@@ -1,5 +1,5 @@
 import type { GridField } from "./types";
-const TTL = 45 * 60_000;
+const TTL = 2 * 60 * 60_000;
 async function database(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return null;
   return new Promise((resolve) => {
