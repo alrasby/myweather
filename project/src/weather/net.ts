@@ -116,6 +116,9 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
       );
     } catch (e) {
       if (signal?.aborted) throw e;
+      // Native transport failure: fall back to WebView fetch only for connection errors.
+      // HTTP responses (including 429) must never be retried through a second transport.
+      if (e instanceof NetworkFailure && e.status !== 0) throw e;
     }
   }
   const ctrl = new AbortController();
@@ -176,7 +179,7 @@ export async function proxyFetch(
           (e instanceof NetworkFailure && e.status === 429)
         )
           throw e;
-        if (attempt === 1) throw new NetworkFailure(0);
+        if (attempt === 1) throw e;
       }
     }
     throw new NetworkFailure(0);

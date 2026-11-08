@@ -6,7 +6,7 @@ import { proxyFetch } from "@/weather/net";
 /**
  * جلب الشبكات من Open-Meteo.
  * قاعدة المطر: قيمة الساعة نفسها فقط — ممنوع جمع ٣ ساعات.
- * التوازي ٦، و٨٠ نقطة لكل طلب. الشبكة العالمية تُجلب مرة وتُرسم على كامل الشاشة.
+ * Limit concurrent requests and batch size to protect the provider quota.
  */
 
 export type GridRequest = {
@@ -106,7 +106,7 @@ function gridKey(req: GridRequest): string {
     req.rows,
     req.hours,
     req.dryRain ? "dry" : "wet",
-    "a46",
+    "a49",
     Math.floor(Date.now() / (30 * 60_000)),
   ].join("|");
 }
@@ -394,7 +394,7 @@ function pack(req: GridRequest, cells: Cell[][], times: number[], id: string): G
   return grid;
 }
 
-const BATCH = 30;
+const BATCH = 20;
 
 function assignBlocks(cells: Cell[][], batch: Point[], json: PointResponse[], hours: number, times: { list: number[] }) {
   const used = new Set<number>();
@@ -464,10 +464,10 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
   await pool(batches, 2, (batch) => consume(batch, true), req.signal);
 
   const missing = points.filter((p) => !cells[p.i]?.[0]?.ok);
-  if (missing.length && missing.length < points.length) {
+  if (missing.length && missing.length < points.length && !isQuotaBlocked()) {
     const again: Point[][] = [];
-    for (let i = 0; i < missing.length; i += 40) again.push(missing.slice(i, i + 40));
-    await pool(again, 3, (batch) => consume(batch, false), req.signal);
+    for (let i = 0; i < missing.length; i += BATCH) again.push(missing.slice(i, i + BATCH));
+    await pool(again, 1, (batch) => consume(batch, false), req.signal);
   }
 
   if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
