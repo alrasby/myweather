@@ -227,7 +227,6 @@ function buildUrl(lats: number[], lons: number[], hours: number): string {
   url.searchParams.set("temperature_unit", "celsius");
   url.searchParams.set("wind_speed_unit", "kmh");
   url.searchParams.set("forecast_hours", String(hours));
-  url.searchParams.set("forecast_days", String(Math.min(16, Math.ceil(hours / 24) + 1)));
   return url.toString();
 }
 
@@ -395,7 +394,7 @@ function pack(req: GridRequest, cells: Cell[][], times: number[], id: string): G
   return grid;
 }
 
-const BATCH = 80;
+const BATCH = 30;
 
 function assignBlocks(cells: Cell[][], batch: Point[], json: PointResponse[], hours: number, times: { list: number[] }) {
   const used = new Set<number>();
@@ -462,7 +461,7 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
     }
   };
 
-  await pool(batches, 3, (batch) => consume(batch, true), req.signal);
+  await pool(batches, 2, (batch) => consume(batch, true), req.signal);
 
   const missing = points.filter((p) => !cells[p.i]?.[0]?.ok);
   if (missing.length && missing.length < points.length) {

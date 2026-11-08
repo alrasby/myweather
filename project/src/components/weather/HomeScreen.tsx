@@ -73,7 +73,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       const coordinates = placeFromCoords(pos.lat, pos.lon, `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`);
       setHere(coordinates);
       locatePlace(coordinates);
-      void lookupPlace(pos.lat, pos.lon, textBase()).then((rev) => {
+      void lookupPlace(pos.lat, pos.lon, lang).then((rev) => {
         if (mine !== ticket || gen !== locateGen.current) return;
         const name = rev?.name || `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`;
         const next = placeFromCoords(pos.lat, pos.lon, name, rev?.country || "", rev?.admin || "");

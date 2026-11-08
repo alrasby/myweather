@@ -83,11 +83,15 @@ export async function lookupPlace(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const [precise, fast] = await Promise.all([
-      fromNominatim(lat, lon, lang, controller.signal).catch(() => null),
-      fromBigData(lat, lon, lang, controller.signal).catch(() => null),
-    ]);
-    return precise || fast;
+    // Return the first valid place name rather than waiting for both providers.
+    // A slow or blocked provider must not delay the other provider's result.
+    const precise = fromNominatim(lat, lon, lang, controller.signal).catch(() => null);
+    const fast = fromBigData(lat, lon, lang, controller.signal).catch(() => null);
+    const first = await Promise.any([
+      precise.then(hit => { if (!hit) throw new Error("no-place"); return hit; }),
+      fast.then(hit => { if (!hit) throw new Error("no-place"); return hit; }),
+    ]).catch(() => null);
+    return first;
   } finally {
     clearTimeout(timer);
   }
