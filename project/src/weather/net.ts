@@ -66,7 +66,7 @@ let foregroundPending = 0;
 function reserveBackgroundRequest(): void {
   const now = Date.now();
   while (backgroundRequests.length && now - backgroundRequests[0]! >= BACKGROUND_WINDOW_MS) backgroundRequests.shift();
-  if (backgroundRequests.length >= BACKGROUND_LIMIT) throw new NetworkFailure(429);
+  if (backgroundRequests.length >= BACKGROUND_LIMIT) throw new NetworkFailure(503);
   backgroundRequests.push(now);
 }
 const headers = { Accept: "application/json, text/plain, */*" };
