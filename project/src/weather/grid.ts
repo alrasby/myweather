@@ -55,6 +55,19 @@ const inflight = new Map<string, Promise<GridField>>();
 const inflightSignals = new Map<string, AbortSignal | undefined>();
 const LRU_MAX = 8;
 
+/** Most recent map request failure; never include coordinates or request URLs in diagnostics. */
+let lastGridFailure = "unknown";
+export function gridFailureReason(): string { return lastGridFailure; }
+function recordGridFailure(err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  lastGridFailure = message === "quota" || message.includes("429") ? "quota"
+    : message.includes("thin") ? "incomplete"
+    : message.includes("reject") || message.includes("http ") ? "provider"
+    : message.includes("AbortError") || message.includes("aborted") ? "cancelled"
+    : "network";
+}
+
+
 function touch<T>(map: Map<string, T>, key: string, value: T) {
   if (map.has(key)) map.delete(key);
   map.set(key, value);
@@ -151,7 +164,7 @@ async function fetchRetry(url: string, signal?: AbortSignal): Promise<Response> 
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
-      if (message === "quota") { markQuota(60_000); throw err; }
+      if (message === "quota") { markQuota(60_000); recordGridFailure(err); throw err; }
       if (message.startsWith("reject") || message === "quota" || message.startsWith("http ")) throw err;
       lastErr = err;
     }
@@ -447,6 +460,7 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
       if (req.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
       if (message === "quota") { markQuota(60_000); throw err; }
+      recordGridFailure(err);
       if (message.startsWith("reject") && batch.length > 8) {
         const mid = Math.floor(batch.length / 2);
         await consume(batch.slice(0, mid), false);
@@ -472,7 +486,10 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
 
   if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
   const ratio = fillRatio(cells);
-  if (req.full ? ratio < 0.35 : ratio < 0.28) throw new Error("thin");
+  if (req.full ? ratio < 0.35 : ratio < 0.28) {
+    recordGridFailure(new Error("thin"));
+    throw new Error("thin");
+  }
   if (!times.list.length || times.list.some((t) => !Number.isFinite(t))) {
     const start = Date.now();
     times.list = Array.from({ length: req.hours }, (_, i) => start + i * 3_600_000);
