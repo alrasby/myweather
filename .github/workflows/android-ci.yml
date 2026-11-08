@@ -18,6 +18,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      - name: Check source and release identity
+        run: node scripts/verify-import.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -32,8 +34,6 @@ jobs:
             project/android/**/*.gradle*
             project/android/gradle/wrapper/gradle-wrapper.properties
       - uses: android-actions/setup-android@v3
-      - name: Check source and release identity
-        run: node scripts/verify-import.mjs
       - name: Install Android SDK
         run: yes | sdkmanager --licenses >/dev/null && sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
       - name: Install locked JavaScript dependencies
