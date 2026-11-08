@@ -1,7 +1,7 @@
 import { daylightNow } from "@/weather/astro";
 import { dayKey } from "@/weather/format";
 import { markQuota } from "@/weather/grid";
-import { proxyFetch } from "@/weather/net";
+import { NetworkFailure, proxyFetch } from "@/weather/net";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -14,6 +14,14 @@ export type CacheFile = {
 };
 
 const inflight = new Map<string, Promise<{ bundle: WeatherBundle; stale: boolean; estimated: boolean }>>();
+let forecastFailure = "connection";
+export function lastForecastFailure(): string { return forecastFailure; }
+function failureCode(err: unknown): string {
+  if (err instanceof NetworkFailure) return err.status === 429 ? "quota" : err.status ? "http-" + err.status : "network";
+  if (err instanceof Error && err.message === "quota") return "quota";
+  if (err instanceof Error && /^http \d{3}$/.test(err.message)) return err.message.replace(" ", "-");
+  return "network";
+}
 
 function emptyCache(): CacheFile {
   return { places: [], activeId: "", entries: {} };
@@ -314,12 +322,14 @@ export function loadWeather(
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
       try {
         const bundle = await fetchForecast(place, opts?.signal);
+        forecastFailure = "";
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
       } catch (err) {
         if (aborted(err, opts?.signal)) throw err;
         last = err;
-        if (err instanceof Error && err.message === "quota") break;
+        forecastFailure = failureCode(err);
+        if (forecastFailure === "quota") break;
         if (attempt < 1) {
           try {
             await pause(500 * (attempt + 1), opts?.signal);
