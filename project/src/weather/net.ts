@@ -167,7 +167,6 @@ export async function proxyFetch(
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       if (Date.now() < (cooldown.get(host) ?? 0)) throw new NetworkFailure(429);
       if (priority === "background") {
-        if (foregroundPending > 0) throw new NetworkFailure(0);
         reserveBackgroundRequest();
       }
       try {
