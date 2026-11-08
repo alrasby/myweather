@@ -59,11 +59,11 @@ const foreground = requestLane(2),
   background = requestLane(2);
 const cooldown = new Map<string, number>();
 // Keep only transport/status diagnostics; never store request URLs or coordinates.
-export type ForecastConnectionDiagnostic = { source: "native" | "web" | "local"; status: number; at: number };
+export type ForecastConnectionDiagnostic = { source: "native" | "web" | "local"; status: number; at: number; retryAfterMs?: number };
 let lastForecastDiagnostic: ForecastConnectionDiagnostic | null = null;
 export function getForecastConnectionDiagnostic(): ForecastConnectionDiagnostic | null { return lastForecastDiagnostic; }
-function noteForecast(source: ForecastConnectionDiagnostic["source"], status: number): void {
-  lastForecastDiagnostic = { source, status, at: Date.now() };
+function noteForecast(source: ForecastConnectionDiagnostic["source"], status: number, retryAfterMs?: number): void {
+  lastForecastDiagnostic = { source, status, at: Date.now(), retryAfterMs };
 }
 // Bound map-grid traffic independently so it cannot exhaust the shared forecast API.
 const backgroundRequests: number[] = [];
@@ -182,7 +182,7 @@ export async function proxyFetch(
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) {
-        if (isForecast) noteForecast("local", 429);
+        if (isForecast) noteForecast("local", 429, (cooldown.get(cooldownKey) ?? 0) - Date.now());
         throw new NetworkFailure(429);
       }
       if (priority === "background") {
@@ -191,22 +191,16 @@ export async function proxyFetch(
       try {
         const response = await request(url, signal, isForecast);
         if (response.status === 429) {
-          const raw = response.headers.get("retry-after");
-          const seconds = Number(raw);
-          const ms =
-            raw && Number.isFinite(seconds)
-              ? seconds * 1000
-              : raw
-                ? Date.parse(raw) - Date.now()
-                : 60000;
-          cooldown.set(
-            cooldownKey,
-            Date.now() +
-              Math.max(
-                1000,
-                Math.min(Number.isFinite(ms) ? ms : 60000, 1800000),
-              ),
-          );
+          const raw = response.headers.get("retry-after")?.trim();
+          const seconds = raw && /^[0-9]+(?:\\.[0-9]+)?$/.test(raw) ? Number(raw) : NaN;
+          const retryMs = Number.isFinite(seconds)
+            ? seconds * 1000
+            : raw ? Date.parse(raw) - Date.now() : NaN;
+          // A missing/invalid Retry-After gets a short backoff, not an arbitrary long lock.
+          // A real provider Retry-After is respected (up to 30 minutes).
+          const delay = Math.max(5000, Math.min(Number.isFinite(retryMs) ? retryMs : 60000, 1800000));
+          cooldown.set(cooldownKey, Date.now() + delay);
+          if (isForecast) noteForecast(lastForecastDiagnostic?.source === "native" ? "native" : "web", 429, delay);
           throw new NetworkFailure(429);
         }
         if (response.status >= 500 && attempt === 0) continue;
