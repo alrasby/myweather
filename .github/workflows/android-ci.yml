@@ -62,9 +62,9 @@ jobs:
         run: npm run build:android
       - name: Prepare Gradle wrapper
         run: chmod +x project/android/gradlew
-      - name: Gradle unit tests and debug APK
+      - name: Gradle unit tests
         working-directory: project/android
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Build and verify signed release
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         working-directory: project/android
@@ -92,17 +92,12 @@ jobs:
           test -s "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/myweather-apksigner.txt
           grep -qi '3beb5ef19402c3411be1ad094a9f51fea80d3a35e5b92971b47f5f84169a0e91' /tmp/myweather-apksigner.txt
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -1 | grep "name='net.nabdhserv.myweather' versionCode='54' versionName='1.0.53'"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -1 | grep "name='net.nabdhserv.myweather' versionCode='55' versionName='1.0.54'"
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: myweather-debug-apk
-          path: project/android/app/build/outputs/apk/debug/*.apk
-          retention-days: 7
+          cp "$APK" app/build/outputs/apk/release/MyWeather.apk
       - uses: actions/upload-artifact@v4
         if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
-          name: myweather-signed-release-apk
-          path: project/android/app/build/outputs/apk/release/*.apk
+          name: MyWeather
+          path: project/android/app/build/outputs/apk/release/MyWeather.apk
           retention-days: 7

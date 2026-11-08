@@ -105,10 +105,10 @@ void main() {
     mm = max(0.0, mm);
     vec4 sn = mix(texture(u_cloud0, uv), texture(u_cloud1, uv), u_mix);
     float snowCm = max(0.0, sn.r * 12.0);
-    float rainBody = smoothstep(0.02, 0.16, mm);
-    float snowBody = smoothstep(0.02, 0.18, snowCm);
-    float cloudA = smoothstep(0.18, 0.90, sn.b) * 0.34;
-    float depthA = smoothstep(0.002, 0.12, sn.g * 3.0) * 0.28;
+    float rainBody = smoothstep(0.025, 0.22, mm);
+    float snowBody = smoothstep(0.025, 0.22, snowCm);
+    float cloudA = 0.0; // General cloud cover is not precipitation.
+    float depthA = 0.0; // Snow depth on ground is not falling snow.
     if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01)) {
       frag = vec4(0.0);
       return;
@@ -1306,10 +1306,10 @@ export function shade(
   const layer = layerByKind(kind);
   if (kind === 2) {
     const snowCm = s.snow ?? 0;
-    const rainBody = smooth(0.02, 0.16, s.rain);
-    const snowBody = smooth(0.02, 0.18, snowCm);
-    const cloudA = smooth(35, 95, s.cloud ?? 0) * 0.34;
-    const depthA = smooth(0.002, 0.12, s.snowDepth ?? 0) * 0.28;
+    const rainBody = smooth(0.025, 0.22, s.rain);
+    const snowBody = smooth(0.025, 0.22, snowCm);
+    const cloudA = 0; // Cloud coverage is not measured precipitation.
+    const depthA = 0; // Ground snow must not appear as snowfall.
     if (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01) return null;
     const rainA = rainBody * (0.45 + smooth(0.15, 7, s.rain) * 0.47);
     const snowI = Math.max(0, Math.min(1, snowCm / 1.8));
