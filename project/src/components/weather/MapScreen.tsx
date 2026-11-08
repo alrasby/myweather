@@ -288,7 +288,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       });
 
     const pullDetail = () => {
-      if (dead || !worldFinished) return;
+      if (dead) return;
+      // Viewport data is the primary source; never gate it behind a global fetch.
       if (saver) return;
       const view = viewSpan();
       if (view.span > 120 || view.span < 0.05) {
@@ -340,8 +341,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         })
         .catch(() => {
           if (!dead && mine === detailGen) {
-            startWorld();
-            if (worldFinished && !worldSucceeded && !detailRef.current) {
+            // A failed local request must not trigger a second global request storm.
+            if (!worldStarted && viewSpan().span > 120) startWorld();
+            if (!worldSucceeded && !detailRef.current) {
               setGridErrorKind(gridFailureReason());
               setGridFailed(true);
               setProgress(1);
@@ -351,6 +353,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     };
     const consider = () => {
       window.clearTimeout(timer);
+      if (viewSpan().span > 120 && !worldStarted) startWorld();
       timer = window.setTimeout(pullDetail, 320);
     };
     map.on("moveend", consider);
@@ -381,7 +384,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }
     })();
     };
-    startWorld();
+    // Only fetch the costly global field for a genuinely global viewport.
+    // Local navigation must not spend the quota on an unseen world grid.
+    if (viewSpan().span > 120 || saver) startWorld();
     consider();
     return () => {
       dead = true;
