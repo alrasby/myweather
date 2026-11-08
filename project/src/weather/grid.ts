@@ -140,7 +140,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function fetchRetry(url: string, signal?: AbortSignal): Promise<Response> {
-  if (isQuotaBlocked()) throw new Error("quota");
   let lastStatus = 0;
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -153,8 +152,7 @@ async function fetchRetry(url: string, signal?: AbortSignal): Promise<Response> 
       if (res.ok) return res;
       lastStatus = res.status;
       if (res.status === 429) {
-        const retryAfter = Number(res.headers.get("retry-after"));
-        markQuota(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 30 * 60_000) : 5 * 60_000);
+        // proxyFetch owns the provider-wide cooldown; do not create a second clock.
         throw new Error("quota");
       } else if (res.status < 500) {
         throw new Error(`http ${res.status}`);
@@ -457,7 +455,7 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
     } catch (err) {
       if (req.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
-      if (message === "quota") { markQuota(60_000); throw err; }
+      if (message === "quota") { recordGridFailure(err); throw err; }
       recordGridFailure(err);
       if (message.startsWith("reject") && batch.length > 8) {
         const mid = Math.floor(batch.length / 2);
@@ -476,7 +474,7 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
   await pool(batches, 1, (batch) => consume(batch, true), req.signal);
 
   const missing = points.filter((p) => !cells[p.i]?.[0]?.ok);
-  if (missing.length && missing.length < points.length && !isQuotaBlocked() && fillRatio(cells) < 0.35) {
+  if (missing.length && missing.length < points.length && fillRatio(cells) < 0.35) {
     const again: Point[][] = [];
     for (let i = 0; i < missing.length; i += BATCH) again.push(missing.slice(i, i + BATCH));
     await pool(again, 1, (batch) => consume(batch, false), req.signal);
@@ -512,7 +510,16 @@ export function fetchGrid(req: GridRequest): Promise<GridField> {
   if (pending && !inflightSignals.get(key)?.aborted) return pending;
   const promise = readGrid(key).then(cached => {
     if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
-    return cached ?? fetchGridUncached(req, key);
+    if (cached) return cached;
+    try {
+      return await fetchGridUncached(req, key);
+    } catch (err) {
+      if (req.signal?.aborted) throw err;
+      // Show last successful data when the provider is rate limited or offline.
+      const stale = await readGrid(key, true);
+      if (stale) return stale;
+      throw err;
+    }
   })
     .then((grid) => {
       if (!req.signal?.aborted) { touch(lru, key, grid); void saveGrid(grid); }
