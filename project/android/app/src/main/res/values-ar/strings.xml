@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_name">طقسي</string>
+    <string name="widget_desc">ودجت زجاجي. اسحب الحواف لتغيير العرض والارتفاع حتى يناسب خانة الشاشة.</string>
+    <string name="widget_config_title">الطقس والساعة</string>
+    <string name="widget_opacity">شفافية الودجت</string>
+    <string name="widget_theme">المظهر</string>
+    <string name="widget_light">فاتح</string>
+    <string name="widget_dark">غامق</string>
+    <string name="widget_style">النمط</string>
+    <string name="widget_style_weather">الطقس</string>
+    <string name="widget_style_clock">الطقس والساعة</string>
+    <string name="widget_done">تم</string>
+    <string name="widget_city">المدينة</string>
+    <string name="widget_here">موقعي</string>
+    <string name="widget_preview_temp">29°</string>
+    <string name="widget_preview_city">مسقط</string>
+    <string name="widget_preview_cond">غائم جزئيًا</string>
+    <string name="widget_preview_hilo">↑ 33°   ↓ 24°</string>
+    <string name="widget_preview_d0">اليوم</string>
+    <string name="widget_preview_d1">غدًا</string>
+    <string name="widget_preview_d2">الأربعاء</string>
+    <string name="widget_preview_d3">الخميس</string>
+    <string name="widget_preview_t0">33°  24°</string>
+    <string name="widget_preview_t1">34°  25°</string>
+    <string name="widget_preview_t2">35°  26°</string>
+    <string name="widget_preview_t3">33°  26°</string>
+</resources>

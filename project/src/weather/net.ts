@@ -1,0 +1,186 @@
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+
+export class NetworkFailure extends Error {
+  constructor(public status: number) {
+    super(status === 429 ? "quota" : status ? `http ${status}` : "connection");
+  }
+}
+// Reserve foreground capacity for current weather and location names.
+export function requestLane(limit: number) {
+  let running = 0;
+  const queue: Array<{
+    start: () => void;
+    cancel: () => void;
+    signal?: AbortSignal;
+  }> = [];
+  const pump = () => {
+    while (running < limit && queue.length) {
+      const job = queue.shift()!;
+      job.signal?.removeEventListener("abort", job.cancel);
+      if (job.signal?.aborted) {
+        job.cancel();
+        continue;
+      }
+      running++;
+      job.start();
+    }
+  };
+  return (signal?: AbortSignal): Promise<() => void> =>
+    new Promise((resolve, reject) => {
+      const cancel = () => {
+        const i = queue.indexOf(ticket);
+        if (i >= 0) queue.splice(i, 1);
+        reject(new DOMException("aborted", "AbortError"));
+      };
+      const ticket = {
+        signal,
+        cancel,
+        start: () => {
+          let done = false;
+          resolve(() => {
+            if (!done) {
+              done = true;
+              running--;
+              pump();
+            }
+          });
+        },
+      };
+      if (signal?.aborted) {
+        cancel();
+        return;
+      }
+      queue.push(ticket);
+      signal?.addEventListener("abort", cancel, { once: true });
+      pump();
+    });
+}
+const foreground = requestLane(2),
+  background = requestLane(2);
+const cooldown = new Map<string, number>();
+const headers = { Accept: "application/json, text/plain, */*" };
+function abortable<T>(
+  work: Promise<T>,
+  signal: AbortSignal | undefined,
+  ms: number,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const clean = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      clean();
+      reject(new DOMException("aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      clean();
+      reject(new NetworkFailure(0));
+    }, ms);
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    work.then(
+      (v) => {
+        clean();
+        resolve(v);
+      },
+      (e) => {
+        clean();
+        reject(e);
+      },
+    );
+  });
+}
+async function request(url: string, signal?: AbortSignal): Promise<Response> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const r = await abortable(
+        CapacitorHttp.request({
+          url,
+          method: "GET",
+          responseType: "text",
+          connectTimeout: 10000,
+          readTimeout: 15000,
+          headers,
+        }),
+        signal,
+        17000,
+      );
+      if (r.status < 200 || r.status > 599) throw new NetworkFailure(0);
+      return new Response(
+        typeof r.data === "string" ? r.data : JSON.stringify(r.data),
+        { status: r.status, headers: r.headers },
+      );
+    } catch (e) {
+      if (signal?.aborted) throw e;
+    }
+  }
+  const ctrl = new AbortController();
+  const stop = () => ctrl.abort();
+  if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+  signal?.addEventListener("abort", stop, { once: true });
+  const timer = setTimeout(stop, 12000);
+  try {
+    return await fetch(url, {
+      signal: ctrl.signal,
+      headers,
+      cache: "no-store",
+    });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+export async function proxyFetch(
+  url: string,
+  signal?: AbortSignal,
+  priority: "foreground" | "background" = "foreground",
+): Promise<Response> {
+  const host = new URL(url).host;
+  const release = await (priority === "background" ? background : foreground)(
+    signal,
+  );
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+      if (Date.now() < (cooldown.get(host) ?? 0)) throw new NetworkFailure(429);
+      try {
+        const response = await request(url, signal);
+        if (response.status === 429) {
+          const raw = response.headers.get("retry-after");
+          const seconds = Number(raw);
+          const ms =
+            raw && Number.isFinite(seconds)
+              ? seconds * 1000
+              : raw
+                ? Date.parse(raw) - Date.now()
+                : 60000;
+          cooldown.set(
+            host,
+            Date.now() +
+              Math.max(
+                1000,
+                Math.min(Number.isFinite(ms) ? ms : 60000, 1800000),
+              ),
+          );
+          throw new NetworkFailure(429);
+        }
+        if (response.status >= 500 && attempt === 0) continue;
+        return response;
+      } catch (e) {
+        if (
+          signal?.aborted ||
+          (e instanceof NetworkFailure && e.status === 429)
+        )
+          throw e;
+        if (attempt === 1) throw new NetworkFailure(0);
+      }
+    }
+    throw new NetworkFailure(0);
+  } finally {
+    release();
+  }
+}
