@@ -33,9 +33,10 @@ jobs:
           cache-dependency-path: |
             project/android/**/*.gradle*
             project/android/gradle/wrapper/gradle-wrapper.properties
-      - uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: '12266719'
+      - name: Use preinstalled Android SDK command-line tools
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
       - name: Install Android SDK
         run: yes | sdkmanager --licenses >/dev/null && sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
       - name: Install locked JavaScript dependencies
