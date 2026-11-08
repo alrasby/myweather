@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { clearBundles, enrichWeather, loadWeather, readCacheFile, writeCacheFile } from "@/weather/api";
+import { clearBundles, enrichWeather, lastForecastFailure, loadWeather, readCacheFile, writeCacheFile } from "@/weather/api";
 import {
   CACHE_TTL_MS,
   MUSCAT,
@@ -191,14 +191,14 @@ export const useWeather = create<WeatherState>((set, get) => ({
       const res = await loadWeather(place, { force, signal });
       if (signal?.aborted) return;
       if (get().activeId !== place.id) return;
-      set({ bundle: res.bundle, stale: res.stale, estimated: res.estimated, loading: false, error: res.stale, connectionIssue: res.stale ? "connection" : null });
+      set({ bundle: res.bundle, stale: res.stale, estimated: res.estimated, loading: false, error: res.stale, connectionIssue: res.stale ? lastForecastFailure() || "connection" : null });
       if (!res.stale) void enrichWeather(place, res.bundle, signal).then(next => {
         if (!signal?.aborted && get().activeId === place.id && get().bundle?.fetchedAt === res.bundle.fetchedAt) set({bundle:next});
       }).catch(() => undefined);
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
       if (get().activeId !== place.id) return;
-      set({ loading: false, error: true, connectionIssue: err instanceof Error && err.message === "quota" ? "quota" : "connection" });
+      set({ loading: false, error: true, connectionIssue: lastForecastFailure() || "connection" });
     }
   },
   setActive: (id) => {
