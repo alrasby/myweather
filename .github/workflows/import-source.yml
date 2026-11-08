@@ -1,0 +1,64 @@
+name: Import source archive
+on:
+  push:
+    branches:
+      - import/myweather-1.0.47
+    paths:
+      - MyWeather-1.0.47-GitHub-Import.zip
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify and unpack approved archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive='MyWeather-1.0.47-GitHub-Import.zip'
+          test -s "$archive"
+          python3 - <<'PY'
+          import pathlib
+          import zipfile
+          archive=pathlib.Path("MyWeather-1.0.47-GitHub-Import.zip")
+          required={"project/package-lock.json","project/android/app/build.gradle","project/android/gradle/wrapper/gradle-wrapper.jar","project/src/weather/net.ts","project/src/components/weather/MapScreen.tsx"}
+          with zipfile.ZipFile(archive) as z:
+              names=set(z.namelist())
+              if not required <= names:
+                  raise SystemExit("Source archive missing required project files")
+              if len(names)>1000 or sum(i.file_size for i in z.infolist())>40_000_000:
+                  raise SystemExit("Unexpected archive size")
+              for i in z.infolist():
+                  name=i.filename
+                  p=pathlib.PurePosixPath(name)
+                  if name.startswith("/") or "\\" in name or ".." in p.parts:
+                      raise SystemExit(f"Unsafe zip entry: {name}")
+                  if not (name.startswith("project/") or name in {
+                      "connection-tests.mjs","worldwide-tests.mjs","worldwide-results.json",
+                      "map-tests.mjs","precip-data-tests.mjs","render-tests.mjs",
+                      "live-grid-test.mjs","shader-check.py","apk-147-signature.txt",
+                      "apk-147-metadata.txt","myweather-import-to-github.ps1","IMPORT_GUIDE_AR.txt"
+                  }):
+                      raise SystemExit(f"Unexpected zip entry: {name}")
+                  if (i.external_attr >> 16) & 0o170000 == 0o120000:
+                      raise SystemExit(f"Symlink zip entry rejected: {name}")
+              for i in z.infolist():
+                  if i.filename.endswith("/") or i.filename in ("myweather-import-to-github.ps1","IMPORT_GUIDE_AR.txt"):
+                      continue
+                  p=pathlib.Path(i.filename)
+                  p.parent.mkdir(parents=True,exist_ok=True)
+                  p.write_bytes(z.read(i))
+          PY
+          chmod +x project/android/gradlew
+          node scripts/verify-import.mjs
+          git rm -f "$archive"
+          git add project/ connection-tests.mjs worldwide-tests.mjs worldwide-results.json map-tests.mjs precip-data-tests.mjs render-tests.mjs live-grid-test.mjs shader-check.py apk-147-signature.txt apk-147-metadata.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: import verified MyWeather 1.0.47 sources"
+          git push origin HEAD:import/myweather-1.0.47
