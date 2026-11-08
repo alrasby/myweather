@@ -58,6 +58,13 @@ export function requestLane(limit: number) {
 const foreground = requestLane(2),
   background = requestLane(2);
 const cooldown = new Map<string, number>();
+// Keep only transport/status diagnostics; never store request URLs or coordinates.
+export type ForecastConnectionDiagnostic = { source: "native" | "web" | "local"; status: number; at: number };
+let lastForecastDiagnostic: ForecastConnectionDiagnostic | null = null;
+export function getForecastConnectionDiagnostic(): ForecastConnectionDiagnostic | null { return lastForecastDiagnostic; }
+function noteForecast(source: ForecastConnectionDiagnostic["source"], status: number): void {
+  lastForecastDiagnostic = { source, status, at: Date.now() };
+}
 // Bound map-grid traffic independently so it cannot exhaust the shared forecast API.
 const backgroundRequests: number[] = [];
 const BACKGROUND_WINDOW_MS = 10 * 60_000;
@@ -105,7 +112,7 @@ function abortable<T>(
     );
   });
 }
-async function request(url: string, signal?: AbortSignal): Promise<Response> {
+async function request(url: string, signal?: AbortSignal, forecast = false): Promise<Response> {
   if (Capacitor.isNativePlatform()) {
     try {
       const r = await abortable(
@@ -121,6 +128,7 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
         17000,
       );
       if (r.status < 200 || r.status > 599) throw new NetworkFailure(0);
+      if (forecast) noteForecast("native", r.status);
       return new Response(
         typeof r.data === "string" ? r.data : JSON.stringify(r.data),
         { status: r.status, headers: r.headers },
@@ -138,11 +146,16 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
   signal?.addEventListener("abort", stop, { once: true });
   const timer = setTimeout(stop, 12000);
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       signal: ctrl.signal,
       headers,
       cache: "no-store",
     });
+    if (forecast) noteForecast("web", response.status);
+    return response;
+  } catch (err) {
+    if (forecast && !signal?.aborted) noteForecast("web", 0);
+    throw err;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", stop);
@@ -156,6 +169,7 @@ export async function proxyFetch(
   const host = new URL(url).host;
   // Map-grid rate limits must not suppress independent current-weather attempts.
   const cooldownKey = `${host}:${priority}`;
+  const isForecast = priority === "foreground" && host === "api.open-meteo.com" && new URL(url).pathname === "/v1/forecast";
   if (priority === "foreground") foregroundPending++;
   let release: (() => void) | undefined;
   try {
@@ -167,12 +181,15 @@ export async function proxyFetch(
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-      if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) throw new NetworkFailure(429);
+      if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) {
+        if (isForecast) noteForecast("local", 429);
+        throw new NetworkFailure(429);
+      }
       if (priority === "background") {
         reserveBackgroundRequest();
       }
       try {
-        const response = await request(url, signal);
+        const response = await request(url, signal, isForecast);
         if (response.status === 429) {
           const raw = response.headers.get("retry-after");
           const seconds = Number(raw);
@@ -195,6 +212,9 @@ export async function proxyFetch(
         if (response.status >= 500 && attempt === 0) continue;
         return response;
       } catch (e) {
+        if (isForecast && !signal?.aborted && !(e instanceof NetworkFailure && e.status === 429)) {
+          noteForecast(lastForecastDiagnostic?.source === "native" ? "native" : "web", e instanceof NetworkFailure ? e.status : 0);
+        }
         if (
           signal?.aborted ||
           (e instanceof NetworkFailure && e.status === 429)

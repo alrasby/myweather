@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { DetailCards } from "@/components/weather/SkyCards";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
+import { getForecastConnectionDiagnostic } from "@/weather/net";
 import { readBestPosition } from "@/weather/geo";
 import {
   dayKey,
@@ -174,6 +175,11 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       ) : null}
 
       {locationStatus ? <p role="status" className="mt-2 text-center text-xs text-on-sky/80">{locationStatus}</p> : null}
+      {error && getForecastConnectionDiagnostic() ? (
+        <p role="status" className="mt-2 text-center text-xs text-on-sky/80">
+          {lang === "ar" ? "تشخيص الاتصال" : "Connection diagnostic"}: {getForecastConnectionDiagnostic()!.source} / HTTP {getForecastConnectionDiagnostic()!.status}
+        </p>
+      ) : null}
       {error && !bundle ? (
         <div className="wx-card mt-4 p-5 text-center">
           <p className="text-sm text-muted">{connectionIssue === "quota" ? (lang === "ar" ? "بلغ مزود الطقس حد الطلبات مؤقتًا. ستتم إعادة المحاولة." : "Weather request limit reached. Retrying shortly.") : t(lang, "offline")}</p>
