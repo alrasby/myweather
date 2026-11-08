@@ -70,7 +70,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     const apply = (pos: { lat: number; lon: number; accuracy: number }) => {
       if (gen !== locateGen.current) return;
       const mine = ++ticket;
-      setLocationStatus(`${lang === "ar" ? "دقة الموقع" : "Location accuracy"}: ±${Math.ceil(pos.accuracy)} m`);
       const coordinates = placeFromCoords(pos.lat, pos.lon, `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`);
       setHere(coordinates);
       locatePlace(coordinates);
