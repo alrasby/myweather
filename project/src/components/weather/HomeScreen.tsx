@@ -177,7 +177,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       {locationStatus ? <p role="status" className="mt-2 text-center text-xs text-on-sky/80">{locationStatus}</p> : null}
       {error && getForecastConnectionDiagnostic() ? (
         <p role="status" className="mt-2 text-center text-xs text-on-sky/80">
-          {lang === "ar" ? "تشخيص الاتصال" : "Connection diagnostic"}: {getForecastConnectionDiagnostic()!.source} / HTTP {getForecastConnectionDiagnostic()!.status}
+          {lang === "ar" ? "تشخيص الاتصال" : "Connection diagnostic"}: {getForecastConnectionDiagnostic()!.source} / HTTP {getForecastConnectionDiagnostic()!.status}{getForecastConnectionDiagnostic()!.source === "local" && getForecastConnectionDiagnostic()!.retryAfterMs ? ` · ${Math.ceil(getForecastConnectionDiagnostic()!.retryAfterMs! / 1000)} ${lang === "ar" ? "ثانية متبقية" : "seconds remaining"}` : ""}
         </p>
       ) : null}
       {error && !bundle ? (
