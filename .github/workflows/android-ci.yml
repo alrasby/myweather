@@ -13,40 +13,54 @@ jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: project/package-lock.json
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            project/android/**/*.gradle*
+            project/android/gradle/wrapper/gradle-wrapper.properties
       - uses: android-actions/setup-android@v3
+      - name: Check source and release identity
+        run: node scripts/verify-import.mjs
       - name: Install Android SDK
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-      - name: Install locked JS dependencies
+        run: yes | sdkmanager --licenses >/dev/null && sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - name: Install locked JavaScript dependencies
+        working-directory: project
         run: npm ci
       - name: Typecheck
+        working-directory: project
         run: npm run typecheck
       - name: Unit tests
+        working-directory: project
         run: npm test
-      - name: Weather regression tests
+      - name: Deterministic weather regression tests
         run: |
-          for test in connection-tests.mjs map-tests.mjs precip-data-tests.mjs render-tests.mjs; do
-            if [ -f "$test" ]; then node "$test"; fi
-          done
+          node connection-tests.mjs
+          node map-tests.mjs
+          node precip-data-tests.mjs
       - name: Build Capacitor web assets and sync Android
+        working-directory: project
         run: npm run build:android
       - name: Prepare Gradle wrapper
-        run: chmod +x android/gradlew
-      - name: Gradle unit tests and debug build
-        working-directory: android
+        run: chmod +x project/android/gradlew
+      - name: Gradle unit tests and debug APK
+        working-directory: project/android
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
-      - name: Build release APK
+      - name: Build and verify signed release
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        working-directory: android
+        working-directory: project/android
         env:
           KEYSTORE_BASE64: ${{ secrets.MYWEATHER_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.MYWEATHER_KEYSTORE_PASSWORD }}
@@ -67,17 +81,21 @@ jobs:
           } > keystore.properties
           chmod 600 keystore.properties
           ./gradlew --no-daemon :app:assembleRelease
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | head -1
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/myweather-apksigner.txt
+          grep -qi '3beb5ef19402c3411be1ad094a9f51fea80d3a35e5b92971b47f5f84169a0e91' /tmp/myweather-apksigner.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -1 | grep "name='net.nabdhserv.myweather' versionCode='48' versionName='1.0.47'"
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: myweather-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: project/android/app/build/outputs/apk/debug/*.apk
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
           name: myweather-signed-release-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          path: project/android/app/build/outputs/apk/release/*.apk
           retention-days: 7
