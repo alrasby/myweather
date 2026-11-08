@@ -259,6 +259,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engine.setGlobal(null);
     const hours = prefs.mapHours;
     let worldFinished = false;
+    let worldSucceeded = false;
     const saver = prefs.dataSaver;
     setProgress(0.08);
     setGridFailed(false);
@@ -335,7 +336,15 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           setGridFailed(false);
           setProgress(1);
         })
-        .catch(() => { if (!dead && mine === detailGen) startWorld(); });
+        .catch(() => {
+          if (!dead && mine === detailGen) {
+            startWorld();
+            if (worldFinished && !worldSucceeded && !detailRef.current) {
+              setGridFailed(true);
+              setProgress(1);
+            }
+          }
+        });
     };
     const consider = () => {
       window.clearTimeout(timer);
@@ -353,6 +362,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (dead) return;
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
+        worldSucceeded = true;
         worldFinished = true;
         setProgress(1);
         consider();
@@ -360,8 +370,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (!dead && !worldAc.signal.aborted) {
           worldFinished = true;
           consider();
-          setGridFailed(!detailRef.current);
-          setProgress(1);
+          // Wait for viewport fallback before declaring all weather layers unavailable.
+          setProgress(0.9);
         }
       }
     })();
@@ -636,7 +646,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       </div>
       <div className="map-sheet pointer-events-none absolute inset-0 flex flex-col">
         {gridFailed ? (
-          <div role="status" className="wx-card pointer-events-auto mx-3 mt-2 px-3 py-2 text-sm text-fg">
+          <div role="status" className="wx-card pointer-events-auto mx-3 px-3 py-2 text-sm text-fg"
+            style={{ marginTop: "calc(env(safe-area-inset-top, 0px) + 32px)" }}>
             {lang === "ar" ? "تعذّر تحميل بيانات الطبقات. تحقق من الاتصال." : "Map data unavailable. Check your connection."}
             <button type="button" className="mx-2 underline" onClick={() => setGridRetry(n => n + 1)}>
               {lang === "ar" ? "إعادة المحاولة" : "Retry"}
