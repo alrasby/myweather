@@ -43,4 +43,4 @@ for (const secret of [
   "project/android/local.properties",
 ]) assert.equal(existsSync(path(secret)), false, `Do not commit secret/local file: ${secret}`);
 
-console.log("MyWeather 1.0.49 / build 50 source identity verified.");
+console.log("MyWeather 1.0.50 / build 51 source identity verified.");
