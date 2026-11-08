@@ -924,7 +924,7 @@ export class FieldEngine {
         const m = scale === 1 ? at(depth, c, r) : bilinear(depth, x, y);
         data[pix] = Math.max(0, Math.min(255, Math.round((cm / 12) * 255)));
         data[pix + 1] = Math.max(0, Math.min(255, Math.round((m / 3) * 255)));
-        data[pix + 2] = Math.max(0, Math.min(255, Math.round((bilinear(grid.cloud.subarray(base, base + rows * cols), x, y) / 100) * 255)));
+        data[pix + 2] = Math.max(0, Math.min(255, Math.round((bilinear(grid.cloud, x, y) / 100) * 255)));
         data[pix + 3] = grid.ok[base + Math.max(0, Math.min(rows - 1, Math.round(y))) * cols + Math.max(0, Math.min(cols - 1, Math.round(x)))] ? 255 : 0;
       }
     }
