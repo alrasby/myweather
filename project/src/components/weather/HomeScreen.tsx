@@ -169,7 +169,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       ) : null}
 
       {locationStatus ? <p role="status" className="mt-2 text-center text-xs text-on-sky/80">{locationStatus}</p> : null}
-      {error ? (
+      {error && !bundle ? (
         <div className="wx-card mt-4 p-5 text-center">
           <p className="text-sm text-muted">{connectionIssue === "quota" ? (lang === "ar" ? "بلغ مزود الطقس حد الطلبات مؤقتًا. ستتم إعادة المحاولة." : "Weather request limit reached. Retrying shortly.") : t(lang, "offline")}</p>
           <button type="button" onClick={refresh} className="mt-3 h-11 rounded-full bg-accent px-4 text-sm font-medium text-accent-ink">
