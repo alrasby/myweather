@@ -743,9 +743,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               <span ref={valueRef} className="font-semibold text-accent">—</span>
             </div>
             <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
-            {kind === 2 ? <div className="mt-1 text-[0.6rem] leading-snug text-muted">
-              {lang === "ar" ? "رمادي: غيوم كثيفة · ملوّن: مطر · أبيض: تساقط ثلج · سماوي: غطاء ثلجي" : "Gray: clouds · Color: rain · White: snowfall · Cyan: snow cover"}
-            </div> : null}
             <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
             <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
               {ticks.map((tick) => (

@@ -24,8 +24,8 @@ assert.equal(missing.length, 0, `Source archive import incomplete: ${missing.joi
 const gradle = readFileSync(path("project/android/app/build.gradle"), "utf8");
 for (const pattern of [
   /applicationId\s+["']net\.nabdhserv\.myweather["']/,
-  /versionCode\s+51\b/,
-  /versionName\s+["']1\.0\.50["']/,
+  /versionCode\s+52\b/,
+  /versionName\s+["']1\.0\.51["']/,
 ]) assert.match(gradle, pattern);
 
 const wrapper = readFileSync(path("project/android/gradle/wrapper/gradle-wrapper.properties"), "utf8");
@@ -43,4 +43,4 @@ for (const secret of [
   "project/android/local.properties",
 ]) assert.equal(existsSync(path(secret)), false, `Do not commit secret/local file: ${secret}`);
 
-console.log("MyWeather 1.0.50 / build 51 source identity verified.");
+console.log("MyWeather 1.0.51 / build 52 source identity verified.");
