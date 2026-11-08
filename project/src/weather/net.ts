@@ -168,8 +168,9 @@ export async function proxyFetch(
 ): Promise<Response> {
   const host = new URL(url).host;
   // Map-grid rate limits must not suppress independent current-weather attempts.
-  const cooldownKey = `${host}:${priority}`;
   const isForecast = priority === "foreground" && host === "api.open-meteo.com" && new URL(url).pathname === "/v1/forecast";
+  // Geocoding and other foreground calls must not inherit forecast backoff.
+  const cooldownKey = `${host}:${priority}:${isForecast ? "forecast" : "other"}`;
   if (priority === "foreground") foregroundPending++;
   let release: (() => void) | undefined;
   try {
