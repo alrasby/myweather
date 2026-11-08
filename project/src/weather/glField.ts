@@ -107,7 +107,8 @@ void main() {
     float snowCm = max(0.0, sn.r * 12.0);
     float rainBody = smoothstep(0.025, 0.22, mm);
     float snowBody = smoothstep(0.025, 0.22, snowCm);
-    float cloudA = 0.0; // General cloud cover is not precipitation.
+    // Show dense cloud cover as a subtle separate backdrop, never as rain intensity.
+    float cloudA = smoothstep(0.62, 0.96, sn.b) * 0.30;
     float depthA = 0.0; // Snow depth on ground is not falling snow.
     if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01)) {
       frag = vec4(0.0);
@@ -1308,7 +1309,8 @@ export function shade(
     const snowCm = s.snow ?? 0;
     const rainBody = smooth(0.025, 0.22, s.rain);
     const snowBody = smooth(0.025, 0.22, snowCm);
-    const cloudA = 0; // Cloud coverage is not measured precipitation.
+    // Cloud cover provides a restrained backdrop, separate from rain and snowfall.
+    const cloudA = smooth(62, 96, s.cloud ?? 0) * 0.30;
     const depthA = 0; // Ground snow must not appear as snowfall.
     if (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01) return null;
     const rainA = rainBody * (0.45 + smooth(0.15, 7, s.rain) * 0.47);
