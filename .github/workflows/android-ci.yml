@@ -2,7 +2,7 @@ name: Android CI
 on:
   pull_request:
   push:
-    branches: [main, import/myweather-1.0.47]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -66,7 +66,7 @@ jobs:
         working-directory: project/android
         run: ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Build and verify signed release
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         working-directory: project/android
         env:
           KEYSTORE_BASE64: ${{ secrets.MYWEATHER_KEYSTORE_BASE64 }}
@@ -96,7 +96,7 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
           cp "$APK" app/build/outputs/apk/release/MyWeather.apk
       - uses: actions/upload-artifact@v4
-        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         with:
           name: MyWeather
           path: project/android/app/build/outputs/apk/release/MyWeather.apk
