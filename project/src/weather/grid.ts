@@ -119,8 +119,8 @@ function gridKey(req: GridRequest): string {
     req.rows,
     req.hours,
     req.dryRain ? "dry" : "wet",
-    "a49",
-    Math.floor(Date.now() / (30 * 60_000)),
+    "a50",
+    Math.floor(Date.now() / (2 * 60 * 60_000)),
   ].join("|");
 }
 
@@ -153,18 +153,16 @@ async function fetchRetry(url: string, signal?: AbortSignal): Promise<Response> 
       if (res.ok) return res;
       lastStatus = res.status;
       if (res.status === 429) {
-        const text = await res.text().catch(() => "");
-        if (/daily (api )?request limit|daily limit exceeded/i.test(text)) {
-          markQuota(30 * 60_000);
-          throw new Error("quota");
-        }
+        const retryAfter = Number(res.headers.get("retry-after"));
+        markQuota(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 30 * 60_000) : 5 * 60_000);
+        throw new Error("quota");
       } else if (res.status < 500) {
         throw new Error(`http ${res.status}`);
       }
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
-      if (message === "quota") { markQuota(60_000); recordGridFailure(err); throw err; }
+      if (message === "quota") { recordGridFailure(err); throw err; }
       if (message.startsWith("reject") || message === "quota" || message.startsWith("http ")) throw err;
       lastErr = err;
     }
@@ -475,10 +473,10 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
     }
   };
 
-  await pool(batches, 2, (batch) => consume(batch, true), req.signal);
+  await pool(batches, 1, (batch) => consume(batch, true), req.signal);
 
   const missing = points.filter((p) => !cells[p.i]?.[0]?.ok);
-  if (missing.length && missing.length < points.length && !isQuotaBlocked()) {
+  if (missing.length && missing.length < points.length && !isQuotaBlocked() && fillRatio(cells) < 0.35) {
     const again: Point[][] = [];
     for (let i = 0; i < missing.length; i += BATCH) again.push(missing.slice(i, i + BATCH));
     await pool(again, 1, (batch) => consume(batch, false), req.signal);
