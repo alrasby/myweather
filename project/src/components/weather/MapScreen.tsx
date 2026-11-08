@@ -290,7 +290,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const pullDetail = () => {
       if (dead) return;
       // Viewport data is the primary source; never gate it behind a global fetch.
-      if (saver) return;
       const view = viewSpan();
       if (view.span > 120 || view.span < 0.05) {
         startWorld();
@@ -315,8 +314,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       detailAc?.abort();
       detailAc = new AbortController();
       const cell = Math.max(0.025, span / 16);
-      const cols = Math.max(6, Math.min(8, Math.round(lonSpan / cell)));
-      const rows = Math.max(6, Math.min(8, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
+      const cols = Math.max(6, Math.min(saver ? 6 : 8, Math.round(lonSpan / cell)));
+      const rows = Math.max(6, Math.min(saver ? 6 : 8, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
       void fetchGrid({
         south,
         north,
@@ -386,7 +385,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     };
     // Only fetch the costly global field for a genuinely global viewport.
     // Local navigation must not spend the quota on an unseen world grid.
-    if (viewSpan().span > 120 || saver) startWorld();
+    if (viewSpan().span > 120) startWorld();
     consider();
     return () => {
       dead = true;
