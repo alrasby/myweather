@@ -154,6 +154,8 @@ export async function proxyFetch(
   priority: "foreground" | "background" = "foreground",
 ): Promise<Response> {
   const host = new URL(url).host;
+  // Map-grid rate limits must not suppress independent current-weather attempts.
+  const cooldownKey = `${host}:${priority}`;
   if (priority === "foreground") foregroundPending++;
   let release: (() => void) | undefined;
   try {
@@ -165,7 +167,7 @@ export async function proxyFetch(
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-      if (Date.now() < (cooldown.get(host) ?? 0)) throw new NetworkFailure(429);
+      if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) throw new NetworkFailure(429);
       if (priority === "background") {
         reserveBackgroundRequest();
       }
@@ -181,7 +183,7 @@ export async function proxyFetch(
                 ? Date.parse(raw) - Date.now()
                 : 60000;
           cooldown.set(
-            host,
+            cooldownKey,
             Date.now() +
               Math.max(
                 1000,
