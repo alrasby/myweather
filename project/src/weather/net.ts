@@ -58,6 +58,13 @@ export function requestLane(limit: number) {
 const foreground = requestLane(2),
   background = requestLane(2);
 const cooldown = new Map<string, number>();
+// Keep only transport/status diagnostics; never store request URLs or coordinates.
+export type ForecastConnectionDiagnostic = { source: "native" | "web" | "local"; status: number; at: number };
+let lastForecastDiagnostic: ForecastConnectionDiagnostic | null = null;
+export function getForecastConnectionDiagnostic(): ForecastConnectionDiagnostic | null { return lastForecastDiagnostic; }
+function noteForecast(source: ForecastConnectionDiagnostic["source"], status: number): void {
+  lastForecastDiagnostic = { source, status, at: Date.now() };
+}
 // Bound map-grid traffic independently so it cannot exhaust the shared forecast API.
 const backgroundRequests: number[] = [];
 const BACKGROUND_WINDOW_MS = 10 * 60_000;
@@ -121,6 +128,7 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
         17000,
       );
       if (r.status < 200 || r.status > 599) throw new NetworkFailure(0);
+      noteForecast("native", r.status);
       return new Response(
         typeof r.data === "string" ? r.data : JSON.stringify(r.data),
         { status: r.status, headers: r.headers },
@@ -138,11 +146,13 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
   signal?.addEventListener("abort", stop, { once: true });
   const timer = setTimeout(stop, 12000);
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       signal: ctrl.signal,
       headers,
       cache: "no-store",
     });
+    noteForecast("web", response.status);
+    return response;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", stop);
@@ -167,7 +177,10 @@ export async function proxyFetch(
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-      if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) throw new NetworkFailure(429);
+      if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) {
+        if (priority === "foreground") noteForecast("local", 429);
+        throw new NetworkFailure(429);
+      }
       if (priority === "background") {
         reserveBackgroundRequest();
       }
