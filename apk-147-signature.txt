@@ -1,0 +1,17 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=NabdhServ.Net, OU=MyWeather, O=NabdhServ.Net, L=Muscat, C=OM
+Signer #1 certificate SHA-256 digest: 3beb5ef19402c3411be1ad094a9f51fea80d3a35e5b92971b47f5f84169a0e91
+Signer #1 certificate SHA-1 digest: 41a81295c45354012ed6988186c3febf7aedf37f
+Signer #1 certificate MD5 digest: 73e899f436310f71cb80fde21a08dc9f
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: 874781df9798fa457f098b57fecad6cc356c4c52ed34e2ac518d62c4a83eb4f2
+Signer #1 public key SHA-1 digest: 74a6b1760445c68b2b8c8a732b88c7d036bb3187
+Signer #1 public key MD5 digest: cc3e1920fd0a2754a0eb963b5ba29285

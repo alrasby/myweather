@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Muscat",
+    "temp": 25.8,
+    "timezone": "Asia/Muscat",
+    "weatherTime": "2026-11-07T18:30:00.000Z",
+    "days": 15
+  },
+  {
+    "name": "New York",
+    "temp": 13.9,
+    "timezone": "America/New_York",
+    "weatherTime": "2026-11-07T18:30:00.000Z",
+    "days": 15
+  },
+  {
+    "name": "London",
+    "temp": 10.3,
+    "timezone": "Europe/London",
+    "weatherTime": "2026-11-07T18:30:00.000Z",
+    "days": 15
+  },
+  {
+    "name": "Tokyo",
+    "temp": 9.1,
+    "timezone": "Asia/Tokyo",
+    "weatherTime": "2026-11-07T18:30:00.000Z",
+    "days": 15
+  },
+  {
+    "name": "Sydney",
+    "temp": 10.6,
+    "timezone": "Australia/Sydney",
+    "weatherTime": "2026-11-07T18:30:00.000Z",
+    "days": 15
+  }
+]

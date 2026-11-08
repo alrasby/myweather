@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MyWeather</string>
+    <string name="title_activity_main">MyWeather</string>
+    <string name="package_name">net.nabdhserv.myweather</string>
+    <string name="custom_url_scheme">net.nabdhserv.myweather</string>
+    <string name="widget_name">MyWeather</string>
+    <string name="widget_desc">Glass weather widget. Drag the edges to change width and height.</string>
+    <string name="widget_config_title">Weather and Clock</string>
+    <string name="widget_opacity">Transparency</string>
+    <string name="widget_theme">Appearance</string>
+    <string name="widget_light">Light</string>
+    <string name="widget_dark">Dark</string>
+    <string name="widget_style">Style</string>
+    <string name="widget_style_weather">Weather</string>
+    <string name="widget_style_clock">Weather and clock</string>
+    <string name="widget_done">Done</string>
+    <string name="widget_city">City</string>
+    <string name="widget_here">My location</string>
+    <string name="widget_preview_temp">29°</string>
+    <string name="widget_preview_city">Muscat</string>
+    <string name="widget_preview_cond">Partly cloudy</string>
+    <string name="widget_preview_hilo">↑ 33°   ↓ 24°</string>
+    <string name="widget_preview_d0">Today</string>
+    <string name="widget_preview_d1">Tomorrow</string>
+    <string name="widget_preview_d2">Wednesday</string>
+    <string name="widget_preview_d3">Thursday</string>
+    <string name="widget_preview_t0">33°  24°</string>
+    <string name="widget_preview_t1">34°  25°</string>
+    <string name="widget_preview_t2">35°  26°</string>
+    <string name="widget_preview_t3">33°  26°</string>
+</resources>

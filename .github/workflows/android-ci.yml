@@ -1,0 +1,108 @@
+name: Android CI
+on:
+  pull_request:
+  push:
+    branches: [main, import/myweather-1.0.47]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check source and release identity
+        run: node scripts/verify-import.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            project/android/**/*.gradle*
+            project/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Use preinstalled Android SDK command-line tools
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
+      - name: Install Android SDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - name: Install locked JavaScript dependencies
+        working-directory: project
+        run: npm ci
+      - name: Typecheck
+        working-directory: project
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: project
+        run: |
+          node --test scripts/browser-smoke-verdict.test.mjs scripts/sign-out-plan.test.mjs
+          node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts
+      - name: Deterministic weather regression tests
+        run: |
+          node connection-tests.mjs
+          node map-tests.mjs
+          node precip-data-tests.mjs
+      - name: Build Capacitor web assets and sync Android
+        working-directory: project
+        run: npm run build:android
+      - name: Prepare Gradle wrapper
+        run: chmod +x project/android/gradlew
+      - name: Gradle unit tests and debug APK
+        working-directory: project/android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Build and verify signed release
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        working-directory: project/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MYWEATHER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MYWEATHER_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MYWEATHER_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MYWEATHER_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Signing secrets missing"; exit 1
+          fi
+          trap 'rm -f keystore.properties release.jks' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          chmod 600 release.jks
+          {
+            printf 'storeFile=release.jks\n'
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > keystore.properties
+          chmod 600 keystore.properties
+          ./gradlew --no-daemon :app:assembleRelease
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/myweather-apksigner.txt
+          grep -qi '3beb5ef19402c3411be1ad094a9f51fea80d3a35e5b92971b47f5f84169a0e91' /tmp/myweather-apksigner.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -1 | grep "name='net.nabdhserv.myweather' versionCode='48' versionName='1.0.47'"
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: myweather-debug-apk
+          path: project/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        with:
+          name: myweather-signed-release-apk
+          path: project/android/app/build/outputs/apk/release/*.apk
+          retention-days: 7
