@@ -310,9 +310,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       const mine = ++detailGen;
       detailAc?.abort();
       detailAc = new AbortController();
-      const cell = Math.max(0.025, span / 22);
-      const cols = Math.max(14, Math.min(26, Math.round(lonSpan / cell)));
-      const rows = Math.max(14, Math.min(28, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
+      const cell = Math.max(0.025, span / 16);
+      const cols = Math.max(12, Math.min(18, Math.round(lonSpan / cell)));
+      const rows = Math.max(12, Math.min(18, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
       void fetchGrid({
         south,
         north,
@@ -349,7 +349,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       void (async () => {
       try {
         // A shared global field complements independently fetched viewport detail.
-        const globalGrid = await loadWorld(saver ? 24 : 32, saver ? 14 : 18, 0.05, 0.98);
+        const globalGrid = await loadWorld(saver ? 16 : 20, saver ? 10 : 12, 0.05, 0.98);
         if (dead) return;
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
@@ -742,7 +742,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               <span className="font-semibold text-fg">{t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
               <span ref={valueRef} className="font-semibold text-accent">—</span>
             </div>
-            <span className="text-[0.6rem] text-muted">{lang === "ar" ? "توقعات نموذجية — دقة التفاصيل حسب شبكة البيانات" : "Model forecast — detail depends on the data grid"}</span>
             <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
             {kind === 2 ? <div className="mt-1 text-[0.6rem] leading-snug text-muted">
               {lang === "ar" ? "رمادي: غيوم كثيفة · ملوّن: مطر · أبيض: تساقط ثلج · سماوي: غطاء ثلجي" : "Gray: clouds · Color: rain · White: snowfall · Cyan: snow cover"}
