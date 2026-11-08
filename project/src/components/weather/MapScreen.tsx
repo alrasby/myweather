@@ -314,8 +314,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       detailAc?.abort();
       detailAc = new AbortController();
       const cell = Math.max(0.025, span / 16);
-      const cols = Math.max(10, Math.min(12, Math.round(lonSpan / cell)));
-      const rows = Math.max(10, Math.min(12, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
+      const cols = Math.max(6, Math.min(8, Math.round(lonSpan / cell)));
+      const rows = Math.max(6, Math.min(8, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
       void fetchGrid({
         south,
         north,
@@ -361,7 +361,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       void (async () => {
       try {
         // A shared global field complements independently fetched viewport detail.
-        const globalGrid = await loadWorld(saver ? 12 : 16, saver ? 8 : 10, 0.05, 0.98);
+        const globalGrid = await loadWorld(saver ? 6 : 8, saver ? 4 : 5, 0.05, 0.98);
         if (dead) return;
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
