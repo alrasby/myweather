@@ -508,7 +508,7 @@ export function fetchGrid(req: GridRequest): Promise<GridField> {
   }
   const pending = inflight.get(key);
   if (pending && !inflightSignals.get(key)?.aborted) return pending;
-  const promise = readGrid(key).then(cached => {
+  const promise = readGrid(key).then(async cached => {
     if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
     if (cached) return cached;
     try {
