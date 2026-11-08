@@ -157,7 +157,10 @@ export const useWeather = create<WeatherState>((set, get) => ({
       ? file.activeId
       : (places.find((p) => p.primary)?.id ?? places[0]?.id ?? "");
     let peek: Place | null = null;
-    if (!places.length && here) {
+    if (here && file.activeId === here.id && !places.some((p) => p.id === here.id)) {
+      peek = here;
+      activeId = here.id;
+    } else if (!places.length && here) {
       peek = here;
       activeId = here.id;
     } else if (!places.length) {
@@ -214,6 +217,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
   locatePlace: (place) => {
     const same = get().activeId === place.id;
     set({ peek: place, activeId: place.id, revision: same ? get().revision : get().revision + 1 });
+    persistPlaces(get().places, place.id);
   },
   setHere: (place) => {
     saveHere(place);

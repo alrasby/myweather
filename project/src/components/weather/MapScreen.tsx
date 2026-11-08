@@ -342,14 +342,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     };
     map.on("moveend", consider);
     map.on("zoomend", consider);
-    consider();
     const startWorld = () => {
       if (worldStarted || dead) return;
       worldStarted = true;
       void (async () => {
       try {
         // A shared global field complements independently fetched viewport detail.
-        const globalGrid = await loadWorld(saver ? 16 : 20, saver ? 10 : 12, 0.05, 0.98);
+        const globalGrid = await loadWorld(saver ? 24 : 32, saver ? 14 : 18, 0.05, 0.98);
         if (dead) return;
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
@@ -363,6 +362,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }
     })();
     };
+    startWorld();
+    consider();
     return () => {
       dead = true;
       worldAc.abort();

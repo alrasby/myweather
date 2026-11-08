@@ -71,8 +71,13 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       if (gen !== locateGen.current) return;
       const mine = ++ticket;
       const coordinates = placeFromCoords(pos.lat, pos.lon, `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`);
-      setHere(coordinates);
-      locatePlace(coordinates);
+      const previous = useWeather.getState().here;
+      const samePosition = previous && Math.abs(previous.lat - pos.lat) < 0.005 && Math.abs(previous.lon - pos.lon) < 0.005;
+      const firstPlace = samePosition && previous.name && !/^[-\d.,\s]+$/.test(previous.name)
+        ? placeFromCoords(pos.lat, pos.lon, previous.name, previous.country, previous.admin)
+        : coordinates;
+      setHere(firstPlace);
+      locatePlace(firstPlace);
       void lookupPlace(pos.lat, pos.lon, lang).then((rev) => {
         if (mine !== ticket || gen !== locateGen.current) return;
         const name = rev?.name || `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`;
