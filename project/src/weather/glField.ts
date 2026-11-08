@@ -107,7 +107,7 @@ void main() {
     float snowCm = max(0.0, sn.r * 12.0);
     float rainBody = smoothstep(0.02, 0.16, mm);
     float snowBody = smoothstep(0.02, 0.18, snowCm);
-    float cloudA = smoothstep(0.35, 0.95, sn.b) * 0.34;
+    float cloudA = smoothstep(0.18, 0.90, sn.b) * 0.34;
     float depthA = smoothstep(0.002, 0.12, sn.g * 3.0) * 0.28;
     if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01)) {
       frag = vec4(0.0);
@@ -924,7 +924,7 @@ export class FieldEngine {
         const m = scale === 1 ? at(depth, c, r) : bilinear(depth, x, y);
         data[pix] = Math.max(0, Math.min(255, Math.round((cm / 12) * 255)));
         data[pix + 1] = Math.max(0, Math.min(255, Math.round((m / 3) * 255)));
-        data[pix + 2] = Math.max(0, Math.min(255, Math.round((bilinear(grid.cloud, x, y) / 100) * 255)));
+        data[pix + 2] = Math.max(0, Math.min(255, Math.round((bilinear(grid.cloud.subarray(base, base + rows * cols), x, y) / 100) * 255)));
         data[pix + 3] = grid.ok[base + Math.max(0, Math.min(rows - 1, Math.round(y))) * cols + Math.max(0, Math.min(cols - 1, Math.round(x)))] ? 255 : 0;
       }
     }
@@ -1028,7 +1028,7 @@ export class FieldEngine {
 
   private drawParticles(dt: number) {
     if (!this.map || !this.partCtx) return;
-    const flow = this.kind === 0 && !this.saver && this.particleTarget > 0;
+    const flow = this.kind === 0 && this.particleTarget > 0;
     if (!flow) {
       this.clearParticles();
       this.paintOverlay();
