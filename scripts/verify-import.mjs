@@ -24,7 +24,7 @@ assert.equal(missing.length, 0, `Source archive import incomplete: ${missing.joi
 const gradle = readFileSync(path("project/android/app/build.gradle"), "utf8");
 for (const pattern of [
   /applicationId\s+["']net\.nabdhserv\.myweather["']/,
-  /versionCode\s+49\b/,
+  /versionCode\s+50\b/,
   /versionName\s+["']1\.0\.48["']/,
 ]) assert.match(gradle, pattern);
 
