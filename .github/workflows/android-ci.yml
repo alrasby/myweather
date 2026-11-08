@@ -1,0 +1,83 @@
+name: Android CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - name: Install locked JS dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Weather regression tests
+        run: |
+          for test in connection-tests.mjs map-tests.mjs precip-data-tests.mjs render-tests.mjs; do
+            if [ -f "$test" ]; then node "$test"; fi
+          done
+      - name: Build Capacitor web assets and sync Android
+        run: npm run build:android
+      - name: Prepare Gradle wrapper
+        run: chmod +x android/gradlew
+      - name: Gradle unit tests and debug build
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Build release APK
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MYWEATHER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MYWEATHER_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MYWEATHER_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MYWEATHER_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Signing secrets missing"; exit 1
+          fi
+          trap 'rm -f keystore.properties release.jks' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          chmod 600 release.jks
+          {
+            printf 'storeFile=release.jks\n'
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > keystore.properties
+          chmod 600 keystore.properties
+          ./gradlew --no-daemon :app:assembleRelease
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | head -1
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: myweather-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        with:
+          name: myweather-signed-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 7
