@@ -31,6 +31,9 @@ for (const pattern of [
 const wrapper = readFileSync(path("project/android/gradle/wrapper/gradle-wrapper.properties"), "utf8");
 assert.match(wrapper, /gradle-8\.14\.3-/);
 
+const preview = readFileSync(path("project/src/lib/auth/preview.ts"), "utf8");
+assert.doesNotMatch(preview, /PREVIEW_CLIENT_SECRET\\s*=\\s*["'][^"']{10,}["']/, "Do not publish a hard-coded preview client secret");
+
 const cap = readFileSync(path("project/capacitor.config.ts"), "utf8");
 assert.match(cap, /net\.nabdhserv\.myweather/);
 
