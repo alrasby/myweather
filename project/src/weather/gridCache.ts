@@ -11,7 +11,7 @@ async function database(): Promise<IDBDatabase | null> {
     request.onblocked = () => resolve(null);
   });
 }
-export async function readGrid(id: string): Promise<GridField | null> {
+export async function readGrid(id: string, allowStale = false): Promise<GridField | null> {
   try {
     const db = await database();
     if (!db) return null;
@@ -20,7 +20,7 @@ export async function readGrid(id: string): Promise<GridField | null> {
       req.onsuccess = () => {
         const row = req.result;
         db.close();
-        resolve(row && Date.now() - row.saved < TTL ? row.grid : null);
+        resolve(row && Date.now() - row.saved < (allowStale ? 24 * 60 * 60_000 : TTL) ? row.grid : null);
       };
       req.onerror = () => {
         db.close();
@@ -43,7 +43,7 @@ export async function saveGrid(grid: GridField): Promise<void> {
       req.onsuccess = () => {
         const rows = req.result.sort((a, b) => b.saved - a.saved);
         rows.forEach((row, i) => {
-          if (i >= 5 || Date.now() - row.saved >= TTL) store.delete(row.id);
+          if (i >= 12 || Date.now() - row.saved >= 24 * 60 * 60_000) store.delete(row.id);
         });
       };
       tx.oncomplete =
