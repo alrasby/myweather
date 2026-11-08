@@ -4,7 +4,7 @@ import type { LayerGroup, Map as LeafletMap } from "leaflet";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { loadWeather, placeFromCoords } from "@/weather/api";
 import { FieldEngine, type FrameInfo } from "@/weather/glField";
-import { covers, fetchGrid } from "@/weather/grid";
+import { covers, gridFailureReason, fetchGrid } from "@/weather/grid";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
 import { compassFrom } from "@/weather/heading";
@@ -88,6 +88,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [gridFailed, setGridFailed] = useState(false);
+  const [gridErrorKind, setGridErrorKind] = useState("unknown");
   const [gridRetry, setGridRetry] = useState(0);
   const [pins, setPins] = useState<Array<LiveCyclone & { x: number; y: number }>>([]);
   const [cycloneMsg, setCycloneMsg] = useState<string | null>(null);
@@ -334,12 +335,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           engine.setDetail(grid);
           engine.setRainView(grid);
           setGridFailed(false);
+          setGridErrorKind("unknown");
           setProgress(1);
         })
         .catch(() => {
           if (!dead && mine === detailGen) {
             startWorld();
             if (worldFinished && !worldSucceeded && !detailRef.current) {
+              setGridErrorKind(gridFailureReason());
               setGridFailed(true);
               setProgress(1);
             }
@@ -363,6 +366,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
         worldSucceeded = true;
+        setGridFailed(false);
+        setGridErrorKind("unknown");
         worldFinished = true;
         setProgress(1);
         consider();
@@ -648,7 +653,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         {gridFailed ? (
           <div role="status" className="wx-card pointer-events-auto mx-3 px-3 py-2 text-sm text-fg"
             style={{ marginTop: "calc(env(safe-area-inset-top, 0px) + 32px)" }}>
-            {lang === "ar" ? "تعذّر تحميل بيانات الطبقات. تحقق من الاتصال." : "Map data unavailable. Check your connection."}
+            {lang === "ar" ? (gridErrorKind === "quota" ? "خدمة بيانات الطقس مقيّدة مؤقتًا. حاول لاحقًا." : gridErrorKind === "incomplete" ? "لم تُرجع خدمة الطقس بيانات كافية للخريطة." : gridErrorKind === "provider" ? "رفضت خدمة الطقس بعض الطلبات." : "تعذّر الاتصال بخدمة بيانات الطقس.") : (gridErrorKind === "quota" ? "Weather provider rate limit. Try later." : gridErrorKind === "incomplete" ? "Weather provider returned insufficient map data." : gridErrorKind === "provider" ? "Weather provider rejected requests." : "Could not reach weather data service.")}
             <button type="button" className="mx-2 underline" onClick={() => setGridRetry(n => n + 1)}>
               {lang === "ar" ? "إعادة المحاولة" : "Retry"}
             </button>
