@@ -112,7 +112,7 @@ function abortable<T>(
     );
   });
 }
-async function request(url: string, signal?: AbortSignal): Promise<Response> {
+async function request(url: string, signal?: AbortSignal, forecast = false): Promise<Response> {
   if (Capacitor.isNativePlatform()) {
     try {
       const r = await abortable(
@@ -128,7 +128,7 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
         17000,
       );
       if (r.status < 200 || r.status > 599) throw new NetworkFailure(0);
-      noteForecast("native", r.status);
+      if (forecast) noteForecast("native", r.status);
       return new Response(
         typeof r.data === "string" ? r.data : JSON.stringify(r.data),
         { status: r.status, headers: r.headers },
@@ -151,8 +151,11 @@ async function request(url: string, signal?: AbortSignal): Promise<Response> {
       headers,
       cache: "no-store",
     });
-    noteForecast("web", response.status);
+    if (forecast) noteForecast("web", response.status);
     return response;
+  } catch (err) {
+    if (forecast && !signal?.aborted) noteForecast("web", 0);
+    throw err;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", stop);
@@ -166,6 +169,7 @@ export async function proxyFetch(
   const host = new URL(url).host;
   // Map-grid rate limits must not suppress independent current-weather attempts.
   const cooldownKey = `${host}:${priority}`;
+  const isForecast = priority === "foreground" && host === "api.open-meteo.com" && new URL(url).pathname === "/v1/forecast";
   if (priority === "foreground") foregroundPending++;
   let release: (() => void) | undefined;
   try {
@@ -178,14 +182,14 @@ export async function proxyFetch(
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) {
-        if (priority === "foreground") noteForecast("local", 429);
+        if (isForecast) noteForecast("local", 429);
         throw new NetworkFailure(429);
       }
       if (priority === "background") {
         reserveBackgroundRequest();
       }
       try {
-        const response = await request(url, signal);
+        const response = await request(url, signal, isForecast);
         if (response.status === 429) {
           const raw = response.headers.get("retry-after");
           const seconds = Number(raw);
@@ -208,6 +212,9 @@ export async function proxyFetch(
         if (response.status >= 500 && attempt === 0) continue;
         return response;
       } catch (e) {
+        if (isForecast && !signal?.aborted && !(e instanceof NetworkFailure && e.status === 429)) {
+          noteForecast(lastForecastDiagnostic?.source === "native" ? "native" : "web", e instanceof NetworkFailure ? e.status : 0);
+        }
         if (
           signal?.aborted ||
           (e instanceof NetworkFailure && e.status === 429)
