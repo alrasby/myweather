@@ -4,7 +4,7 @@ on:
     branches:
       - import/myweather-1.0.47
     paths:
-      - MyWeather-1.0.47-GitHub-Import.zip
+      - MyWeather-1.0.47-GitHub-Import (1).zip
   workflow_dispatch:
 permissions:
   contents: write
@@ -20,12 +20,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive='MyWeather-1.0.47-GitHub-Import.zip'
+          archive='MyWeather-1.0.47-GitHub-Import (1).zip'
           test -s "$archive"
           python3 - <<'PY'
           import pathlib
           import zipfile
-          archive=pathlib.Path("MyWeather-1.0.47-GitHub-Import.zip")
+          archive=pathlib.Path("MyWeather-1.0.47-GitHub-Import (1).zip")
           required={"project/package-lock.json","project/android/app/build.gradle","project/android/gradle/wrapper/gradle-wrapper.jar","project/src/weather/net.ts","project/src/components/weather/MapScreen.tsx"}
           with zipfile.ZipFile(archive) as z:
               names=set(z.namelist())
