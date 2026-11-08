@@ -58,6 +58,17 @@ export function requestLane(limit: number) {
 const foreground = requestLane(2),
   background = requestLane(2);
 const cooldown = new Map<string, number>();
+// Bound map-grid traffic independently so it cannot exhaust the shared forecast API.
+const backgroundRequests: number[] = [];
+const BACKGROUND_WINDOW_MS = 10 * 60_000;
+const BACKGROUND_LIMIT = 3;
+let foregroundPending = 0;
+function reserveBackgroundRequest(): void {
+  const now = Date.now();
+  while (backgroundRequests.length && now - backgroundRequests[0]! >= BACKGROUND_WINDOW_MS) backgroundRequests.shift();
+  if (backgroundRequests.length >= BACKGROUND_LIMIT) throw new NetworkFailure(429);
+  backgroundRequests.push(now);
+}
 const headers = { Accept: "application/json, text/plain, */*" };
 function abortable<T>(
   work: Promise<T>,
@@ -143,13 +154,22 @@ export async function proxyFetch(
   priority: "foreground" | "background" = "foreground",
 ): Promise<Response> {
   const host = new URL(url).host;
-  const release = await (priority === "background" ? background : foreground)(
-    signal,
-  );
+  if (priority === "foreground") foregroundPending++;
+  let release: (() => void) | undefined;
+  try {
+    release = await (priority === "background" ? background : foreground)(signal);
+  } catch (err) {
+    if (priority === "foreground") foregroundPending--;
+    throw err;
+  }
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       if (Date.now() < (cooldown.get(host) ?? 0)) throw new NetworkFailure(429);
+      if (priority === "background") {
+        if (foregroundPending > 0) throw new NetworkFailure(0);
+        reserveBackgroundRequest();
+      }
       try {
         const response = await request(url, signal);
         if (response.status === 429) {
@@ -184,6 +204,7 @@ export async function proxyFetch(
     }
     throw new NetworkFailure(0);
   } finally {
-    release();
+    release?.();
+    if (priority === "foreground") foregroundPending--;
   }
 }
