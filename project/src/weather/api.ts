@@ -263,6 +263,7 @@ async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Weathe
   if (res.status === 429) {
     const body = await res.text().catch(() => "");
     if (/daily (api )?request limit|daily limit exceeded/i.test(body)) markQuota(30 * 60_000);
+    console.warn("[MyWeather forecast] HTTP 429", body.slice(0, 500));
     throw new Error("quota");
   }
   if (!res.ok) throw new Error(`http ${res.status}`);

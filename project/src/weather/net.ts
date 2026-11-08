@@ -174,6 +174,8 @@ export async function proxyFetch(
       try {
         const response = await request(url, signal);
         if (response.status === 429) {
+          // Preserve provider error body for foreground forecast diagnostics.
+          if (priority === "foreground") return response;
           const raw = response.headers.get("retry-after");
           const seconds = Number(raw);
           const ms =
