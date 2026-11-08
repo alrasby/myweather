@@ -258,6 +258,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engine.setRainWorld(null);
     engine.setGlobal(null);
     const hours = prefs.mapHours;
+    let worldFinished = false;
     const saver = prefs.dataSaver;
     setProgress(0.08);
     setGridFailed(false);
@@ -285,8 +286,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       });
 
     const pullDetail = () => {
-      if (dead) return;
-      if (saver) { startWorld(); return; }
+      if (dead || !worldFinished) return;
+      if (saver) return;
       const view = viewSpan();
       if (view.span > 120 || view.span < 0.05) {
         startWorld();
@@ -311,8 +312,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       detailAc?.abort();
       detailAc = new AbortController();
       const cell = Math.max(0.025, span / 16);
-      const cols = Math.max(12, Math.min(18, Math.round(lonSpan / cell)));
-      const rows = Math.max(12, Math.min(18, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
+      const cols = Math.max(10, Math.min(12, Math.round(lonSpan / cell)));
+      const rows = Math.max(10, Math.min(12, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
       void fetchGrid({
         south,
         north,
@@ -348,14 +349,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       void (async () => {
       try {
         // A shared global field complements independently fetched viewport detail.
-        const globalGrid = await loadWorld(saver ? 24 : 32, saver ? 14 : 18, 0.05, 0.98);
+        const globalGrid = await loadWorld(saver ? 12 : 16, saver ? 8 : 10, 0.05, 0.98);
         if (dead) return;
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
+        worldFinished = true;
         setProgress(1);
         consider();
       } catch {
         if (!dead && !worldAc.signal.aborted) {
+          worldFinished = true;
+          consider();
           setGridFailed(!detailRef.current);
           setProgress(1);
         }
