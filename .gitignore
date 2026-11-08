@@ -1,0 +1,14 @@
+node_modules/
+.gradle/
+**/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
