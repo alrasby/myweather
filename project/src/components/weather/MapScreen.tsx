@@ -185,8 +185,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // world out of its bounded viewport when two fingers move together.
           touchZoom: "center",
           bounceAtZoomLimits: false,
-          zoomAnimation: false,
-          fadeAnimation: false,
+          zoomAnimation: true,
+          fadeAnimation: true,
           // Wrap longitudes continuously while constraining only the polar direction.
           worldCopyJump: true,
           inertia: true,
@@ -200,6 +200,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
           maxZoom: 16,
           updateWhenIdle: false,
+          updateInterval: 100,
           keepBuffer: 6,
         }).addTo(map);
         imageryRef.current = imagery;
@@ -208,7 +209,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, keepBuffer: 6 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 100, keepBuffer: 6 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
