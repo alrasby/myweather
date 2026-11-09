@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { modelTileFrameReady } from "@/weather/modelTileReadiness";
+import { modelTileFrameReady, isPrecipitationTile } from "@/weather/modelTileReadiness";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -34,39 +34,41 @@ const RAIN = {
   breakpoints: [0.12, 0.4, 0.9, 1.8, 3.5, 7, 12, 20],
   colors: [
     [176, 214, 248, 0],
-    [72, 158, 236, 0.38],
-    [22, 104, 214, 0.52],
-    [14, 158, 86, 0.62],
-    [190, 206, 22, 0.74],
-    [255, 176, 0, 0.84],
-    [224, 58, 26, 0.92],
-    [132, 34, 176, 0.96],
+    [72, 158, 236, 0.56],
+    [22, 104, 214, 0.72],
+    [14, 158, 86, 0.84],
+    [190, 206, 22, 0.91],
+    [255, 176, 0, 0.94],
+    [224, 58, 26, 0.96],
+    [132, 34, 176, 0.97],
   ],
 };
 
 const SNOW = {
   type: "breakpoint" as const,
   unit: "mm/h",
-  breakpoints: [0.18, 0.45, 1.1, 2.4],
+  breakpoints: [0.08, 0.25, 0.7, 1.6],
   colors: [
-    [255, 255, 255, 0],
-    [230, 240, 255, 0.4],
-    [255, 255, 255, 0.68],
-    [214, 230, 255, 0.86],
+    [213, 229, 249, 0],
+    [154, 204, 251, 0.64],
+    [226, 243, 255, 0.84],
+    [249, 253, 255, 0.95],
   ],
 };
 
 const CLOUD = {
   type: "breakpoint" as const,
   unit: "%",
-  breakpoints: [32, 52, 66, 78, 90, 100],
+  // Show well-defined dense cloud masses; thin widespread cover should not
+  // wash the satellite imagery out into a nearly uniform grey fog.
+  breakpoints: [55, 70, 82, 90, 96, 100],
   colors: [
     [255, 255, 255, 0],
-    [250, 252, 255, 0.07],
-    [248, 250, 253, 0.16],
-    [246, 248, 252, 0.3],
-    [244, 247, 251, 0.42],
-    [240, 244, 248, 0.52],
+    [255, 255, 255, 0],
+    [249, 252, 255, 0.07],
+    [248, 251, 255, 0.24],
+    [244, 249, 255, 0.43],
+    [244, 249, 255, 0.57],
   ],
 };
 
@@ -257,7 +259,8 @@ function tileHasInk(tile?: HTMLElement): boolean {
   try {
     const { width, height } = tile;
     const data = ctx.getImageData(0, 0, width, height).data;
-    const step = Math.max(16, Math.floor(Math.min(width, height) / 10));
+    // Small but real precipitation or snow cells must not be missed.
+    const step = 8;
     for (let y = 0; y < height; y += step) {
       for (let x = 0; x < width; x += step) {
         if ((data[(y * width + x) * 4 + 3] ?? 0) > 8) return true;
@@ -429,12 +432,10 @@ export class ModelField {
       frame.ready = ready;
       this.orderKey = "";
       if (!ready) {
-        // Partial frames are never exposed: keep the global rain canvas visible.
+        // Partial frames are never exposed: keep the global rain/snow canvas visible.
         frame.opacity = 0;
         for (const layer of made) layer.setOpacity?.(0);
       }
-      if (this.anyInk()) this.onLive?.();
-      else this.onMiss?.();
       this.applyOpacity();
     };
     const giveUp = () => {
@@ -466,7 +467,9 @@ export class ModelField {
       });
       layer.on("tileload", (ev) => {
         // Canvas readback is expensive on Android; only inspect until the first nonempty tile.
-        if (!alive() || frame.ink || !tileHasInk(ev?.tile)) return;
+        // Cloud-only tiles are NOT sufficient to hide real rain/snow from
+        // the global fallback. Wait for precipitation or snowfall data.
+        if (!alive() || frame.ink || !isPrecipitationTile(index) || !tileHasInk(ev?.tile)) return;
         frame.ink = true;
         this.loading.delete(step);
         window.clearTimeout(wait);
@@ -526,6 +529,14 @@ export class ModelField {
       frame.opacity = value;
       for (const layer of frame.layers) layer.setOpacity?.(value);
     }
+    // Reveal the model only after sufficient tile opacity is actually present,
+    // avoiding the abrupt disappearance of visible rain/snow during blending.
+    const visibleOpacity = Array.from(this.frames.values()).reduce(
+      (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
+      0,
+    );
+    if (visibleOpacity >= 0.88) this.onLive?.();
+    else this.onMiss?.();
   }
 
   private clear() {
