@@ -45,8 +45,10 @@ function coverTileGaps(L: LeafletNs) {
       tile.style.clipPath = "none";
       return;
     }
-    tile.style.width = `${size.x + 1}px`;
-    tile.style.height = `${size.y + 1}px`;
+    // Keep raster tiles at their exact grid dimensions: overlapping opaque imagery
+    // and translucent label tiles by 1px creates visible horizontal/vertical seams.
+    tile.style.width = `${size.x}px`;
+    tile.style.height = `${size.y}px`;
   };
 }
 
@@ -209,9 +211,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           minZoom: minZoomFor(el),
           maxZoom: 16,
           zoomSnap: 1,
-          // Prevent two-finger pinch from shrinking the map into a floating world rectangle.
-          // Keep one-finger dragging and the existing +/- zoom buttons available.
-          touchZoom: false,
+          // Restore pinch-to-zoom, anchored at map center to avoid dragging the
+          // world out of its bounded viewport when two fingers move together.
+          touchZoom: "center",
           bounceAtZoomLimits: false,
           zoomAnimation: false,
           fadeAnimation: false,
