@@ -190,7 +190,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // Wrap longitudes continuously while constraining only the polar direction.
           worldCopyJump: true,
           inertia: true,
-          inertiaDeceleration: 4000,
+          // Cap long inertial flings to avoid moving ahead of available satellite tiles.
+          inertiaDeceleration: 4500,
+          inertiaMaxSpeed: 1100,
           maxBounds: [[-85.0511287798, -100000], [85.0511287798, 100000]],
           maxBoundsViscosity: 1,
           doubleClickZoom: false,
