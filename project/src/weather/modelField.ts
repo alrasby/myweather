@@ -247,25 +247,6 @@ export function installSpatialFetch(): void {
     throw new Error("spatial-fetch");
   };
 }
-/** حافة البلاطة أفتح من داخلها؛ تُستبدل بنسخة الصف الداخلي حتى لا يبقى خط. */
-function calmTileEdge(tile?: HTMLElement) {
-  if (!(tile instanceof HTMLCanvasElement) || tile.width < 8 || tile.height < 8) return;
-  const ctx = tile.getContext("2d");
-  if (!ctx) return;
-  const w = tile.width;
-  const h = tile.height;
-  const scratch = document.createElement("canvas");
-  scratch.width = w;
-  scratch.height = h;
-  const copy = scratch.getContext("2d");
-  if (!copy) return;
-  copy.drawImage(tile, 0, 0);
-  ctx.drawImage(scratch, 0, 2, w, 2, 0, 0, w, 2);
-  ctx.drawImage(scratch, 0, h - 4, w, 2, 0, h - 2, w, 2);
-  ctx.drawImage(scratch, 2, 0, 2, h, 0, 0, 2, h);
-  ctx.drawImage(scratch, w - 4, 0, 2, h, w - 2, 0, 2, h);
-}
-
 function tileHasInk(tile?: HTMLElement): boolean {
   if (!(tile instanceof HTMLCanvasElement) || tile.width < 2 || tile.height < 2) return false;
   const ctx = tile.getContext("2d");
@@ -448,7 +429,6 @@ export class ModelField {
     for (const layer of made) {
       layer.on("tileload", (ev) => {
         if (!alive()) return;
-        calmTileEdge(ev?.tile);
         if (!tileHasInk(ev?.tile)) return;
         if (frame.ink) return;
         frame.ink = true;
