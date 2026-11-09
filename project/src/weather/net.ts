@@ -84,32 +84,29 @@ let foregroundPending = 0;
 
 function loadSpends(): Spend[] {
   if (spends) return spends;
+  // A persisted estimate is not proof of provider usage. In particular, old
+  // versions retained reservations for aborted/failed map requests for 24h.
+  // Discard the legacy ledger once, then account only for this app session.
   spends = [];
   try {
-    if (typeof localStorage !== "undefined") {
-      const raw = JSON.parse(localStorage.getItem(BUDGET_KEY) ?? "[]") as unknown;
-      if (Array.isArray(raw)) {
-        for (const item of raw) {
-          if (Array.isArray(item) && Number.isFinite(item[0]) && Number.isFinite(item[1])) spends.push([item[0], item[1]]);
-        }
-      }
-    }
+    if (typeof localStorage !== "undefined") localStorage.removeItem(BUDGET_KEY);
   } catch {
-    /* التخزين غير متاح: الميزانية تبقى في الذاكرة فقط */
+    /* Storage is optional; the in-memory limiter still protects the provider. */
   }
   return spends;
 }
 function saveSpends(): void {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(BUDGET_KEY, JSON.stringify(loadSpends()));
-  } catch {
-    /* التخزين ممتلئ */
-  }
+  // Intentionally session-only. Persisting failed/aborted request reservations
+  // used to lock map layers after an app restart despite healthy foreground data.
 }
 function pruneSpends(now: number): Spend[] {
   const list = loadSpends();
   const oldest = now - BUDGET_WINDOWS[BUDGET_WINDOWS.length - 1]!.ms;
-  while (list.length && list[0]![0] < oldest) list.shift();
+  // Filter rather than shift: concurrent requests and device clock changes can
+  // leave timestamps out of order.
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (!Number.isFinite(list[i]![0]) || list[i]![0] < oldest || list[i]![0] > now + 60_000) list.splice(i, 1);
+  }
   return list;
 }
 /** وزن الطلب = عدد المواقع × ceil(المتغيرات / 10). غير Open-Meteo = 0. */
