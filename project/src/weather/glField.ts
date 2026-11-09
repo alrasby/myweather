@@ -69,6 +69,11 @@ void main() {
     : normDelta(lon - u_grid.x) / max(u_grid.y, 0.0001);
   if (u_full > 0.5) {
     u = u - floor(u);
+    // Do not stretch the northern/southern edge row into a horizontal band.
+    if (u_kind == 2 && (v < 0.0 || v > 1.0)) {
+      frag = vec4(0.0);
+      return;
+    }
     v = clamp(v, 0.0, 1.0);
   } else if (v < -0.03 || v > 1.03 || u < -0.002 || u > 1.002) {
     frag = vec4(0.0);
@@ -76,8 +81,12 @@ void main() {
   }
   float edge = 1.0;
   if (u_full < 0.5) {
-    edge = smoothstep(-0.03, 0.0, v) * smoothstep(1.03, 1.0, v);
-    edge *= smoothstep(-0.002, 0.01, u) * smoothstep(1.002, 0.99, u);
+    // smoothstep requires ascending edges; reversed edges are undefined in GLSL.
+    edge = smoothstep(-0.03, 0.0, v) * (1.0 - smoothstep(1.0, 1.03, v));
+    edge *= smoothstep(-0.002, 0.01, u) * (1.0 - smoothstep(0.99, 1.002, u));
+  } else if (u_kind == 2) {
+    // Softly fade the rain field near polar data limits, not a hard horizontal cut.
+    edge = smoothstep(0.0, 0.015, v) * (1.0 - smoothstep(0.985, 1.0, v));
   }
   float uu = u_full > 0.5 ? u : clamp(u, 0.0, 1.0);
   float vv = clamp(v, 0.0, 1.0);
