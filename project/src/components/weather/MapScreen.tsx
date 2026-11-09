@@ -209,6 +209,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           minZoom: minZoomFor(el),
           maxZoom: 16,
           zoomSnap: 1,
+          // Prevent two-finger pinch from shrinking the map into a floating world rectangle.
+          // Keep one-finger dragging and the existing +/- zoom buttons available.
+          touchZoom: false,
+          bounceAtZoomLimits: false,
           zoomAnimation: false,
           fadeAnimation: false,
           // A single bounded world avoids jumping into unpopulated tile copies on drag.
