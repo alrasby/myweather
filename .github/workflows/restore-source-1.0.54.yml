@@ -21,7 +21,7 @@ jobs:
           set -euo pipefail
           archive='MyWeather-1.0.54-GitHub-Import.zip'
           test -s "$archive"
-          echo 'ea4d0e72f9c00f2f7d9c26c0a938272c7b1ff488847e88268df30e7ecf3cb81c  MyWeather-1.0.54-GitHub-Import.zip' | sha256sum -c -
+          echo '36e78d66e80129abdce1de8f883dca47dd6ad889a3e58fa96b9f5fe30e3a6632  MyWeather-1.0.54-GitHub-Import.zip' | sha256sum -c -
           cp project/index.html /tmp/myweather-android-index.html
           cp project/vite.android.config.ts /tmp/myweather-vite-android.config.ts
           python3 - <<'PY'
