@@ -12,6 +12,7 @@ assert.equal(net.requestWeight('https://api.open-meteo.com/v1/forecast?latitude=
 assert.equal(net.requestWeight('https://example.com/x?latitude=1,2'),0);
 let requests=0;
 globalThis.fetch=async input=>{requests++;const url=new URL(input);const lats=url.searchParams.get('latitude').split(',').map(Number),lons=url.searchParams.get('longitude').split(',').map(Number);
+assert.equal(url.searchParams.get('hourly').split(',').length,9,'Map request must stay within one Open-Meteo budget multiplier');
 return new Response(JSON.stringify(lats.map((lat,i)=>({latitude:lat,longitude:lons[i],hourly:{time:['2026-11-07T12:00','2026-11-07T13:00'],temperature_2m:[30,32],precipitation:[2,6],wind_speed_10m:[36,36],wind_direction_10m:[90,90],pressure_msl:[1010,1010]}}))),{status:200});};
 // أول فتح: شبكة عالمية 18×9 + منطقة 16×16 (418 موقعًا) تنجحان دون رفض
 const world=await grid.fetchGrid({south:-80,north:84,west:-180,lonSpan:360,rows:9,cols:18,hours:2,full:true});
