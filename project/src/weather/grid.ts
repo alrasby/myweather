@@ -108,7 +108,7 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-function gridKey(req: GridRequest): string {
+function gridKey(req: GridRequest, bucketOffset = 0): string {
   return [
     req.full ? "F" : "D",
     round1(req.south),
@@ -120,7 +120,7 @@ function gridKey(req: GridRequest): string {
     req.hours,
     req.dryRain ? "dry" : "wet",
     "a50",
-    Math.floor(Date.now() / (2 * 60 * 60_000)),
+    Math.floor(Date.now() / (2 * 60 * 60_000)) - bucketOffset,
   ].join("|");
 }
 
@@ -403,7 +403,8 @@ function pack(req: GridRequest, cells: Cell[][], times: number[], id: string): G
   return grid;
 }
 
-const BATCH = 20;
+// الحصة تُحسب بعدد المواقع لا بعدد الطلبات؛ دفعات أكبر = زمن أقل بالتكلفة نفسها.
+const BATCH = 50;
 
 function assignBlocks(cells: Cell[][], batch: Point[], json: PointResponse[], hours: number, times: { list: number[] }) {
   const used = new Set<number>();
@@ -446,16 +447,29 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
   const batches: Point[][] = [];
   for (let i = 0; i < points.length; i += BATCH) batches.push(points.slice(i, i + BATCH));
   let done = 0;
+  let quotaHit = false;
   const times = { list: [] as number[] };
 
   const consume = async (batch: Point[], count: boolean) => {
+    if (quotaHit) {
+      if (count) {
+        done++;
+        req.onProgress?.(done, batches.length);
+      }
+      return;
+    }
     try {
       const json = await fetchBatch(batch, req.hours, req.signal);
       assignBlocks(cells, batch, json, req.hours, times);
     } catch (err) {
       if (req.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
-      if (message === "quota") { recordGridFailure(err); throw err; }
+      if (message === "quota") {
+        // نحتفظ بما وصل من دفعات سابقة ونوقف الباقي بدل إسقاط الشبكة كلها.
+        quotaHit = true;
+        recordGridFailure(err);
+        return;
+      }
       recordGridFailure(err);
       if (message.startsWith("reject") && batch.length > 8) {
         const mid = Math.floor(batch.length / 2);
@@ -471,20 +485,22 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
     }
   };
 
-  await pool(batches, 1, (batch) => consume(batch, true), req.signal);
+  await pool(batches, 3, (batch) => consume(batch, true), req.signal);
 
   const missing = points.filter((p) => !cells[p.i]?.[0]?.ok);
-  if (missing.length && missing.length < points.length && fillRatio(cells) < 0.35) {
+  if (!quotaHit && missing.length && missing.length < points.length && fillRatio(cells) < 0.35) {
     const again: Point[][] = [];
     for (let i = 0; i < missing.length; i += BATCH) again.push(missing.slice(i, i + BATCH));
-    await pool(again, 1, (batch) => consume(batch, false), req.signal);
+    await pool(again, 3, (batch) => consume(batch, false), req.signal);
   }
 
   if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
   const ratio = fillRatio(cells);
-  if (req.full ? ratio < 0.35 : ratio < 0.28) {
-    recordGridFailure(new Error("thin"));
-    throw new Error("thin");
+  if ((quotaHit && ratio < 0.85) || (req.full ? ratio < 0.35 : ratio < 0.28)) {
+    // ضعف البيانات بسبب حدّ الاستخدام يُبلَّغ كحدّ استخدام لا كبيانات ناقصة.
+    const failure = new Error(quotaHit ? "quota" : "thin");
+    recordGridFailure(failure);
+    throw failure;
   }
   if (!times.list.length || times.list.some((t) => !Number.isFinite(t))) {
     const start = Date.now();
@@ -516,7 +532,7 @@ export function fetchGrid(req: GridRequest): Promise<GridField> {
     } catch (err) {
       if (req.signal?.aborted) throw err;
       // Show last successful data when the provider is rate limited or offline.
-      const stale = await readGrid(key, true);
+      const stale = (await readGrid(key, true)) ?? (await readGrid(gridKey(req, 1), true)) ?? (await readGrid(gridKey(req, 2), true));
       if (stale) return stale;
       throw err;
     }
