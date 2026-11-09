@@ -213,33 +213,16 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           fadeAnimation: false,
           worldCopyJump: true,
           inertia: true,
+          // Constrain vertical dragging at Mercator poles, while retaining horizontal world wrap.
+          maxBounds: [[-85.0511287798, -540], [85.0511287798, 540]],
+          maxBoundsViscosity: 1,
           doubleClickZoom: false,
         });
         const here = placeRef.current;
         map.setView([here.lat, here.lon], 5);
-        const pole = 85.0511287798;
-        let locking = false;
-        const lockPoles = () => {
-          if (locking) return;
-          const size = map!.getSize();
-          if (size.y < 8) return;
-          const midX = size.x / 2;
-          const top = map!.containerPointToLatLng([midX, 0]);
-          const bot = map!.containerPointToLatLng([midX, size.y]);
-          const overNorth = top.lat > pole;
-          const overSouth = bot.lat < -pole;
-          let dy = 0;
-          if (overNorth) dy += map!.latLngToContainerPoint([pole, top.lng]).y;
-          if (!overNorth && overSouth) dy += map!.latLngToContainerPoint([-pole, bot.lng]).y - size.y;
-          if (Math.abs(dy) > 0.5) {
-            locking = true;
-            map!.panBy([0, dy], { animate: false });
-            locking = false;
-          }
-        };
-        map.on("move zoom", lockPoles);
         const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
           maxZoom: 16,
+          keepBuffer: 4,
         }).addTo(map);
         imageryRef.current = imagery;
         const labels = map.createPane("wx-labels");
@@ -247,7 +230,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels" },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", keepBuffer: 4 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
