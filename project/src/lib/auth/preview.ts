@@ -5,13 +5,16 @@
  * URL, which can't be pre-registered per app. The broker instead exposes ONE
  * shared "preview" client that accepts any
  * `https://*.grok-sandbox.com/api/auth/oauth2/callback/*`
- * (broker: `app-builder-deployer/auth/src/preview-oauth.ts`). Configuring it through the environment lets
+ * (broker: `app-builder-deployer/auth/src/preview-oauth.ts`). Baking it here lets
  * the live preview do REAL sign-in — no demo/mock users — with no platform
  * injection. When deployed the deployer injects a per-app
  * `GROK_AUTH_*` that overrides these (see `server.ts`).
  *
- * Preview credentials must be injected through server environment variables.
- * Never commit credentials to a public source repository.
+ * These MUST equal the broker's `GROK_PREVIEW_CLIENT_ID` /
+ * `GROK_PREVIEW_CLIENT_SECRET` (set in the broker's Vercel env; the broker stores
+ * only the secret's `base64url(SHA-256)` hash). This is a dedicated, low-privilege
+ * client (preview-only, `*.grok-sandbox.com`) — rotate it by regenerating the
+ * broker env var and this constant together.
  */
 export const PREVIEW_CLIENT_ID = "grok_preview";
 export const PREVIEW_CLIENT_SECRET =

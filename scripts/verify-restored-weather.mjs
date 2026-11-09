@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const source = (path) => readFileSync(new URL('../project/src/weather/' + path, import.meta.url), 'utf8');
+const net = source('net.ts');
+const grid = source('grid.ts');
+const map = readFileSync(new URL('../project/src/components/weather/MapScreen.tsx', import.meta.url), 'utf8');
+const android = readFileSync(new URL('../project/vite.android.config.ts', import.meta.url), 'utf8');
+assert.match(net, /export async function proxyFetch\(/, 'network entrypoint must exist');
+assert.match(net, /CapacitorHttp\.request/, 'native HTTP transport must exist');
+assert.match(net, /raceTimeout/, 'network timeout protection must exist');
+assert.match(grid, /export (async )?function fetchGrid\(/, 'grid entrypoint must exist');
+assert.match(grid, /precipitation/, 'rain input must exist');
+assert.match(grid, /snowfall/, 'snow input must exist');
+assert.match(grid, /wind_speed_10m/, 'wind input must exist');
+assert.match(map, /fetchGrid/, 'map must use weather grid');
+assert.match(android, /@\/weather\/proxy\.functions/, 'Android service alias must exist');
+assert.match(android, /src\/android\/services\.ts/, 'Android service alias must resolve');
+console.log('PASS: restored weather network, map, precipitation and Android service wiring contracts');

@@ -1,4 +1,3 @@
-import { readGrid, saveGrid } from "./gridCache";
 import type { FieldSample, GridField } from "@/weather/types";
 import { dirFromUV } from "@/weather/heading";
 import { proxyFetch } from "@/weather/net";
@@ -6,7 +5,7 @@ import { proxyFetch } from "@/weather/net";
 /**
  * جلب الشبكات من Open-Meteo.
  * قاعدة المطر: قيمة الساعة نفسها فقط — ممنوع جمع ٣ ساعات.
- * Limit concurrent requests and batch size to protect the provider quota.
+ * التوازي ٦، و٨٠ نقطة لكل طلب. الشبكة العالمية تُجلب مرة وتُرسم على كامل الشاشة.
  */
 
 export type GridRequest = {
@@ -52,21 +51,7 @@ export function resetQuota(): void {
 }
 const lru = new Map<string, GridField>();
 const inflight = new Map<string, Promise<GridField>>();
-const inflightSignals = new Map<string, AbortSignal | undefined>();
 const LRU_MAX = 8;
-
-/** Most recent map request failure; never include coordinates or request URLs in diagnostics. */
-let lastGridFailure = "unknown";
-export function gridFailureReason(): string { return lastGridFailure; }
-function recordGridFailure(err: unknown): void {
-  const message = err instanceof Error ? err.message : String(err);
-  lastGridFailure = message === "quota" || message.includes("429") ? "quota"
-    : message.includes("thin") ? "incomplete"
-    : message.includes("reject") || message.includes("http ") ? "provider"
-    : message.includes("AbortError") || message.includes("aborted") ? "cancelled"
-    : "network";
-}
-
 
 function touch<T>(map: Map<string, T>, key: string, value: T) {
   if (map.has(key)) map.delete(key);
@@ -108,7 +93,7 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-function gridKey(req: GridRequest, bucketOffset = 0): string {
+function gridKey(req: GridRequest): string {
   return [
     req.full ? "F" : "D",
     round1(req.south),
@@ -119,8 +104,7 @@ function gridKey(req: GridRequest, bucketOffset = 0): string {
     req.rows,
     req.hours,
     req.dryRain ? "dry" : "wet",
-    "a50",
-    Math.floor(Date.now() / (2 * 60 * 60_000)) - bucketOffset,
+    "a40",
   ].join("|");
 }
 
@@ -140,27 +124,30 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function fetchRetry(url: string, signal?: AbortSignal): Promise<Response> {
+  if (isQuotaBlocked()) throw new Error("quota");
   let lastStatus = 0;
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
     try {
-      const res = await proxyFetch(url, signal, "background");
+      const res = await proxyFetch(url, signal);
       if (res.status === 400 || res.status === 403 || res.status === 404) {
         throw new Error(`reject ${res.status}`);
       }
       if (res.ok) return res;
       lastStatus = res.status;
       if (res.status === 429) {
-        // proxyFetch owns the provider-wide cooldown; do not create a second clock.
-        throw new Error("quota");
+        const text = await res.text().catch(() => "");
+        if (/daily (api )?request limit|daily limit exceeded/i.test(text)) {
+          markQuota(30 * 60_000);
+          throw new Error("quota");
+        }
       } else if (res.status < 500) {
         throw new Error(`http ${res.status}`);
       }
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
-      if (message === "quota") { recordGridFailure(err); throw err; }
       if (message.startsWith("reject") || message === "quota" || message.startsWith("http ")) throw err;
       lastErr = err;
     }
@@ -174,8 +161,6 @@ type HourlyBlock = {
   time?: string[];
   temperature_2m?: (number | null)[];
   precipitation?: (number | null)[];
-  rain?: (number | null)[];
-  showers?: (number | null)[];
   wind_speed_10m?: (number | null)[];
   wind_direction_10m?: (number | null)[];
   wind_u_component_10m?: (number | null)[];
@@ -229,13 +214,13 @@ function buildUrl(lats: number[], lons: number[], hours: number): string {
   url.searchParams.set("longitude", lons.join(","));
   url.searchParams.set(
     "hourly",
-    "temperature_2m,precipitation,rain,showers,snowfall,snow_depth,cloud_cover,wind_speed_10m,wind_direction_10m",
+    "temperature_2m,precipitation,snowfall,snow_depth,precipitation_probability,cloud_cover,cloud_cover_low,cloud_cover_mid,wind_speed_10m,wind_direction_10m,wind_u_component_10m,wind_v_component_10m,pressure_msl",
   );
   url.searchParams.set("timezone", "GMT");
-  url.searchParams.set("cell_selection", "nearest");
   url.searchParams.set("temperature_unit", "celsius");
   url.searchParams.set("wind_speed_unit", "kmh");
   url.searchParams.set("forecast_hours", String(hours));
+  url.searchParams.set("forecast_days", String(Math.min(16, Math.ceil(hours / 24) + 1)));
   return url.toString();
 }
 
@@ -299,8 +284,14 @@ function finiteOrNull(v: number | null | undefined): number | null {
 
 /** غيوم ماطرة: غطاء منخفض/متوسط، أو سماء مكتظة، أو احتمال مطر قريب. */
 function rainDeck(h: HourlyBlock, t: number, rain: number): number {
-  // Cloud cover is independent of precipitation; do not fabricate clouds from probability.
-  return Math.max(0, Math.min(100, finiteOrNull(h.cloud_cover?.[t]) ?? 0));
+  const low = finiteOrNull(h.cloud_cover_low?.[t]);
+  const mid = finiteOrNull(h.cloud_cover_mid?.[t]);
+  const total = finiteOrNull(h.cloud_cover?.[t]);
+  const pop = finiteOrNull(h.precipitation_probability?.[t]);
+  let deck = Math.max(low ?? 0, mid ?? 0, (total ?? 0) * 0.82);
+  if (pop != null && pop >= 45) deck = Math.max(deck, 58 + (pop - 45) * 0.6);
+  if (rain >= 0.08) deck = Math.max(deck, 74);
+  return Math.max(0, Math.min(100, deck));
 }
 
 function applyBlock(cells: Cell[][], index: number, block: PointResponse | undefined, hours: number) {
@@ -313,11 +304,7 @@ function applyBlock(cells: Cell[][], index: number, block: PointResponse | undef
     const dir = h.wind_direction_10m?.[t];
     if (temp == null || !Number.isFinite(temp)) continue;
     const rainRaw = h.precipitation?.[t];
-    const liquid = finiteOrNull(h.rain?.[t]);
-    const showers = finiteOrNull(h.showers?.[t]);
-    const snowEquivalent = Math.max(0, h.snowfall?.[t] ?? 0) / 0.7;
-    const rain = liquid != null && showers != null ? Math.max(0, liquid + showers)
-      : Math.max(0, (rainRaw ?? 0) - snowEquivalent);
+    const rain = rainRaw == null || !Number.isFinite(rainRaw) ? 0 : rainRaw;
     const snowRaw = h.snowfall?.[t];
     const snow = snowRaw == null || !Number.isFinite(snowRaw) ? 0 : Math.max(0, snowRaw);
     const depthRaw = h.snow_depth?.[t];
@@ -399,22 +386,87 @@ function pack(req: GridRequest, cells: Cell[][], times: number[], id: string): G
     snowDepth,
     ok,
   };
-  // Missing model cells remain transparent; never spread neighbouring precipitation into them.
+  fillGaps(grid, !!req.dryRain);
   return grid;
 }
 
-// الحصة تُحسب بعدد المواقع لا بعدد الطلبات؛ دفعات أكبر = زمن أقل بالتكلفة نفسها.
-const BATCH = 50;
+/** ثقوب صغيرة فقط. الشبكة العالمية لا تسحب حرارة صفّ بعيد حتى لا يغطي هواء الشمال الجزيرة. */
+function fillGaps(grid: GridField, dryRain = false) {
+  if (grid.full) {
+    fillSameRow(grid, dryRain);
+    return;
+  }
+  const passes = 2;
+  const { cols, rows, hours } = grid;
+  for (let pass = 0; pass < passes; pass++) {
+    const filled = smear(grid, cols, rows, hours, dryRain, false);
+    if (!filled) break;
+  }
+}
+
+function fillSameRow(grid: GridField, dryRain: boolean) {
+  const { cols, rows, hours } = grid;
+  for (let pass = 0; pass < 2; pass++) {
+    const filled = smear(grid, cols, rows, hours, dryRain, true);
+    if (!filled) break;
+  }
+}
+
+function smear(grid: GridField, cols: number, rows: number, hours: number, dryRain: boolean, rowOnly: boolean): boolean {
+  const nextOk = grid.ok.slice();
+  const fields = [grid.temp, grid.rain, grid.u, grid.v, grid.spd, grid.msl, grid.cloud, grid.snow, grid.snowDepth];
+  const next = fields.map((f) => f.slice());
+  let changed = false;
+  for (let h = 0; h < hours; h++) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = (h * rows + r) * cols + c;
+        if (grid.ok[i]) continue;
+        let count = 0;
+        const acc = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+        for (let dr = rowOnly ? 0 : -1; dr <= (rowOnly ? 0 : 1); dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const rr = r + dr;
+            if (rr < 0 || rr >= rows) continue;
+            let cc = c + dc;
+            if (grid.full) cc = (cc + cols) % cols;
+            else if (cc < 0 || cc >= cols) continue;
+            const j = (h * rows + rr) * cols + cc;
+            if (!grid.ok[j]) continue;
+            count++;
+            for (let f = 0; f < 9; f++) acc[f] += fields[f]![j]!;
+          }
+        }
+        if (!count) continue;
+        changed = true;
+        nextOk[i] = 1;
+        for (let f = 0; f < 9; f++) {
+          const keepDry = dryRain && (f === 1 || f === 7 || f === 8);
+          next[f]![i] = keepDry ? 0 : acc[f]! / count;
+        }
+      }
+    }
+  }
+  if (!changed) return false;
+  grid.ok = nextOk;
+  grid.temp = next[0]!;
+  grid.rain = next[1]!;
+  grid.u = next[2]!;
+  grid.v = next[3]!;
+  grid.spd = next[4]!;
+  grid.msl = next[5]!;
+  grid.cloud = next[6]!;
+  grid.snow = next[7]!;
+  grid.snowDepth = next[8]!;
+  return true;
+}
+
+const BATCH = 80;
 
 function assignBlocks(cells: Cell[][], batch: Point[], json: PointResponse[], hours: number, times: { list: number[] }) {
   const used = new Set<number>();
   json.forEach((block, idx) => {
-    // Multi-location responses preserve request order, including locations snapped to the same model cell.
-    if (json.length === batch.length) {
-      if (!times.list.length && block.hourly?.time?.length) times.list = block.hourly.time.slice(0, hours).map(parseGmt);
-      applyBlock(cells, batch[idx]!.i, block, hours);
-      return;
-    }
     const lat = block?.latitude;
     const lon = block?.longitude;
     let point: Point | undefined;
@@ -441,41 +493,43 @@ function assignBlocks(cells: Cell[][], batch: Point[], json: PointResponse[], ho
   });
 }
 
+/** يرفض الشبكة فقط إذا انقلبت: الشمال أدفأ من مسقط. بلا طلب إضافي حتى لا يعلّق الجلب. */
+function assertShape(grid: GridField): void {
+  if (!grid.full || grid.lonSpan < 300 || grid.rows < 10) return;
+  const muscat = sampleGrid(grid, 23.588, 58.383, 0)?.temp;
+  const north = sampleGrid(grid, 60.17, 24.94, 0)?.temp;
+  if (muscat == null || north == null) return;
+  if (north > muscat + 8) throw new Error("thin");
+}
+
 async function fetchGridUncached(req: GridRequest, key: string): Promise<GridField> {
   const points = makePoints(req);
   const cells = emptyCells(points.length, req.hours);
   const batches: Point[][] = [];
   for (let i = 0; i < points.length; i += BATCH) batches.push(points.slice(i, i + BATCH));
   let done = 0;
-  let quotaHit = false;
   const times = { list: [] as number[] };
 
   const consume = async (batch: Point[], count: boolean) => {
-    if (quotaHit) {
-      if (count) {
-        done++;
-        req.onProgress?.(done, batches.length);
-      }
-      return;
-    }
     try {
       const json = await fetchBatch(batch, req.hours, req.signal);
       assignBlocks(cells, batch, json, req.hours, times);
     } catch (err) {
       if (req.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
       const message = err instanceof Error ? err.message : "";
-      if (message === "quota") {
-        // نحتفظ بما وصل من دفعات سابقة ونوقف الباقي بدل إسقاط الشبكة كلها.
-        quotaHit = true;
-        recordGridFailure(err);
-        return;
-      }
-      recordGridFailure(err);
-      if (message.startsWith("reject") && batch.length > 8) {
+      const oversized =
+        message !== "quota" &&
+        batch.length > 8 &&
+        (message.startsWith("reject") ||
+          message.startsWith("http") ||
+          message.includes("timeout") ||
+          message.includes("fail") ||
+          message.includes("JSON") ||
+          message.includes("json"));
+      if (oversized) {
         const mid = Math.floor(batch.length / 2);
         await consume(batch.slice(0, mid), false);
         await consume(batch.slice(mid), false);
-        return;
       }
     } finally {
       if (count) {
@@ -485,23 +539,18 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
     }
   };
 
-  await pool(batches, 3, (batch) => consume(batch, true), req.signal);
+  await pool(batches, 6, (batch) => consume(batch, true), req.signal);
 
   const missing = points.filter((p) => !cells[p.i]?.[0]?.ok);
-  if (!quotaHit && missing.length && missing.length < points.length && fillRatio(cells) < 0.35) {
+  if (missing.length && missing.length < points.length) {
     const again: Point[][] = [];
-    for (let i = 0; i < missing.length; i += BATCH) again.push(missing.slice(i, i + BATCH));
-    await pool(again, 3, (batch) => consume(batch, false), req.signal);
+    for (let i = 0; i < missing.length; i += 40) again.push(missing.slice(i, i + 40));
+    await pool(again, 6, (batch) => consume(batch, false), req.signal);
   }
 
   if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
   const ratio = fillRatio(cells);
-  if ((quotaHit && ratio < 0.85) || (req.full ? ratio < 0.35 : ratio < 0.28)) {
-    // ضعف البيانات بسبب حدّ الاستخدام يُبلَّغ كحدّ استخدام لا كبيانات ناقصة.
-    const failure = new Error(quotaHit ? "quota" : "thin");
-    recordGridFailure(failure);
-    throw failure;
-  }
+  if (req.full ? ratio < 0.35 : ratio < 0.28) throw new Error("thin");
   if (!times.list.length || times.list.some((t) => !Number.isFinite(t))) {
     const start = Date.now();
     times.list = Array.from({ length: req.hours }, (_, i) => start + i * 3_600_000);
@@ -511,7 +560,7 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
     times.list.push(prev + 3_600_000);
   }
   const grid = pack(req, cells, times.list.slice(0, req.hours), key);
-
+  assertShape(grid);
   return grid;
 }
 
@@ -523,29 +572,16 @@ export function fetchGrid(req: GridRequest): Promise<GridField> {
     return Promise.resolve(hit);
   }
   const pending = inflight.get(key);
-  if (pending && !inflightSignals.get(key)?.aborted) return pending;
-  const promise = readGrid(key).then(async cached => {
-    if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
-    if (cached) return cached;
-    try {
-      return await fetchGridUncached(req, key);
-    } catch (err) {
-      if (req.signal?.aborted) throw err;
-      // Show last successful data when the provider is rate limited or offline.
-      const stale = (await readGrid(key, true)) ?? (await readGrid(gridKey(req, 1), true)) ?? (await readGrid(gridKey(req, 2), true));
-      if (stale) return stale;
-      throw err;
-    }
-  })
+  if (pending) return pending;
+  const promise = fetchGridUncached(req, key)
     .then((grid) => {
-      if (!req.signal?.aborted) { touch(lru, key, grid); void saveGrid(grid); }
+      if (!req.signal?.aborted) touch(lru, key, grid);
       return grid;
     })
     .finally(() => {
-      if (inflight.get(key) === promise) { inflight.delete(key); inflightSignals.delete(key); }
+      inflight.delete(key);
     });
   inflight.set(key, promise);
-  inflightSignals.set(key, req.signal);
   return promise;
 }
 

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { clearBundles, enrichWeather, lastForecastFailure, loadWeather, readCacheFile, writeCacheFile } from "@/weather/api";
+import { clearBundles, loadWeather, readCacheFile, writeCacheFile } from "@/weather/api";
+import { estimateBundle } from "@/weather/estimate";
 import {
   CACHE_TTL_MS,
   MUSCAT,
@@ -22,7 +23,6 @@ type WeatherState = {
   bundle: WeatherBundle | null;
   stale: boolean;
   estimated: boolean;
-  connectionIssue: string | null;
   loading: boolean;
   error: boolean;
   notice: string | null;
@@ -114,7 +114,7 @@ function saveHere(place: Place | null) {
 
 function persistPlaces(places: Place[], activeId: string) {
   const file = readCacheFile();
-  const entries: Record<string, CacheEntry> = {...file.entries};
+  const entries: Record<string, CacheEntry> = {};
   for (const place of places) {
     const entry = file.entries[place.id];
     if (entry) entries[place.id] = entry;
@@ -140,7 +140,6 @@ export const useWeather = create<WeatherState>((set, get) => ({
   bundle: null,
   stale: false,
   estimated: false,
-  connectionIssue: null,
   loading: false,
   error: false,
   notice: null,
@@ -157,10 +156,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
       ? file.activeId
       : (places.find((p) => p.primary)?.id ?? places[0]?.id ?? "");
     let peek: Place | null = null;
-    if (here && file.activeId === here.id && !places.some((p) => p.id === here.id)) {
-      peek = here;
-      activeId = here.id;
-    } else if (!places.length && here) {
+    if (!places.length && here) {
       peek = here;
       activeId = here.id;
     } else if (!places.length) {
@@ -173,32 +169,29 @@ export const useWeather = create<WeatherState>((set, get) => ({
   loadActive: async (force, signal) => {
     const peek = get().peek;
     const place =
-      (peek && peek.id === get().activeId ? peek : undefined) ?? get().places.find((p) => p.id === get().activeId);
+      get().places.find((p) => p.id === get().activeId) ?? (peek && peek.id === get().activeId ? peek : undefined);
     if (!place) return;
     const cached = readCacheFile().entries[place.id];
     const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS && !force;
     if (fresh && cached) {
-      set({ bundle: cached.bundle, stale: false, estimated: false, loading: false, error: false, connectionIssue: null });
+      set({ bundle: cached.bundle, stale: false, estimated: false, loading: false, error: false });
       return;
     }
     const current = get().bundle;
     if (!current || current.placeId !== place.id) {
-      set({ bundle: cached?.bundle ?? null, estimated: false, stale: !!cached, loading: true, error: false, connectionIssue: null });
+      set({ bundle: estimateBundle(place), estimated: true, stale: true, loading: true, error: false });
     } else {
-      set({ loading: true, error: false, connectionIssue: null });
+      set({ loading: true, error: false });
     }
     try {
       const res = await loadWeather(place, { force, signal });
       if (signal?.aborted) return;
       if (get().activeId !== place.id) return;
-      set({ bundle: res.bundle, stale: res.stale, estimated: res.estimated, loading: false, error: res.stale, connectionIssue: res.stale ? lastForecastFailure() || "connection" : null });
-      if (!res.stale) void enrichWeather(place, res.bundle, signal).then(next => {
-        if (!signal?.aborted && get().activeId === place.id && get().bundle?.fetchedAt === res.bundle.fetchedAt) set({bundle:next});
-      }).catch(() => undefined);
+      set({ bundle: res.bundle, stale: res.stale, estimated: res.estimated, loading: false, error: false });
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
       if (get().activeId !== place.id) return;
-      set({ loading: false, error: true, connectionIssue: lastForecastFailure() || "connection" });
+      set({ loading: false, error: !get().bundle });
     }
   },
   setActive: (id) => {
@@ -215,9 +208,15 @@ export const useWeather = create<WeatherState>((set, get) => ({
     set({ peek: place, activeId: place.id, revision: get().revision + 1 });
   },
   locatePlace: (place) => {
-    const same = get().activeId === place.id;
-    set({ peek: place, activeId: place.id, revision: same ? get().revision : get().revision + 1 });
-    persistPlaces(get().places, place.id);
+    const saved = get().places.find((p) => sameSpot(p, place));
+    if (saved) {
+      get().setActive(saved.id);
+      return;
+    }
+    const places = get().places.filter((p) => !p.primary);
+    const keep = places[0]?.id ?? "";
+    set({ places, peek: place, activeId: place.id, revision: get().revision + 1 });
+    persistPlaces(places, keep);
   },
   setHere: (place) => {
     saveHere(place);
@@ -299,7 +298,6 @@ export const useWeather = create<WeatherState>((set, get) => ({
 }));
 
 export function activePlace(state: Pick<WeatherState, "places" | "activeId"> & Partial<Pick<WeatherState, "peek">>): Place {
-  if (state.peek && state.peek.id === state.activeId) return state.peek;
   const saved = state.places.find((p) => p.id === state.activeId);
   if (saved) return saved;
   if (state.peek && state.peek.id === state.activeId) return state.peek;

@@ -424,6 +424,11 @@ html:not(.light) .pop-chance {
   background: #0c2233;
 }
 
+.leaflet-container .leaflet-tile {
+  max-width: none !important;
+  max-height: none !important;
+}
+
 .map-tools {
   position: absolute;
   top: 50%;
