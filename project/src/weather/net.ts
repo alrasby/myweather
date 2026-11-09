@@ -59,11 +59,11 @@ const foreground = requestLane(2),
   background = requestLane(2);
 const cooldown = new Map<string, number>();
 // Keep only transport/status diagnostics; never store request URLs or coordinates.
-export type ForecastConnectionDiagnostic = { source: "native" | "web" | "local"; status: number; at: number; retryAfterMs?: number };
+export type ForecastConnectionDiagnostic = { source: "native" | "web" | "local"; status: number; at: number; retryAfterMs?: number; providerReason?: string };
 let lastForecastDiagnostic: ForecastConnectionDiagnostic | null = null;
 export function getForecastConnectionDiagnostic(): ForecastConnectionDiagnostic | null { return lastForecastDiagnostic; }
-function noteForecast(source: ForecastConnectionDiagnostic["source"], status: number, retryAfterMs?: number): void {
-  lastForecastDiagnostic = { source, status, at: Date.now(), retryAfterMs };
+function noteForecast(source: ForecastConnectionDiagnostic["source"], status: number, retryAfterMs?: number, providerReason?: string): void {
+  lastForecastDiagnostic = { source, status, at: Date.now(), retryAfterMs, providerReason };
 }
 // Bound map-grid traffic independently so it cannot exhaust the shared forecast API.
 const backgroundRequests: number[] = [];
@@ -183,7 +183,7 @@ export async function proxyFetch(
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) {
-        if (isForecast) noteForecast("local", 429, (cooldown.get(cooldownKey) ?? 0) - Date.now());
+        if (isForecast) noteForecast("local", 429, (cooldown.get(cooldownKey) ?? 0) - Date.now(), lastForecastDiagnostic?.providerReason);
         throw new NetworkFailure(429);
       }
       if (priority === "background") {
@@ -201,7 +201,18 @@ export async function proxyFetch(
           // A real provider Retry-After is respected (up to 30 minutes).
           const delay = Math.max(5000, Math.min(Number.isFinite(retryMs) ? retryMs : 60000, 1800000));
           cooldown.set(cooldownKey, Date.now() + delay);
-          if (isForecast) noteForecast(lastForecastDiagnostic?.source === "native" ? "native" : "web", 429, delay);
+          if (isForecast) {
+            // Inspect only a bounded provider error body; never record URL or coordinates.
+            let reason = "unknown";
+            try {
+              const body = (await response.clone().text()).slice(0, 2048);
+              if (/daily (?:api )?request limit|daily limit exceeded/i.test(body)) reason = "daily-limit";
+              else if (/hourly (?:api )?request limit|hourly limit exceeded/i.test(body)) reason = "hourly-limit";
+              else if (/minute|per.minute/i.test(body)) reason = "minute-limit";
+              else if (/rate.limit|too many requests/i.test(body)) reason = "rate-limit";
+            } catch { /* diagnostic only */ }
+            noteForecast(lastForecastDiagnostic?.source === "native" ? "native" : "web", 429, delay, reason);
+          }
           throw new NetworkFailure(429);
         }
         if (response.status >= 500 && attempt === 0) continue;
