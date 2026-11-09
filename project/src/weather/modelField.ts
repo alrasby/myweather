@@ -294,6 +294,7 @@ export class ModelField {
   private seq = 0;
   private orderKey = "";
   private visible = false;
+  private lastSyncAt = 0;
   private ready: Promise<void> = Promise.resolve();
 
   attach(L: unknown, map: LeafletMap) {
@@ -338,6 +339,10 @@ export class ModelField {
 
   sync(ms: number) {
     if (!this.visible) return;
+    // Forecast tile management does not need to run at the 60fps WebGL cadence.
+    const now = performance.now();
+    if (now - this.lastSyncAt < 50) return;
+    this.lastSyncAt = now;
     installSpatialFetch();
     void this.ready.then(() => {
       if (!this.visible || !this.adapter || !this.map || !this.times.length) return;
@@ -460,7 +465,8 @@ export class ModelField {
         refresh();
       });
       layer.on("tileload", (ev) => {
-        if (!alive() || !tileHasInk(ev?.tile) || frame.ink) return;
+        // Canvas readback is expensive on Android; only inspect until the first nonempty tile.
+        if (!alive() || frame.ink || !tileHasInk(ev?.tile)) return;
         frame.ink = true;
         this.loading.delete(step);
         window.clearTimeout(wait);
