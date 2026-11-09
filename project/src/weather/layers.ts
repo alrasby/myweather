@@ -55,7 +55,7 @@ export const LAYERS: readonly LayerDef[] = [
     range: [0, 16],
     alpha: 0.9,
     stops: [
-      { v: 0, hex: "#8ed4f8" },
+      { v: 0, hex: "#5eb6f2" },
       { v: 0.4, hex: "#3aa6e4" },
       { v: 1.2, hex: "#2fce8a" },
       { v: 3, hex: "#c6e24a" },

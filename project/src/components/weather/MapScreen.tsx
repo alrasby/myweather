@@ -1,11 +1,12 @@
 import { Play, Sunrise, Sunset, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { LayerGroup, Map as LeafletMap } from "leaflet";
+import type { LayerGroup, Map as LeafletMap, TileLayer } from "leaflet";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { loadWeather, placeFromCoords } from "@/weather/api";
 import { FieldEngine, type FrameInfo } from "@/weather/glField";
-import { covers, gridFailureReason, fetchGrid } from "@/weather/grid";
-import { backgroundCooldownMs } from "@/weather/net";
+import { covers, fetchGrid } from "@/weather/grid";
+import { ModelField } from "@/weather/modelField";
+import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
 import { compassFrom } from "@/weather/heading";
@@ -17,10 +18,37 @@ import { loadLiveCyclones, type LiveCyclone } from "@/weather/cyclones";
 import { loadStormsOnce } from "@/weather/storms";
 import { stormGradeKey, type PaintedSystem } from "@/weather/synoptic";
 import { activePlace, useWeather } from "@/weather/store";
-import type { FieldSample, GridField, Lang, Place, ShadeKind } from "@/weather/types";
+import type { FieldSample, GridField, Lang, Place, ShadeKind, WeatherBundle } from "@/weather/types";
 import "leaflet/dist/leaflet.css";
 
 type LeafletNs = typeof import("leaflet");
+
+function coverTileGaps(L: LeafletNs) {
+  const proto = L.GridLayer.prototype as unknown as {
+    __gap?: boolean;
+    _initTile: (tile: HTMLElement) => void;
+  };
+  if (proto.__gap) return;
+  proto.__gap = true;
+  const orig = proto._initTile;
+  proto._initTile = function (this: { getTileSize: () => { x: number; y: number } }, tile: HTMLElement) {
+    orig.call(this, tile);
+    const size = this.getTileSize();
+    if (tile.tagName === "CANVAS") {
+      // بلاطة المطر شفافة: أي تداخل يضاعف البياض فيصير خطاً. المقاس مطابق تماماً.
+      tile.style.width = `${size.x}px`;
+      tile.style.height = `${size.y}px`;
+      tile.style.marginLeft = "0";
+      tile.style.marginTop = "0";
+      tile.style.left = "0";
+      tile.style.top = "0";
+      tile.style.clipPath = "none";
+      return;
+    }
+    tile.style.width = `${size.x + 1}px`;
+    tile.style.height = `${size.y + 1}px`;
+  };
+}
 
 type SystemCard = {
   kind: PaintedSystem["kind"];
@@ -58,6 +86,25 @@ function minZoomFor(el: HTMLElement): number {
   return Math.min(5, Math.max(2, z));
 }
 
+type FetchBox = { south: number; north: number; west: number; lonSpan: number };
+
+function wrapLon(d: number): number {
+  let x = d;
+  while (x > 180) x -= 360;
+  while (x < -180) x += 360;
+  return x;
+}
+
+/** نفس الإطار تقريبًا: لا نلغي طلبًا قائمًا فيُعلّق التحميل على الشبكة الخشنة. */
+function sameFetch(a: FetchBox | null, b: FetchBox | null): boolean {
+  if (!a || !b) return false;
+  const span = Math.max(a.lonSpan, b.lonSpan, 1);
+  if (Math.abs(a.lonSpan - b.lonSpan) / span > 0.18) return false;
+  if (Math.abs((a.south + a.north) / 2 - (b.south + b.north) / 2) > span * 0.2) return false;
+  if (Math.abs(wrapLon(a.west + a.lonSpan / 2 - (b.west + b.lonSpan / 2))) > span * 0.2) return false;
+  return true;
+}
+
 export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const places = useWeather((s) => s.places);
   const activeId = useWeather((s) => s.activeId);
@@ -67,6 +114,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const peek = useWeather((s) => s.peek);
   const place = activePlace({ places, activeId, peek });
   const hostRef = useRef<HTMLDivElement>(null);
+  const imageryRef = useRef<TileLayer | null>(null);
+  const modelRef = useRef<ModelField | null>(null);
+  if (!modelRef.current) modelRef.current = new ModelField();
   const engineRef = useRef<FieldEngine | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<LeafletNs | null>(null);
@@ -74,6 +124,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const prefsRef = useRef(prefs);
   const langRef = useRef(lang);
   const tzRef = useRef(bundle?.timezone ?? "UTC");
+  const bundleRef = useRef(bundle);
   const kindRef = useRef<ShadeKind>(0);
   const dragRef = useRef(false);
   const detailRef = useRef<GridField | null>(null);
@@ -88,9 +139,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const [kind, setKind] = useState<ShadeKind>(prefs.mapLayer);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [gridFailed, setGridFailed] = useState(false);
-  const [gridErrorKind, setGridErrorKind] = useState("unknown");
-  const [gridRetry, setGridRetry] = useState(0);
   const [pins, setPins] = useState<Array<LiveCyclone & { x: number; y: number }>>([]);
   const [cycloneMsg, setCycloneMsg] = useState<string | null>(null);
   const cycloneDismissed = useRef(false);
@@ -100,6 +148,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   prefsRef.current = prefs;
   langRef.current = lang;
   tzRef.current = bundle?.timezone ?? tzRef.current;
+  bundleRef.current = bundle;
   kindRef.current = kind;
 
   useEffect(() => {
@@ -116,15 +165,31 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         timeRef.current.textContent = formatClock(info.timeMs, tzRef.current, language);
       }
       if (valueRef.current) {
-        valueRef.current.textContent = info.sample
-          ? sampleText(info.sample, kindRef.current, current, language)
-          : "—";
+        if (kindRef.current === 2) {
+          const center = mapRef.current?.getCenter();
+          const near = center
+            ? nearbyRain(placeRef.current, bundleRef.current, center.lat, center.lng, info.timeMs)
+            : null;
+          const gridMm = info.sample?.rain ?? 0;
+          if (near != null && (info.estimated || (gridMm < 0.05 && near >= 0.05))) {
+            valueRef.current.textContent = `${formatNumber(near, language, 1)} mm`;
+          } else if (info.estimated) {
+            valueRef.current.textContent = "—";
+          } else {
+            valueRef.current.textContent = info.sample ? sampleText(info.sample, 2, current, language) : "—";
+          }
+        } else {
+          valueRef.current.textContent = info.sample
+            ? sampleText(info.sample, kindRef.current, current, language)
+            : "—";
+        }
       }
       const grid = engine.activeGrid();
       if (sliderRef.current) {
         if (grid) sliderRef.current.max = String(Math.max(1, grid.hours - 1));
         if (!dragRef.current) sliderRef.current.value = String(info.hour);
       }
+      if (kindRef.current === 2) modelRef.current?.sync(info.timeMs);
     };
     engine.onFrame = paint;
     const onVis = () => engine.setPaused(document.hidden || !el.offsetParent);
@@ -134,6 +199,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const L = await loadLeaflet();
         if (dead) return;
         leafletRef.current = L;
+        coverTileGaps(L);
         map = L.map(el, {
           zoomControl: false,
           attributionControl: false,
@@ -169,13 +235,22 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           }
         };
         map.on("move zoom", lockPoles);
-        L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
           maxZoom: 16,
         }).addTo(map);
+        imageryRef.current = imagery;
+        const labels = map.createPane("wx-labels");
+        labels.style.zIndex = "420";
+        labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels" },
         ).addTo(map);
+        modelRef.current?.attach(L, map);
+        if (modelRef.current) {
+          modelRef.current.onLive = () => engine.setModelCover(true);
+          modelRef.current.onMiss = () => engine.setModelCover(false);
+        }
         map.on("click", (event) => {
           window.clearTimeout(clickTimer.current);
           const hit = engine.hitTest(event.latlng.lat, event.latlng.lng);
@@ -230,7 +305,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
 
   useEffect(() => {
     engineRef.current?.setKind(kind);
-  }, [kind]);
+    imageryRef.current?.setOpacity(1);
+    modelRef.current?.setVisible(kind === 2);
+    if (kind !== 2) engineRef.current?.setModelCover(false);
+  }, [kind, ready]);
 
   useEffect(() => {
     setKind(prefs.mapLayer);
@@ -239,7 +317,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine || !ready) return;
-    const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 650 : 420;
+    const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
     engine.setParticleCount(n);
     engine.setSaver(prefs.dataSaver);
   }, [prefs.dataSaver, prefs.particles, ready]);
@@ -251,21 +329,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     let dead = false;
     let timer = 0;
     let detailGen = 0;
-    let worldStarted = false;
+    let worldReady = false;
     const worldAc = new AbortController();
     let detailAc: AbortController | null = null;
+    let pendingDetail: FetchBox | null = null;
     detailRef.current = null;
     engine.setDetail(null);
-    engine.setRainView(null);
-    engine.setRainWorld(null);
-    engine.setGlobal(null);
-    const hours = prefs.mapHours;
-    let worldFinished = false;
-    let worldSucceeded = false;
+    const hours = prefs.mapHours === 72 ? 48 : prefs.mapHours;
     const saver = prefs.dataSaver;
     setProgress(0.08);
-    setGridFailed(false);
-    const world = { south: -85.0511, north: 85.0511, west: -180, lonSpan: 360, hours, full: true as const };
+    const world = { south: -80, north: 84, west: -180, lonSpan: 360, hours, full: true as const };
+    engine.setGlobal(estimateGrid({ ...world, cols: saver ? 12 : 24, rows: saver ? 6 : 12 }));
 
     const viewSpan = () => {
       const size = map.getSize();
@@ -289,36 +363,48 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       });
 
     const pullDetail = () => {
-      if (dead) return;
-      // Viewport data is the primary source; never gate it behind a global fetch.
+      if (!worldReady || saver || dead) return;
       const view = viewSpan();
-      if (view.span > 120 || view.span < 0.05) {
-        startWorld();
+      if (view.span > 165) {
         detailGen += 1;
         detailAc?.abort();
         detailAc = null;
+        pendingDetail = null;
         detailRef.current = null;
         engine.setDetail(null);
-        engine.setRainView(null);
         return;
       }
+      if (view.span < 1.2) return;
       const span = view.span;
-      // هامش أوسع: التحريك داخل نصف الشاشة لا يطلب بيانات جديدة.
-      const padLon = Math.max(0.15, span * 0.45);
-      const padLat = Math.max(0.15, (view.north - view.south) * 0.45);
+      const padLon = Math.max(1.5, span * 0.35);
+      const padLat = Math.max(1.2, (view.north - view.south) * 0.35);
       const south = Math.max(-85, view.south - padLat);
       const north = Math.min(85, view.north + padLat);
       const west = view.west - padLon;
-      const lonSpan = Math.max(0.2, view.east + padLon - west);
+      const lonSpan = Math.max(6, view.east + padLon - west);
+      const nextBox: FetchBox = { south, north, west, lonSpan };
+      if (sameFetch(pendingDetail, nextBox)) return;
       const loaded = detailRef.current;
-      if (loaded && covers(loaded, view) && span > loaded.lonSpan * 0.4) return;
+      if (loaded && covers(loaded, view)) {
+        const have = loaded.lonSpan / Math.max(1, loaded.cols);
+        const want = Math.max(0.55, Math.min(2.2, span / 42));
+        if (have <= want * 1.35) return;
+      }
       const mine = ++detailGen;
+      pendingDetail = nextBox;
       detailAc?.abort();
       detailAc = new AbortController();
-      // الحصة بعدد المواقع: ≤ 256 نقطة للمنطقة الظاهرة (≤ 64 في وضع التوفير).
-      const maxSide = saver ? 8 : 16;
-      const cols = maxSide;
-      const rows = Math.max(8, Math.min(maxSide, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
+      const latH = Math.max(1, north - south);
+      const area = Math.max(6, lonSpan * latH);
+      let cell = Math.sqrt(area / 1400);
+      cell = Math.max(0.55, Math.min(2.2, cell));
+      let cols = Math.max(18, Math.min(56, Math.round(lonSpan / cell)));
+      let rows = Math.max(14, Math.min(36, Math.round(latH / cell)));
+      while (cols * rows > 1400 && (cols > 18 || rows > 14)) {
+        if (cols >= rows && cols > 18) cols -= 1;
+        else if (rows > 14) rows -= 1;
+        else break;
+      }
       void fetchGrid({
         south,
         north,
@@ -333,63 +419,44 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         .then((grid) => {
           if (dead || mine !== detailGen) return;
           const now = viewSpan();
-          if (now.span > 120 || !covers(grid, now)) return;
+          if (now.span > 165 || !covers(grid, now)) return;
           detailRef.current = grid;
           engine.setDetail(grid);
-          engine.setRainView(grid);
-          setGridFailed(false);
-          setGridErrorKind("unknown");
-          setProgress(1);
         })
         .catch(() => {
-          if (!dead && mine === detailGen) {
-            // A failed local request must not trigger a second global request storm.
-            if (!worldStarted && viewSpan().span > 120) startWorld();
-            if (!worldSucceeded && !detailRef.current) {
-              setGridErrorKind(gridFailureReason());
-              setGridFailed(true);
-              setProgress(1);
-            }
-          }
+          if (mine === detailGen) pendingDetail = null;
         });
     };
     const consider = () => {
       window.clearTimeout(timer);
-      if (viewSpan().span > 120 && !worldStarted) startWorld();
       timer = window.setTimeout(pullDetail, 320);
     };
     map.on("moveend", consider);
     map.on("zoomend", consider);
-    const startWorld = () => {
-      if (worldStarted || dead) return;
-      worldStarted = true;
-      void (async () => {
+    void (async () => {
       try {
-        // A shared global field complements independently fetched viewport detail.
-        const globalGrid = await loadWorld(saver ? 12 : 18, saver ? 6 : 9, 0.05, 0.98);
+        const quick = await loadWorld(saver ? 12 : 24, saver ? 6 : 12, 0.05, 0.32);
         if (dead) return;
-        engine.setGlobal(globalGrid);
-        engine.setRainWorld(globalGrid);
-        worldSucceeded = true;
-        setGridFailed(false);
-        setGridErrorKind("unknown");
-        worldFinished = true;
-        setProgress(1);
+        engine.setGlobal(quick);
+        worldReady = true;
+        if (saver) {
+          setProgress(1);
+          return;
+        }
         consider();
+        const fine = await loadWorld(48, 24, 0.32, 0.98);
+        if (dead) return;
+        engine.setGlobal(fine);
+        setProgress(1);
       } catch {
         if (!dead && !worldAc.signal.aborted) {
-          worldFinished = true;
-          consider();
-          // Wait for viewport fallback before declaring all weather layers unavailable.
-          setProgress(0.9);
+          if (!worldReady) {
+            engine.setGlobal(estimateGrid({ ...world, cols: saver ? 12 : 24, rows: saver ? 6 : 12 }));
+          }
+          setProgress(1);
         }
       }
     })();
-    };
-    // Only fetch the costly global field for a genuinely global viewport.
-    // Local navigation must not spend the quota on an unseen world grid.
-    if (viewSpan().span > 120) startWorld();
-    consider();
     return () => {
       dead = true;
       worldAc.abort();
@@ -398,15 +465,143 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       map.off("moveend", consider);
       map.off("zoomend", consider);
     };
-  }, [ready, prefs.mapHours, prefs.dataSaver, gridRetry]);
+  }, [ready, prefs.mapHours, prefs.dataSaver]);
 
-  // عند حدّ الاستخدام: إعادة تلقائية بعد انتهاء المهلة بدل انتظار الضغط على الزر.
   useEffect(() => {
-    if (!gridFailed || gridErrorKind !== "quota") return;
-    const wait = Math.min(15 * 60_000, Math.max(8_000, backgroundCooldownMs() + 1_000));
-    const id = window.setTimeout(() => setGridRetry((n) => n + 1), wait);
-    return () => window.clearTimeout(id);
-  }, [gridFailed, gridErrorKind]);
+    const map = mapRef.current;
+    const engine = engineRef.current;
+    if (!map || !engine || !ready || kind !== 2) return;
+    let dead = false;
+    let timer = 0;
+    let viewGen = 0;
+    const worldAc = new AbortController();
+    let viewAc: AbortController | null = null;
+    let pendingView: FetchBox | null = null;
+    const hours = prefs.mapHours === 72 ? 48 : prefs.mapHours;
+    const saver = prefs.dataSaver;
+
+    const loadWorld = async () => {
+      const box = {
+        south: -80,
+        north: 84,
+        west: -180,
+        lonSpan: 360,
+        hours,
+        full: true as const,
+        dryRain: true,
+        signal: worldAc.signal,
+      };
+      try {
+        const quick = await fetchGrid({ ...box, cols: saver ? 18 : 36, rows: saver ? 10 : 18 });
+        if (!dead) engine.setRainWorld(quick);
+        if (saver || dead) return;
+        const fine = await fetchGrid({ ...box, cols: 72, rows: 36 });
+        if (!dead) engine.setRainWorld(fine);
+      } catch {
+        /* الطبقة تبقى على شبكة الحرارة المحمّلة، بلا فراغ */
+      }
+    };
+
+    const pullView = () => {
+      if (saver || dead) return;
+      const size = map.getSize();
+      const nw = map.containerPointToLatLng([0, 0]);
+      const se = map.containerPointToLatLng([size.x, size.y]);
+      let west = nw.lng;
+      let east = se.lng;
+      if (east < west) east += 360;
+      const span = Math.min(360, east - west);
+      if (span > 200) {
+        viewGen += 1;
+        viewAc?.abort();
+        viewAc = null;
+        pendingView = null;
+        engine.setRainView(null);
+        return;
+      }
+      if (span < 1.2) return;
+      const latSpan = Math.max(1, nw.lat - se.lat);
+      const wide = span > 36;
+      const padFrac = wide ? 0.12 : 0.28;
+      const padLon = Math.max(wide ? 1.4 : 1.8, span * padFrac);
+      const padLat = Math.max(wide ? 1 : 1.2, latSpan * padFrac);
+      const south = Math.max(-80, se.lat - padLat);
+      const north = Math.min(84, nw.lat + padLat);
+      const boxWest = west - padLon;
+      const lonSpan = Math.max(6, east + padLon - boxWest);
+      const nextBox: FetchBox = { south, north, west: boxWest, lonSpan };
+      if (sameFetch(pendingView, nextBox)) return;
+      const viewLat = Math.max(1, north - south);
+      const budget = 4200;
+      const area = Math.max(6, lonSpan * viewLat);
+      let cell = Math.sqrt(area / budget);
+      cell = Math.max(0.4, Math.min(1.7, cell));
+      let cols = Math.max(20, Math.min(84, Math.round(lonSpan / cell)));
+      let rows = Math.max(14, Math.min(60, Math.round(viewLat / cell)));
+      while (cols * rows > budget && (cols > 20 || rows > 14)) {
+        if (cols >= rows && cols > 20) cols -= 1;
+        else if (rows > 14) rows -= 1;
+        else break;
+      }
+      const midCols = Math.max(16, Math.round(cols * 0.62));
+      const midRows = Math.max(12, Math.round(rows * 0.62));
+      const mine = ++viewGen;
+      pendingView = nextBox;
+      viewAc?.abort();
+      viewAc = new AbortController();
+      const signal = viewAc.signal;
+      const box = {
+        south,
+        north,
+        west: boxWest,
+        lonSpan,
+        hours,
+        full: false as const,
+        dryRain: true,
+        signal,
+      };
+      const show = (grid: Awaited<ReturnType<typeof fetchGrid>>) => {
+        if (dead || signal.aborted || mine !== viewGen) return;
+        const sizeNow = map.getSize();
+        const nwNow = map.containerPointToLatLng([0, 0]);
+        const seNow = map.containerPointToLatLng([sizeNow.x, sizeNow.y]);
+        let westNow = nwNow.lng;
+        let eastNow = seNow.lng;
+        if (eastNow < westNow) eastNow += 360;
+        if (Math.min(360, eastNow - westNow) > 200) return;
+        if (!covers(grid, { south: seNow.lat, north: nwNow.lat, west: westNow, east: eastNow })) return;
+        engine.setRainView(grid);
+      };
+      void (async () => {
+        try {
+          const mid = await fetchGrid({ ...box, cols: midCols, rows: midRows });
+          show(mid);
+          const fine = await fetchGrid({ ...box, cols, rows });
+          show(fine);
+        } catch {
+          if (mine === viewGen) pendingView = null;
+        }
+      })();
+    };
+
+    void loadWorld();
+    pullView();
+    const consider = () => {
+      if (dead) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(pullView, 280);
+    };
+    map.on("moveend", consider);
+    map.on("zoomend", consider);
+    return () => {
+      dead = true;
+      worldAc.abort();
+      viewAc?.abort();
+      window.clearTimeout(timer);
+      map.off("moveend", consider);
+      map.off("zoomend", consider);
+    };
+  }, [ready, kind, prefs.mapHours, prefs.dataSaver]);
 
   useEffect(() => {
     engineRef.current?.setOverlay(lang, prefs.wind);
@@ -594,7 +789,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
 
   return (
     <div className="map-stage relative h-full min-h-0 w-full">
-      <div ref={hostRef} dir="ltr" className="map-host absolute inset-0" />
+      <div ref={hostRef} dir="ltr" className="map-host absolute inset-0" style={{ background: "#101820" }} />
       <div className="cyclone-layer" dir="ltr">
         {cycloneMsg ? (
           <button
@@ -665,15 +860,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         </button>
       </div>
       <div className="map-sheet pointer-events-none absolute inset-0 flex flex-col">
-        {gridFailed ? (
-          <div role="status" className="wx-card pointer-events-auto mx-3 px-3 py-2 text-sm text-fg"
-            style={{ marginTop: "calc(env(safe-area-inset-top, 0px) + 32px)" }}>
-            {lang === "ar" ? (gridErrorKind === "quota" ? "خدمة بيانات الطقس مقيّدة مؤقتًا. حاول لاحقًا." : gridErrorKind === "incomplete" ? "لم تُرجع خدمة الطقس بيانات كافية للخريطة." : gridErrorKind === "provider" ? "رفضت خدمة الطقس بعض الطلبات." : "تعذّر الاتصال بخدمة بيانات الطقس.") : (gridErrorKind === "quota" ? "Weather provider rate limit. Try later." : gridErrorKind === "incomplete" ? "Weather provider returned insufficient map data." : gridErrorKind === "provider" ? "Weather provider rejected requests." : "Could not reach weather data service.")}
-            <button type="button" className="mx-2 underline" onClick={() => setGridRetry(n => n + 1)}>
-              {lang === "ar" ? "إعادة المحاولة" : "Retry"}
-            </button>
-          </div>
-        ) : null}
         {progress < 1 ? (
           <div className="mx-3 mt-1 h-1 overflow-hidden rounded-full bg-line">
             <div className="h-full bg-accent" style={{ width: `${Math.round(progress * 100)}%` }} />
@@ -809,6 +995,29 @@ function CycloneGlyph() {
   );
 }
 
+function nearbyRain(
+  place: Place,
+  bundle: WeatherBundle | null,
+  lat: number,
+  lon: number,
+  timeMs: number,
+): number | null {
+  if (!bundle || bundle.placeId !== place.id || !bundle.hourly.length) return null;
+  const cos = Math.cos((place.lat * Math.PI) / 180);
+  if (Math.hypot(lat - place.lat, (lon - place.lon) * cos) > 2.2) return null;
+  let best = bundle.hourly[0]!;
+  let dist = Number.POSITIVE_INFINITY;
+  for (const hour of bundle.hourly) {
+    const gap = Math.abs(hour.t - timeMs);
+    if (gap < dist) {
+      dist = gap;
+      best = hour;
+    }
+  }
+  if (dist > 3 * 3_600_000) return null;
+  return best.precip;
+}
+
 function sampleText(
   sample: FieldSample | null,
   kind: ShadeKind,
@@ -822,9 +1031,9 @@ function sampleText(
   const snow = sample.snow ?? 0;
   if (snow >= 0.08) {
     const cm = formatNumber(snow, lang, 1);
-    return lang === "ar" ? `ثلج ${cm} سم/س` : `snow ${cm} cm/h`;
+    return lang === "ar" ? `ثلج ${cm} سم` : `snow ${cm} cm`;
   }
-  return lang === "ar" ? `${mm} مم/س` : `${mm} mm/h`;
+  return `${mm} mm`;
 }
 
 function tickText(value: number, kind: ShadeKind, prefs: { temp: "c" | "f"; wind: "kmh" | "ms" | "mph" | "kn" }, lang: Lang): string {

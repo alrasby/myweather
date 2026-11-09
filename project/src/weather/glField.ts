@@ -53,7 +53,7 @@ float normDelta(float d) {
 
 vec4 decode(vec4 raw) {
   if (u_bytes > 0.5) {
-    return vec4(raw.r * 100.0 - 40.0, raw.g * raw.g * 40.0, raw.b * 180.0, raw.a);
+    return vec4(raw.r * 100.0 - 40.0, raw.g * 40.0, raw.b * 180.0, raw.a);
   }
   return raw;
 }
@@ -76,8 +76,8 @@ void main() {
   }
   float edge = 1.0;
   if (u_full < 0.5) {
-    edge = smoothstep(-0.03, 0.0, v) * (1.0 - smoothstep(1.0, 1.03, v));
-    edge *= smoothstep(-0.002, 0.01, u) * (1.0 - smoothstep(0.99, 1.002, u));
+    edge = smoothstep(-0.03, 0.0, v) * smoothstep(1.03, 1.0, v);
+    edge *= smoothstep(-0.002, 0.01, u) * smoothstep(1.002, 0.99, u);
   }
   float uu = u_full > 0.5 ? u : clamp(u, 0.0, 1.0);
   float vv = clamp(v, 0.0, 1.0);
@@ -104,30 +104,26 @@ void main() {
   } else {
     mm = max(0.0, mm);
     vec4 sn = mix(texture(u_cloud0, uv), texture(u_cloud1, uv), u_mix);
-    float snowCm = max(0.0, sn.r * 12.0);
-    float rainBody = smoothstep(0.025, 0.22, mm);
-    float snowBody = smoothstep(0.025, 0.22, snowCm);
-    // Show dense cloud cover as a subtle separate backdrop, never as rain intensity.
-    float cloudA = smoothstep(0.62, 0.96, sn.b) * 0.30;
-    float depthA = 0.0; // Snow depth on ground is not falling snow.
-    if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01)) {
+    float fallCm = max(0.0, sn.r * 12.0);
+    float cloud = sn.b;
+    float rainBody = smoothstep(0.1, 0.65, mm);
+    float snowBody = smoothstep(0.15, 0.45, fallCm);
+    float cloudBody = smoothstep(0.45, 0.9, cloud);
+    if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02)) {
       frag = vec4(0.0);
       return;
     }
     float t = clamp((mm - u_range.x) / span, 0.0, 1.0);
     vec3 rainCol = texture(u_lut, vec2(t, 0.5)).rgb;
-    float rainA = rainBody * mix(0.45, 0.92, smoothstep(0.15, 7.0, mm));
-    float snowI = clamp(snowCm / 1.8, 0.0, 1.0);
-    vec3 snowCol = mix(vec3(0.74, 0.86, 0.98), vec3(0.96, 0.98, 1.0), snowI);
-    float snowA = snowBody * mix(0.55, 0.90, smoothstep(0.12, 1.6, snowCm));
+    float rainA = rainBody * mix(0.32, 0.9, smoothstep(0.5, 6.0, mm));
+    vec3 snowCol = mix(vec3(0.62, 0.78, 0.96), vec3(0.97, 0.98, 1.0), snowBody);
+    float snowA = snowBody * mix(0.5, 0.82, snowBody);
     float useSnow = snowBody / max(snowBody + rainBody, 0.001);
-    col = mix(rainCol, snowCol, useSnow);
-    float precipA = mix(rainA, snowA, useSnow);
-    float baseA = cloudA + depthA * (1.0 - cloudA);
-    vec3 baseCol = (vec3(0.72, 0.77, 0.83) * cloudA + vec3(0.66, 0.88, 0.96) * depthA * (1.0 - cloudA)) / max(baseA, 0.001);
-    alpha = precipA + baseA * (1.0 - precipA);
-    col = (col * precipA + baseCol * baseA * (1.0 - precipA)) / max(alpha, 0.001);
-    alpha *= u_alphaMul;
+    vec3 wxCol = mix(rainCol, snowCol, useSnow);
+    float wxA = mix(rainA, snowA, useSnow);
+    float wx = clamp(max(rainBody, snowBody), 0.0, 1.0);
+    col = mix(vec3(0.96, 0.97, 0.99), wxCol, wx);
+    alpha = mix(cloudBody * 0.4, wxA, wx) * u_alphaMul;
   }
   frag = vec4(col * alpha * edge, alpha * edge);
 }`;
@@ -299,6 +295,7 @@ export class FieldEngine {
   private showCyclones = false;
   private systems: PaintedSystem[] = [];
   private frameBox: { north: number; south: number; west: number; east: number } | null = null;
+  private modelCover = false;
   private whirl = 0;
 
   constructor(private host: HTMLElement) {
@@ -376,8 +373,16 @@ export class FieldEngine {
     this.drawField();
   }
 
+  /** طبقة المطر تُرسم من حقل النموذج؛ القماش يبقى للأعاصير فقط. */
+  setModelCover(on: boolean) {
+    if (this.modelCover === on) return;
+    this.modelCover = on;
+    if (on) this.particles = [];
+    this.drawField();
+    this.clearParticles();
+  }
+
   setHour(hour: number) {
-    if (Math.abs(this.hour - hour) > 0.5) this.particles = [];
     this.hour = Math.max(0, Math.min(this.hourMax, hour));
     this.drawField();
   }
@@ -616,7 +621,7 @@ export class FieldEngine {
       if (view && this.detailFillsView(view)) {
         const viewCell = view.lonSpan / Math.max(1, view.cols);
         const worldCell = world ? world.lonSpan / Math.max(1, world.cols) : 99;
-        if (!world || viewCell < worldCell * 0.95) return view;
+        if ((!world || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
       }
       if (world) return world;
       if (this.detail && this.detailFillsView(this.detail)) return this.detail;
@@ -674,9 +679,7 @@ export class FieldEngine {
   private local(lat: number, lon: number): { x: number; y: number } | null {
     const map = this.map;
     if (!map) return null;
-    const center = map.getCenter().lng;
-    const wrapped = lon + 360 * Math.round((center - lon) / 360);
-    const p = map.latLngToContainerPoint([lat, wrapped]);
+    const p = map.latLngToContainerPoint([lat, lon]);
     return { x: p.x, y: p.y };
   }
 
@@ -755,11 +758,15 @@ export class FieldEngine {
     gl.viewport(0, 0, this.fieldCanvas.width, this.fieldCanvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    if (this.modelCover && this.kind === 2) return;
     if (!this.frameBox) return;
     const grids = this.paintGrids();
     if (!grids.length) return;
     gl.useProgram(prog);
-    for (const grid of grids) this.drawGrid(gl, grid);
+    for (const grid of grids) {
+      if (this.kind === 2 && grid.id.startsWith("est|")) continue;
+      this.drawGrid(gl, grid);
+    }
   }
 
   private drawGrid(gl: WebGL2RenderingContext, grid: GridField) {
@@ -846,7 +853,7 @@ export class FieldEngine {
       for (let i = 0; i < field.cols * field.rows; i++) {
         const pix = i * 4;
         data[pix] = Math.max(0, Math.min(255, Math.round((((field.temp[i] ?? 0) + 40) / 100) * 255)));
-        data[pix + 1] = Math.max(0, Math.min(255, Math.round(Math.sqrt(Math.max(0, field.rain[i] ?? 0) / 40) * 255)));
+        data[pix + 1] = Math.max(0, Math.min(255, Math.round(((field.rain[i] ?? 0) / 40) * 255)));
         data[pix + 2] = Math.max(0, Math.min(255, Math.round(((field.spd[i] ?? 0) / 180) * 255)));
         data[pix + 3] = field.ok[i] ? 255 : 0;
       }
@@ -877,7 +884,7 @@ export class FieldEngine {
     return tex;
   }
 
-  /** ثلج الساعة: أحمر = هطول سم/١٢، أخضر = عمق م/٣. نفس امتداد شبكة المطر. */
+  /** غيوم الساعة وأبيضها في الأزرق، والثلج المتساقط فقط في الأحمر. */
   private cloudTexFor(grid: GridField, hour: number): WebGLTexture | null {
     const gl = this.gl;
     if (!gl || !grid.snow || !grid.snowDepth) return this.blank;
@@ -897,7 +904,6 @@ export class FieldEngine {
     const dr = rows * scale;
     const base = h * rows * cols;
     const snow = grid.snow;
-    const depth = grid.snowDepth;
     const at = (arr: Float32Array, c: number, r: number) => {
       if (full) c = ((c % cols) + cols) % cols;
       else c = Math.max(0, Math.min(cols - 1, c));
@@ -922,11 +928,11 @@ export class FieldEngine {
         const x = scale === 1 ? c : ((c + 0.5) / dc) * cols - 0.5;
         const pix = (r * dc + c) * 4;
         const cm = scale === 1 ? at(snow, c, r) : bilinear(snow, x, y);
-        const m = scale === 1 ? at(depth, c, r) : bilinear(depth, x, y);
+        const cover = grid.cloud ? (scale === 1 ? at(grid.cloud, c, r) : bilinear(grid.cloud, x, y)) : 0;
         data[pix] = Math.max(0, Math.min(255, Math.round((cm / 12) * 255)));
-        data[pix + 1] = Math.max(0, Math.min(255, Math.round((m / 3) * 255)));
-        data[pix + 2] = Math.max(0, Math.min(255, Math.round((bilinear(grid.cloud, x, y) / 100) * 255)));
-        data[pix + 3] = grid.ok[base + Math.max(0, Math.min(rows - 1, Math.round(y))) * cols + Math.max(0, Math.min(cols - 1, Math.round(x)))] ? 255 : 0;
+        data[pix + 1] = 0;
+        data[pix + 2] = Math.max(0, Math.min(255, Math.round((cover / 100) * 255)));
+        data[pix + 3] = 255;
       }
     }
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -973,18 +979,26 @@ export class FieldEngine {
     const h = this.fieldCanvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    if (this.modelCover && this.kind === 2) return;
     const grids = this.paintGrids();
     if (!grids.length || !this.frameBox) return;
     const box = this.frameBox;
     const span = Math.max(0.01, box.east - box.west);
     for (let i = 0; i < grids.length; i++) {
       const grid = grids[i]!;
+      if (this.kind === 2 && grid.id.startsWith("est|")) continue;
       const { h0, h1, t } = this.blend(grid.hours);
       if (i > 0) {
         ctx.save();
         ctx.globalAlpha = 1;
       }
-      this.blitHour(ctx, grid, h0 + t, box.west, span, box.north, box.south, 1);
+      this.blitHour(ctx, grid, h0, box.west, span, box.north, box.south, 1);
+      if (t > 0.01 && h1 !== h0) {
+        ctx.save();
+        ctx.globalAlpha = t;
+        this.blitHour(ctx, grid, h1, box.west, span, box.north, box.south, t);
+        ctx.restore();
+      }
       if (i > 0) ctx.restore();
     }
   }
@@ -1029,7 +1043,7 @@ export class FieldEngine {
 
   private drawParticles(dt: number) {
     if (!this.map || !this.partCtx) return;
-    const flow = this.kind === 0 && this.particleTarget > 0;
+    const flow = this.kind === 0 && !this.saver && this.particleTarget > 0;
     if (!flow) {
       this.clearParticles();
       this.paintOverlay();
@@ -1050,7 +1064,7 @@ export class FieldEngine {
     const zoomNow = this.map?.getZoom() ?? 0;
     if (this.zoomSeen >= 0 && Math.abs(zoomNow - this.zoomSeen) > 1.25) this.particles.length = 0;
     this.zoomSeen = zoomNow;
-    const cap = Math.min(this.particleTarget, Math.round(cssW * cssH / 1100));
+    const cap = this.kind === 2 ? Math.max(this.particleTarget, 680) : this.particleTarget;
     let born = 0;
     const bornCap = 110;
     while (this.particles.length < cap && born < bornCap) {
@@ -1066,11 +1080,11 @@ export class FieldEngine {
     ctx.lineCap = "butt";
     ctx.lineJoin = "miter";
     for (const p of this.particles) {
-      p.life -= dt;
+      p.life -= dt * (rain ? 0.32 : 0.28);
       const sample = sampleGrid(grid, p.lat, p.lon, this.hour);
       const here = this.local(p.lat, p.lon);
-      const rainMm = rain ? sample?.rain ?? 0 : 0;
-      const rainOk = !rain || rainMm >= 0.05;
+      const snowHere = (sample?.snow ?? 0) >= 0.03 || (sample?.snowDepth ?? 0) >= 0.02;
+      const rainOk = !rain || snowHere;
       const outside = !here || here.x < -48 || here.y < -48 || here.x > cssW + 48 || here.y > cssH + 48;
       if (!sample || p.life <= 0 || outside || !rainOk || !here) {
         const next = this.spawn(grid);
@@ -1085,10 +1099,10 @@ export class FieldEngine {
         p.trail = next.trail;
         continue;
       }
-      if (dt > 0) this.advect(p, sample, dt, 1);
+      if (dt > 0 && !rain) this.advect(p, sample, dt, 1);
       const fade = this.fade(p, rain);
       if (fade < 0.04) continue;
-      if (rain) this.strokeRain(ctx, p, sample, fade, rainMm);
+      if (rain) this.strokeRain(ctx, p, sample, fade, sample.snow ?? 0);
       else this.strokeWind(ctx, p, sample, fade);
     }
     this.zoomSeen = this.map?.getZoom() ?? this.zoomSeen;
@@ -1125,14 +1139,18 @@ export class FieldEngine {
     const mag = Math.hypot(sample.u, sample.v);
     const spd = Math.max(sample.spd, mag);
     if (spd < 0.5 || mag < 0.3) return null;
-    // Advection in projected pixels keeps direction and apparent speed stable at all latitudes.
     const zoom = map.getZoom();
-    const pos = map.project([lat, lon], zoom);
-    const pxPerSec = Math.min(65, Math.max(3, spd * 0.9));
-    const next = map.unproject([pos.x + sample.u / mag * pxPerSec * dt,
-      pos.y - sample.v / mag * pxPerSec * dt], zoom);
-    const nlat = Math.max(-85, Math.min(85, next.lat));
-    const nlon = ((next.lng + 180) % 360 + 360) % 360 - 180;
+    const pxPerDeg = (256 * 2 ** zoom) / 360;
+    const zoomScale = zoom < 3 ? 0.62 : zoom < 5 ? 0.84 : zoom < 7 ? 1 : 1.08;
+    const pxPerSec = Math.min(34, Math.max(10, 8 + spd * 0.28)) * zoomScale;
+    const deg = (pxPerSec * dt) / Math.max(8, pxPerDeg);
+    const cos = Math.max(0.22, Math.cos((lat * Math.PI) / 180));
+    let nlat = lat + (sample.v / mag) * deg;
+    let nlon = lon + ((sample.u / mag) * deg) / cos;
+    if (nlat > 84) nlat = 84;
+    if (nlat < -78) nlat = -78;
+    if (nlon > 180) nlon -= 360;
+    if (nlon < -180) nlon += 360;
     return { lat: nlat, lon: nlon };
   }
 
@@ -1144,16 +1162,27 @@ export class FieldEngine {
     }
     const head = this.local(p.lat, p.lon);
     const prev = head ? this.local(last.lat, last.lon) : null;
-    if (!head || !prev || Math.hypot(head.x - prev.x, head.y - prev.y) >= 1.6) {
+    if (!head || !prev || Math.hypot(head.x - prev.x, head.y - prev.y) >= 2.2) {
       p.trail.push({ lat: p.lat, lon: p.lon });
     }
-    if (p.trail.length > 14) p.trail.splice(0, p.trail.length - 14);
+    this.trimTrail(p, 14);
+  }
+
+  /** الأثر لا يطول عن شرطة قصيرة، حتى لا يصبح مشطاً على الشاشة. */
+  private trimTrail(p: Particle, maxPx: number) {
+    while (p.trail.length > 2) {
+      const tail = this.local(p.trail[0]!.lat, p.trail[0]!.lon);
+      const head = this.local(p.trail[p.trail.length - 1]!.lat, p.trail[p.trail.length - 1]!.lon);
+      const long = p.trail.length > 7 || (!!tail && !!head && Math.hypot(head.x - tail.x, head.y - tail.y) > maxPx);
+      if (!long) break;
+      p.trail.shift();
+    }
   }
 
   private fade(p: Particle, rain = false): number {
     const age = Math.max(0, p.max - p.life);
     if (rain) return Math.min(1, age / 0.16, p.life / 0.4);
-    return Math.min(1, age / 0.4, p.life / 0.85);
+    return Math.min(1, age / 0.25, p.life / 0.45);
   }
 
   private strokeWind(ctx: CanvasRenderingContext2D, p: Particle, sample: FieldSample, fade: number) {
@@ -1173,72 +1202,42 @@ export class FieldEngine {
     if (xy.length >= 2) this.paintThread(ctx, xy, sample, fade);
   }
 
-  /** خيط واحد: الذيل شفاف والرأس أوضح، منحنٍ على المسار لا شرطة مستقيمة. */
+  /** شرطة قصيرة فاتحة فوق طبقة اللون، كجزيئات ويندي لا كخيوط تغطي الخريطة. */
   private paintThread(
     ctx: CanvasRenderingContext2D,
     xy: { x: number; y: number }[],
-    sample: FieldSample,
+    _sample: FieldSample,
     fade: number,
   ) {
-    const [r, g, b] = colorAt(layerByKind(0).stops, sample.spd);
-    const rr = Math.round(r * 0.25 + 255 * 0.75);
-    const gg = Math.round(g * 0.25 + 255 * 0.75);
-    const bb = Math.round(b * 0.25 + 255 * 0.75);
-    const width = 0.8 + Math.min(0.45, sample.spd / 140);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = width;
-    const n = xy.length;
-    const bands = n < 6 ? 2 : 4;
-    for (let b = 0; b < bands; b++) {
-      const i0 = Math.floor(((n - 1) * b) / bands);
-      const i1 = Math.floor(((n - 1) * (b + 1)) / bands);
-      if (i1 <= i0) continue;
-      const along = (b + 1) / bands;
-      const a = fade * (0.04 + 0.65 * along * along);
-      ctx.beginPath();
-      const p0 = xy[i0]!;
-      ctx.moveTo(p0.x, p0.y);
-      for (let i = i0 + 1; i <= i1; i++) {
-        const pt = xy[i]!;
-        ctx.lineTo(pt.x, pt.y);
-      }
-      ctx.strokeStyle = `rgba(${rr},${gg},${bb},${a.toFixed(3)})`;
-      ctx.stroke();
+    ctx.lineWidth = 1.15;
+    ctx.beginPath();
+    const p0 = xy[0]!;
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < xy.length; i++) {
+      const pt = xy[i]!;
+      ctx.lineTo(pt.x, pt.y);
     }
+    ctx.strokeStyle = `rgba(255,255,255,${(0.72 * fade).toFixed(3)})`;
+    ctx.stroke();
   }
 
-  private strokeRain(ctx: CanvasRenderingContext2D, p: Particle, sample: FieldSample, fade: number, mm: number) {
+  private strokeRain(ctx: CanvasRenderingContext2D, p: Particle, _sample: FieldSample, fade: number, _mm: number) {
     const here = this.local(p.lat, p.lon);
     if (!here) return;
-    const snow = sample.temp <= 0.6;
-    const now = performance.now() / 1000;
-    const bob = Math.sin(now * 1.15 + p.lon * 3.0) * (snow ? 1.5 : 0.3);
-    const x = here.x;
-    const y = here.y + bob;
-    if (snow) {
-      const r = 2.5 + Math.min(1.3, mm * 0.4);
-      ctx.lineCap = "round";
-      ctx.strokeStyle = `rgba(255,255,255,${(0.9 * fade).toFixed(3)})`;
-      ctx.lineWidth = 1.15;
-      ctx.beginPath();
-      for (let k = 0; k < 3; k++) {
-        const a = (Math.PI / 3) * k + 0.35;
-        const dx = Math.cos(a) * r;
-        const dy = Math.sin(a) * r;
-        ctx.moveTo(x - dx, y - dy);
-        ctx.lineTo(x + dx, y + dy);
-      }
-      ctx.stroke();
-      ctx.lineCap = "butt";
-      return;
-    }
-    const drop = (now * 16 + p.max * 24) % 9;
+    const r = 2.1;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = `rgba(255,255,255,${(0.82 * fade).toFixed(3)})`;
+    ctx.lineWidth = 1.05;
     ctx.beginPath();
-    ctx.moveTo(x, y + drop);
-    ctx.lineTo(x + 1.0, y + drop + 3.6);
-    ctx.strokeStyle = `rgba(226,242,255,${(0.7 * fade).toFixed(3)})`;
-    ctx.lineWidth = 1.15;
+    for (let k = 0; k < 3; k++) {
+      const a = (Math.PI / 3) * k + 0.4;
+      const dx = Math.cos(a) * r;
+      const dy = Math.sin(a) * r;
+      ctx.moveTo(here.x - dx, here.y - dy);
+      ctx.lineTo(here.x + dx, here.y + dy);
+    }
     ctx.stroke();
   }
 
@@ -1269,36 +1268,54 @@ export class FieldEngine {
     const map = this.map;
     if (!box || !map) return null;
     for (let i = 0; i < 8; i++) {
-      const point = map.containerPointToLatLng([Math.random() * map.getSize().x, Math.random() * map.getSize().y]);
-      const lat = point.lat;
-      let lon = point.lng;
-      if (lon > 180) lon -= 360;
-      const sample = sampleGrid(grid, lat, lon, this.hour);
-      if (!sample || sample.spd < 1.2) continue;
-      const max = 1.8 + Math.random() * 2.2;
-      return { lat, lon, life: max, max, trail: [{ lat, lon }] };
-    }
-    return null;
-  }
-
-  /** رموز داخل الهطول الظاهر فقط: ندف للثلج وقطرات قصيرة للمطر. */
-  private spawnRain(grid: GridField): Particle | null {
-    const box = this.frameBox;
-    if (!box) return null;
-    for (let n = 0; n < 8; n++) {
       const lat = box.south + Math.random() * (box.north - box.south);
       let lon = box.west + Math.random() * Math.max(0.01, box.east - box.west);
       if (lon > 180) lon -= 360;
       const sample = sampleGrid(grid, lat, lon, this.hour);
-      if (!sample || sample.rain < 0.05) continue;
-      const max = 2.4 + Math.random() * 2.6;
-      return { lat, lon, life: max * (0.3 + Math.random() * 0.7), max, trail: [{ lat, lon }] };
+      if (!sample || sample.spd < 1.2) continue;
+      const max = 2.6 + Math.random() * 2.2;
+      return { lat, lon, life: max, max, trail: this.seedWindTrail(grid, lat, lon, sample) };
     }
+    return null;
+  }
+
+  /** ذيل جاهز عكس الريح حتى يظهر الخيط فوراً لا كنقطة. */
+  private seedWindTrail(grid: GridField, lat: number, lon: number, sample: FieldSample): { lat: number; lon: number }[] {
+    const map = this.map;
+    const back: { lat: number; lon: number }[] = [];
+    if (!map) return [{ lat, lon }];
+    let la = lat;
+    let lo = lon;
+    let cur = sample;
+    const zoom = map.getZoom();
+    const pxPerDeg = (256 * 2 ** zoom) / 360;
+    const deg = 2.4 / Math.max(8, pxPerDeg);
+    for (let i = 0; i < 5; i++) {
+      const mag = Math.hypot(cur.u, cur.v);
+      if (mag < 0.3) break;
+      const cos = Math.max(0.22, Math.cos((la * Math.PI) / 180));
+      la -= (cur.v / mag) * deg;
+      lo -= ((cur.u / mag) * deg) / cos;
+      if (lo > 180) lo -= 360;
+      if (lo < -180) lo += 360;
+      if (la > 84 || la < -78) break;
+      back.push({ lat: la, lon: lo });
+      const next = sampleGrid(grid, la, lo, this.hour);
+      if (!next) break;
+      cur = next;
+    }
+    back.reverse();
+    back.push({ lat, lon });
+    return back;
+  }
+
+  /** المطر والثلج لون متصل فقط، بلا نجوم ولا علامات. */
+  private spawnRain(_grid: GridField): Particle | null {
     return null;
   }
 }
 
-export function shade(
+function shade(
   kind: ShadeKind,
   s: FieldSample,
   range: [number, number],
@@ -1306,29 +1323,25 @@ export function shade(
 ): string | null {
   const layer = layerByKind(kind);
   if (kind === 2) {
-    const snowCm = s.snow ?? 0;
-    const rainBody = smooth(0.025, 0.22, s.rain);
-    const snowBody = smooth(0.025, 0.22, snowCm);
-    // Cloud cover provides a restrained backdrop, separate from rain and snowfall.
-    const cloudA = smooth(62, 96, s.cloud ?? 0) * 0.30;
-    const depthA = 0; // Ground snow must not appear as snowfall.
-    if (rainBody < 0.02 && snowBody < 0.02 && cloudA < 0.01 && depthA < 0.01) return null;
-    const rainA = rainBody * (0.45 + smooth(0.15, 7, s.rain) * 0.47);
-    const snowI = Math.max(0, Math.min(1, snowCm / 1.8));
-    const sr = Math.round(189 + (245 - 189) * snowI);
-    const sg = Math.round(219 + (250 - 219) * snowI);
-    const sb = Math.round(250 + (255 - 250) * snowI);
-    const snowA = snowBody * (0.55 + smooth(0.12, 1.6, snowCm) * 0.35);
+    const snowCm = Math.max(s.snow ?? 0, 0);
+    const rainBody = smooth(0.1, 0.65, s.rain);
+    const snowBody = smooth(0.15, 0.45, snowCm);
+    const cloudBody = smooth(0.45, 0.9, (s.cloud ?? 0) / 100);
+    if (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02) return null;
+    const rainA = rainBody * (0.32 + smooth(0.5, 6, s.rain) * 0.58);
+    const snowI = Math.max(0, Math.min(1, snowCm / 0.45));
+    const sr = Math.round(158 + (247 - 158) * snowI);
+    const sg = Math.round(199 + (250 - 199) * snowI);
+    const sb = Math.round(245 + (255 - 245) * snowI);
+    const snowA = snowBody * (0.5 + snowBody * 0.32);
     const useSnow = snowBody / Math.max(snowBody + rainBody, 0.001);
     const [rr, gg, bb] = colorAt(layer.stops, s.rain);
-    const r = Math.round(rr * (1 - useSnow) + sr * useSnow);
-    const g = Math.round(gg * (1 - useSnow) + sg * useSnow);
-    const b = Math.round(bb * (1 - useSnow) + sb * useSnow);
-    const precipA = rainA * (1 - useSnow) + snowA * useSnow;
-    const baseA = cloudA + depthA * (1 - cloudA);
-    const a = precipA + baseA * (1 - precipA);
-    const blend = (value: number, cloud: number, ground: number) => Math.round((value * precipA + (cloud * cloudA + ground * depthA * (1 - cloudA)) * (1 - precipA)) / Math.max(a, 0.001));
-    return `rgba(${blend(r,184,168)},${blend(g,196,224)},${blend(b,212,245)},${(a * alphaMul).toFixed(3)})`;
+    const wx = Math.max(rainBody, snowBody);
+    const r = Math.round((245 * (1 - wx) + (rr * (1 - useSnow) + sr * useSnow) * wx));
+    const g = Math.round((247 * (1 - wx) + (gg * (1 - useSnow) + sg * useSnow) * wx));
+    const b = Math.round((252 * (1 - wx) + (bb * (1 - useSnow) + sb * useSnow) * wx));
+    const a = ((cloudBody * 0.4) * (1 - wx) + (rainA * (1 - useSnow) + snowA * useSnow) * wx) * alphaMul;
+    return `rgba(${r},${g},${b},${Math.min(0.9, a).toFixed(3)})`;
   }
   const value = kind === 0 ? s.spd : s.temp;
   const [r, g, b] = colorAt(layer.stops, Math.max(range[0], Math.min(range[1], value)));

@@ -1,7 +1,8 @@
-import { daylightNow } from "@/weather/astro";
+import { daylightNow, solarDaylight, sunArc } from "@/weather/astro";
+import { estimateBundle } from "@/weather/estimate";
 import { dayKey } from "@/weather/format";
-import { markQuota } from "@/weather/grid";
-import { NetworkFailure, proxyFetch } from "@/weather/net";
+import { isQuotaBlocked, markQuota } from "@/weather/grid";
+import { proxyFetch } from "@/weather/net";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -14,14 +15,6 @@ export type CacheFile = {
 };
 
 const inflight = new Map<string, Promise<{ bundle: WeatherBundle; stale: boolean; estimated: boolean }>>();
-let forecastFailure = "connection";
-export function lastForecastFailure(): string { return forecastFailure; }
-function failureCode(err: unknown): string {
-  if (err instanceof NetworkFailure) return err.status === 429 ? "quota" : err.status ? "http-" + err.status : "network";
-  if (err instanceof Error && err.message === "quota") return "quota";
-  if (err instanceof Error && /^http \d{3}$/.test(err.message)) return err.message.replace(" ", "-");
-  return "network";
-}
 
 function emptyCache(): CacheFile {
   return { places: [], activeId: "", entries: {} };
@@ -46,9 +39,10 @@ export function readCacheFile(): CacheFile {
 export function writeCacheFile(file: CacheFile) {
   if (typeof localStorage === "undefined") return;
   try {
+    const ids = new Set(file.places.map((place) => place.id));
     const entries: Record<string, CacheEntry> = {};
     const kept = Object.entries(file.entries)
-      .filter(([, entry]) => entry?.bundle && Number.isFinite(entry.bundle.current?.temp))
+      .filter(([id]) => ids.has(id))
       .sort((a, b) => b[1].at - a[1].at)
       .slice(0, MAX_CACHED_PLACES);
     for (const [id, entry] of kept) entries[id] = entry;
@@ -86,9 +80,7 @@ function finite(value: unknown): number {
 }
 
 /** وقت Open-Meteo: إن كان بلا منطقة نطرح إزاحة المنطقة بعد قراءته كأنه UTC. */
-function parseWall(value: string | number | undefined, offsetSec: number): number {
-  if (typeof value === "number") return value * 1000;
-  if (value && /^\d{10}(?:\.\d+)?$/.test(value)) return Number(value) * 1000;
+function parseWall(value: string | undefined, offsetSec: number): number {
   if (!value) return NaN;
   if (value.endsWith("Z") || /[+-]\d\d:\d\d$/.test(value)) return Date.parse(value);
   const utc = Date.parse(`${value}Z`);
@@ -104,7 +96,7 @@ function buildBundle(
   const offset = num(json.utc_offset_seconds, 0);
   const timezone = typeof json.timezone === "string" && json.timezone ? json.timezone : "UTC";
   const hourly = (json.hourly ?? {}) as Record<string, unknown>;
-  const times = Array.isArray(hourly.time) ? (hourly.time as (string | number)[]) : [];
+  const times = Array.isArray(hourly.time) ? (hourly.time as string[]) : [];
   const hourRows = times.map((stamp, i) => ({
     t: parseWall(stamp, offset),
     temp: finite((hourly.temperature_2m as number[] | undefined)?.[i]),
@@ -119,9 +111,9 @@ function buildBundle(
     pressure: num((hourly.pressure_msl as number[] | undefined)?.[i]),
   }));
   const daily = (json.daily ?? {}) as Record<string, unknown>;
-  const dayTimes = Array.isArray(daily.time) ? (daily.time as (string | number)[]) : [];
+  const dayTimes = Array.isArray(daily.time) ? (daily.time as string[]) : [];
   const dayRows = dayTimes.map((stamp, i) => ({
-    t: typeof stamp === "number" ? stamp * 1000 + 12 * 3600000 : parseWall(`${stamp}T12:00`, offset),
+    t: parseWall(`${stamp}T12:00`, offset),
     code: num((daily.weather_code as number[] | undefined)?.[i]),
     tmax: finite((daily.temperature_2m_max as number[] | undefined)?.[i]),
     tmin: finite((daily.temperature_2m_min as number[] | undefined)?.[i]),
@@ -195,7 +187,6 @@ function buildBundle(
   if (!Number.isFinite(bundle.current.feels)) bundle.current.feels = bundle.current.temp;
   if (!Number.isFinite(bundle.current.precip)) bundle.current.precip = 0;
   bundle.current.isDay = daylightNow(Date.now(), place.lat, place.lon, bundle.daily, bundle.hourly);
-  if (!Number.isFinite(bundle.current.temp) || !bundle.daily.length) throw new Error("invalid-weather");
   return bundle;
 }
 
@@ -207,7 +198,7 @@ async function fetchAir(place: Place, signal?: AbortSignal): Promise<WeatherBund
   url.searchParams.set("hourly", "dust");
   url.searchParams.set("forecast_hours", "48");
   url.searchParams.set("timezone", "auto");
-  const res = await proxyFetch(url.toString(), signal, "background");
+  const res = await proxyFetch(url.toString(), signal);
   if (!res.ok) return null;
   const json = (await res.json()) as {
     utc_offset_seconds?: number;
@@ -237,14 +228,15 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNulla
   url.searchParams.set("current", "wave_height");
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("timezone", "auto");
-  const res = await proxyFetch(url.toString(), signal, "background");
+  const res = await proxyFetch(url.toString(), signal);
   if (!res.ok) return { coastal: false, wave: null };
   const json = (await res.json()) as { current?: { wave_height?: number } };
   const wave = json.current?.wave_height;
   return typeof wave === "number" && Number.isFinite(wave) ? { coastal: true, wave } : { coastal: false, wave: null };
 }
 
-async function fetchForecast(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
+async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
+  if (isQuotaBlocked()) throw new Error("quota");
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
@@ -261,7 +253,6 @@ async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Weathe
     "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,uv_index_max,wind_speed_10m_max",
   );
   url.searchParams.set("forecast_days", "15");
-  url.searchParams.set("timeformat", "unixtime");
   url.searchParams.set("timezone", "auto");
   url.searchParams.set("wind_speed_unit", "kmh");
   url.searchParams.set("temperature_unit", "celsius");
@@ -280,8 +271,236 @@ async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Weathe
     if (/daily (api )?request limit|daily limit exceeded/i.test(reason)) markQuota(30 * 60_000);
     throw new Error(reason || "forecast");
   }
-  const cached = readCacheFile().entries[place.id]?.bundle;
-  return buildBundle(place, json, cached?.air ?? null, cached?.marine ?? {coastal:false,wave:null});
+  const [air, marine] = await Promise.all([
+    fetchAir(place, signal).catch(() => null),
+    fetchMarine(place, signal).catch(() => ({ coastal: false, wave: null })),
+  ]);
+  return buildBundle(place, json, air, marine);
+}
+
+const MET_UA = "MyWeather/1.0 (net.nabdhserv.myweather)";
+
+type MetDetails = {
+  air_pressure_at_sea_level?: number;
+  air_temperature?: number;
+  cloud_area_fraction?: number;
+  relative_humidity?: number;
+  wind_from_direction?: number;
+  wind_speed?: number;
+  precipitation_amount?: number;
+};
+
+type MetData = {
+  instant?: { details?: MetDetails };
+  next_1_hours?: { summary?: { symbol_code?: string }; details?: MetDetails };
+  next_6_hours?: { summary?: { symbol_code?: string }; details?: MetDetails };
+  next_12_hours?: { summary?: { symbol_code?: string }; details?: MetDetails };
+};
+
+function zoneFromLon(lon: number): { timezone: string; offset: number } {
+  const offsetHours = Math.max(-12, Math.min(14, Math.round(lon / 15)));
+  const offset = offsetHours * 3600;
+  const timezone = offsetHours === 0 ? "UTC" : `Etc/GMT${offsetHours > 0 ? "-" : "+"}${Math.abs(offsetHours)}`;
+  return { timezone, offset };
+}
+
+function wmoFromSymbol(symbol: string): number {
+  const s = symbol.toLowerCase().replace(/_(day|night|polartwilight)$/g, "");
+  const table: Record<string, number> = {
+    clearsky: 0,
+    fair: 1,
+    partlycloudy: 2,
+    cloudy: 3,
+    fog: 45,
+    lightrainshowers: 80,
+    rainshowers: 81,
+    heavyrainshowers: 82,
+    lightrain: 61,
+    rain: 63,
+    heavyrain: 65,
+    lightsleetshowers: 56,
+    sleetshowers: 67,
+    heavysleetshowers: 68,
+    lightsleet: 56,
+    sleet: 67,
+    heavysleet: 68,
+    lightsnow: 71,
+    snow: 73,
+    heavysnow: 75,
+    lightsnowshowers: 85,
+    snowshowers: 86,
+    heavysnowshowers: 86,
+    lightrainshowersandthunder: 95,
+    rainshowersandthunder: 95,
+    heavyrainshowersandthunder: 99,
+    lightrainandthunder: 95,
+    rainandthunder: 95,
+    heavyrainandthunder: 99,
+    lightsnowandthunder: 95,
+    snowandthunder: 95,
+  };
+  if (s in table) return table[s]!;
+  if (s.includes("thunder")) return 95;
+  if (s.includes("snow")) return 73;
+  if (s.includes("sleet")) return 67;
+  if (s.includes("rain")) return 63;
+  if (s.includes("fog")) return 45;
+  if (s.includes("cloud")) return 3;
+  return 2;
+}
+
+function metSymbol(data: MetData): string {
+  return data.next_1_hours?.summary?.symbol_code || data.next_6_hours?.summary?.symbol_code || data.next_12_hours?.summary?.symbol_code || "";
+}
+
+function metPeriodMm(data: MetData, stepH: number): number {
+  const one = data.next_1_hours?.details?.precipitation_amount;
+  const six = data.next_6_hours?.details?.precipitation_amount;
+  const twelve = data.next_12_hours?.details?.precipitation_amount;
+  const raw = stepH <= 2 ? (one ?? six ?? twelve) : stepH <= 8 ? (six ?? twelve ?? one) : (twelve ?? six ?? one);
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+}
+
+function feelsLike(temp: number, rh: number, windKmh: number): number {
+  if (temp >= 27 && rh >= 40) {
+    const hi =
+      -8.7847 +
+      1.6114 * temp +
+      2.3385 * rh -
+      0.1461 * temp * rh -
+      0.0123 * temp * temp -
+      0.0164 * rh * rh +
+      0.0022 * temp * temp * rh +
+      0.0007 * temp * rh * rh -
+      0.00000358 * temp * temp * rh * rh;
+    if (Number.isFinite(hi)) return Math.round(hi * 10) / 10;
+  }
+  return Math.round(temp * 10) / 10;
+}
+
+function clearUv(lat: number, ms: number): number {
+  const start = Date.UTC(new Date(ms).getUTCFullYear(), 0, 0);
+  const doy = Math.floor((ms - start) / 86_400_000);
+  const decl = 23.44 * Math.cos((2 * Math.PI * (doy - 172)) / 365);
+  return Math.max(0, Math.round(10 * Math.cos(((lat - decl) * Math.PI) / 180)));
+}
+
+/** مصدر ثانٍ عندما يرفض Open-Meteo الطلب أو ينقطع. الأرقام حقيقية وليست تقديرًا مناخيًا. */
+async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
+  const url = new URL("https://api.met.no/weatherapi/locationforecast/2.0/compact");
+  url.searchParams.set("lat", place.lat.toFixed(4));
+  url.searchParams.set("lon", place.lon.toFixed(4));
+  const res = await proxyFetch(url.toString(), signal, { "User-Agent": MET_UA });
+  if (!res.ok) throw new Error(`http ${res.status}`);
+  const json = (await res.json()) as { properties?: { timeseries?: { time: string; data?: MetData }[] } };
+  const series = json.properties?.timeseries ?? [];
+  if (!series.length) throw new Error("met-empty");
+  const { timezone, offset } = zoneFromLon(place.lon);
+  const times = series.map((row) => Date.parse(row.time));
+  const slots = series.flatMap((row, i) => {
+    const t = times[i] ?? NaN;
+    if (!Number.isFinite(t)) return [];
+    const details = row.data?.instant?.details ?? {};
+    const temp = num(details.air_temperature);
+    const rh = num(details.relative_humidity);
+    const wind = num(details.wind_speed) * 3.6;
+    const next = times[i + 1];
+    const stepH = Number.isFinite(next) ? Math.max(1, Math.round(((next as number) - t) / 3_600_000)) : 1;
+    const period = metPeriodMm(row.data ?? {}, stepH);
+    const precip = period / stepH;
+    return [
+      {
+        period,
+        hour: {
+          t,
+          temp,
+          precip,
+          pop: precip >= 0.3 ? 70 : precip > 0 ? 35 : 0,
+          code: wmoFromSymbol(metSymbol(row.data ?? {})),
+          wind,
+          gust: wind * 1.35,
+          feels: feelsLike(temp, rh, wind),
+          uv: solarDaylight(place.lat, place.lon, t) ? clearUv(place.lat, t) : 0,
+          isDay: solarDaylight(place.lat, place.lon, t),
+          pressure: num(details.air_pressure_at_sea_level),
+        },
+      },
+    ];
+  });
+  if (!slots.length) throw new Error("met-empty");
+  const hourly = slots.map((slot) => slot.hour);
+  const byDay = new Map<string, typeof slots>();
+  for (const slot of slots) {
+    const key = dayKey(slot.hour.t, timezone);
+    const list = byDay.get(key);
+    if (list) list.push(slot);
+    else byDay.set(key, [slot]);
+  }
+  const daily = [...byDay.entries()].map(([key, rows]) => {
+    const noon = Date.parse(`${key}T12:00:00Z`) - offset * 1000;
+    const temps = rows.map((row) => row.hour.temp);
+    const precip = rows.reduce((sum, row) => sum + row.period, 0);
+    const mid = rows.reduce((best, row) => (Math.abs(row.hour.t - noon) < Math.abs(best.hour.t - noon) ? row : best));
+    const sun = sunArc(place.lat, place.lon, noon);
+    return {
+      t: noon,
+      code: mid.hour.code,
+      tmax: Math.max(...temps),
+      tmin: Math.min(...temps),
+      sunrise: sun.rise,
+      sunset: sun.set,
+      precip: Math.round(precip * 10) / 10,
+      pop: Math.max(...rows.map((row) => row.hour.pop)),
+      uv: clearUv(place.lat, noon),
+      wind: Math.max(...rows.map((row) => row.hour.wind)),
+    };
+  });
+  const now = Date.now();
+  const nearest = hourly.reduce((best, row) => (Math.abs(row.t - now) < Math.abs(best.t - now) ? row : best));
+  const instant = series[0]?.data?.instant?.details ?? {};
+  return {
+    placeId: place.id,
+    timezone,
+    offset,
+    fetchedAt: now,
+    current: {
+      t: nearest.t,
+      temp: nearest.temp,
+      feels: nearest.feels,
+      humidity: Math.round(num(instant.relative_humidity)),
+      precip: nearest.precip,
+      code: nearest.code,
+      cloud: num(instant.cloud_area_fraction),
+      pressure: num(instant.air_pressure_at_sea_level),
+      wind: nearest.wind,
+      gust: nearest.gust,
+      dir: num(instant.wind_from_direction),
+      visibility: 10_000,
+      isDay: daylightNow(now, place.lat, place.lon, daily, hourly),
+    },
+    hourly,
+    daily,
+    air: null,
+    marine: null,
+  };
+}
+
+async function fetchForecast(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
+  let primary: unknown;
+  if (!isQuotaBlocked()) {
+    try {
+      return await fetchOpenMeteo(place, signal);
+    } catch (err) {
+      if (aborted(err, signal)) throw err;
+      primary = err;
+    }
+  }
+  try {
+    return await fetchMet(place, signal);
+  } catch (err) {
+    if (aborted(err, signal)) throw err;
+    throw primary instanceof Error ? primary : err;
+  }
 }
 
 function aborted(err: unknown, signal?: AbortSignal): boolean {
@@ -318,19 +537,16 @@ export function loadWeather(
     const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS;
     if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
     let last: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
       try {
         const bundle = await fetchForecast(place, opts?.signal);
-        forecastFailure = "";
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
       } catch (err) {
         if (aborted(err, opts?.signal)) throw err;
         last = err;
-        forecastFailure = failureCode(err);
-        if (forecastFailure === "quota") break;
-        if (attempt < 1) {
+        if (attempt < 2) {
           try {
             await pause(500 * (attempt + 1), opts?.signal);
           } catch (waitErr) {
@@ -340,13 +556,14 @@ export function loadWeather(
       }
     }
     if (cached) return { bundle: cached.bundle, stale: true, estimated: false };
-    throw last instanceof Error ? last : new Error("connection");
+    if (last instanceof Error && last.message === "quota") return { bundle: estimateBundle(place), stale: true, estimated: true };
+    return { bundle: estimateBundle(place), stale: true, estimated: true };
   })();
   if (!opts?.signal) {
     inflight.set(key, job);
-    void job.then(() => {
+    void job.finally(() => {
       if (inflight.get(key) === job) inflight.delete(key);
-    }, () => { if (inflight.get(key) === job) inflight.delete(key); });
+    });
   }
   return job;
 }
@@ -438,15 +655,4 @@ export function placeFromCoords(lat: number, lon: number, name: string, country 
     lon,
     primary: false,
   };
-}
-
-export async function enrichWeather(place: Place, bundle: WeatherBundle, signal?: AbortSignal): Promise<WeatherBundle> {
-  const [air, marine] = await Promise.all([
-    fetchAir(place, signal).catch(() => bundle.air),
-    fetchMarine(place, signal).catch(() => bundle.marine ?? {coastal:false,wave:null}),
-  ]);
-  if (signal?.aborted) throw new DOMException('aborted','AbortError');
-  const next = {...bundle, air, marine};
-  rememberBundle(place.id, next);
-  return next;
 }

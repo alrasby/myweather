@@ -3,7 +3,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { DetailCards } from "@/components/weather/SkyCards";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
-import { getForecastConnectionDiagnostic } from "@/weather/net";
 import { readBestPosition } from "@/weather/geo";
 import {
   dayKey,
@@ -31,9 +30,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const bundle = useWeather((s) => s.bundle);
   const loading = useWeather((s) => s.loading);
   const error = useWeather((s) => s.error);
-  const connectionIssue = useWeather((s) => s.connectionIssue);
-  const [locationStatus, setLocationStatus] = useState("");
-  useEffect(() => () => { locateGen.current++; }, []);
   const estimated = useWeather((s) => s.estimated);
   const stale = useWeather((s) => s.stale);
   const loadActive = useWeather((s) => s.loadActive);
@@ -65,21 +61,11 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const locate = () => {
     if (locating) return;
     setLocating(true);
-    setLocationStatus("");
     const gen = ++locateGen.current;
     let ticket = 0;
-    const apply = (pos: { lat: number; lon: number; accuracy: number }) => {
-      if (gen !== locateGen.current) return;
+    const apply = (pos: { lat: number; lon: number }) => {
       const mine = ++ticket;
-      const coordinates = placeFromCoords(pos.lat, pos.lon, `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`);
-      const previous = useWeather.getState().here;
-      const samePosition = previous && Math.abs(previous.lat - pos.lat) < 0.005 && Math.abs(previous.lon - pos.lon) < 0.005;
-      const firstPlace = samePosition && previous.name && !/^[-\d.,\s]+$/.test(previous.name)
-        ? placeFromCoords(pos.lat, pos.lon, previous.name, previous.country, previous.admin)
-        : coordinates;
-      setHere(firstPlace);
-      locatePlace(firstPlace);
-      void lookupPlace(pos.lat, pos.lon, lang).then((rev) => {
+      void lookupPlace(pos.lat, pos.lon, textBase()).then((rev) => {
         if (mine !== ticket || gen !== locateGen.current) return;
         const name = rev?.name || `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`;
         const next = placeFromCoords(pos.lat, pos.lon, name, rev?.country || "", rev?.admin || "");
@@ -87,11 +73,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         locatePlace(next);
       });
     };
-    void readBestPosition(apply).then(fix => {
-      if (!fix) throw new Error("no-fix");
-    }).catch(() => {
-      if (gen === locateGen.current) setLocationStatus(lang === "ar" ? "تعذر تحديد الموقع. تحقق من تشغيل الموقع ومنح الإذن الدقيق." : "Location unavailable. Enable location and precise permission.");
-    }).finally(() => {
+    void readBestPosition(apply).finally(() => {
       if (gen === locateGen.current) setLocating(false);
     });
   };
@@ -174,15 +156,9 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         <p className="flex h-6 items-center justify-center text-xs text-on-sky/80">{t(lang, "pull")}</p>
       ) : null}
 
-      {locationStatus ? <p role="status" className="mt-2 text-center text-xs text-on-sky/80">{locationStatus}</p> : null}
-      {error && getForecastConnectionDiagnostic() ? (
-        <p role="status" className="mt-2 text-center text-xs text-on-sky/80">
-          {lang === "ar" ? "تشخيص الاتصال" : "Connection diagnostic"}: {getForecastConnectionDiagnostic()!.source} / HTTP {getForecastConnectionDiagnostic()!.status}{getForecastConnectionDiagnostic()!.providerReason ? ` · ${getForecastConnectionDiagnostic()!.providerReason}` : ""}{getForecastConnectionDiagnostic()!.source === "local" && getForecastConnectionDiagnostic()!.retryAfterMs ? ` · ${Math.ceil(getForecastConnectionDiagnostic()!.retryAfterMs! / 1000)} ${lang === "ar" ? "ثانية متبقية" : "seconds remaining"}` : ""}
-        </p>
-      ) : null}
       {error && !bundle ? (
         <div className="wx-card mt-4 p-5 text-center">
-          <p className="text-sm text-muted">{connectionIssue === "quota" ? (lang === "ar" ? "بلغ مزود الطقس حد الطلبات مؤقتًا. ستتم إعادة المحاولة." : "Weather request limit reached. Retrying shortly.") : t(lang, "offline")}</p>
+          <p className="text-sm text-muted">{t(lang, "offline")}</p>
           <button type="button" onClick={refresh} className="mt-3 h-11 rounded-full bg-accent px-4 text-sm font-medium text-accent-ink">
             {t(lang, "retry")}
           </button>
@@ -219,7 +195,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
             {estimated && !loading ? (
               <p className="mt-1 text-xs font-medium text-on-sky/75">{t(lang, "estimated")}</p>
             ) : stale && !loading ? (
-              <p className="mt-1 text-xs font-medium text-on-sky/75">{t(lang, "stale")} · {new Intl.DateTimeFormat(lang, { timeZone: bundle.timezone, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(bundle.current.t)}</p>
+              <p className="mt-1 text-xs font-medium text-on-sky/75">{t(lang, "stale")}</p>
             ) : loading ? (
               <p className="mt-1 text-xs font-medium text-on-sky/75">{t(lang, "updating")}</p>
             ) : null}

@@ -65,11 +65,9 @@ export function WeatherApp() {
       if (state.loading || (!state.estimated && !state.error)) return;
       void state.loadActive(true);
     };
-    const retryTimer = window.setInterval(kick, 60_000);
     window.addEventListener("online", kick);
     document.addEventListener("visibilitychange", kick);
     return () => {
-      window.clearInterval(retryTimer);
       window.removeEventListener("online", kick);
       document.removeEventListener("visibilitychange", kick);
     };

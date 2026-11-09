@@ -1,28 +1,36 @@
-import { proxyFetch } from "@/weather/net";
 import type { ReverseHit } from "@/weather/reverse.functions";
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 function speech(lang: string): string {
   const code = (lang || "en").slice(0, 2).toLowerCase();
   return /^[a-z]{2}$/.test(code) ? code : "en";
 }
 
-async function fromNominatim(
-  lat: number,
-  lon: number,
-  lang: string,
-  signal: AbortSignal,
-): Promise<ReverseHit> {
+async function fromNominatim(lat: number, lon: number, lang: string): Promise<ReverseHit> {
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("lat", String(lat));
   url.searchParams.set("lon", String(lon));
   url.searchParams.set("zoom", "14");
   url.searchParams.set("accept-language", speech(lang));
-  const res = await proxyFetch(url.toString(), signal);
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
-  const json = (await res.json()) as {
-    address?: Record<string, string | undefined>;
-  };
+  const json = (await res.json()) as { address?: Record<string, string | undefined> };
   const address = json.address ?? {};
   const name =
     address.suburb ||
@@ -42,19 +50,12 @@ async function fromNominatim(
   };
 }
 
-async function fromBigData(
-  lat: number,
-  lon: number,
-  lang: string,
-  signal: AbortSignal,
-): Promise<ReverseHit> {
-  const url = new URL(
-    "https://api.bigdatacloud.net/data/reverse-geocode-client",
-  );
+async function fromBigData(lat: number, lon: number, lang: string): Promise<ReverseHit> {
+  const url = new URL("https://api.bigdatacloud.net/data/reverse-geocode-client");
   url.searchParams.set("latitude", String(lat));
   url.searchParams.set("longitude", String(lon));
   url.searchParams.set("localityLanguage", speech(lang));
-  const res = await proxyFetch(url.toString(), signal);
+  const res = await fetch(url);
   if (!res.ok) return null;
   const json = (await res.json()) as {
     city?: string;
@@ -66,33 +67,16 @@ async function fromBigData(
   if (!name) return null;
   return {
     name,
-    admin:
-      json.city && json.city !== name
-        ? json.city
-        : json.principalSubdivision || "",
+    admin: json.city && json.city !== name ? json.city : json.principalSubdivision || "",
     country: json.countryName || "",
   };
 }
 
 /** اسم أدق مكان: حي أو بلدة، مباشرة من الإحداثيات، لأي بقعة في العالم. */
-export async function lookupPlace(
-  lat: number,
-  lon: number,
-  lang = "ar",
-): Promise<ReverseHit> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-  try {
-    // Return the first valid place name rather than waiting for both providers.
-    // A slow or blocked provider must not delay the other provider's result.
-    const precise = fromNominatim(lat, lon, lang, controller.signal).catch(() => null);
-    const fast = fromBigData(lat, lon, lang, controller.signal).catch(() => null);
-    const first = await Promise.any([
-      precise.then(hit => { if (!hit) throw new Error("no-place"); return hit; }),
-      fast.then(hit => { if (!hit) throw new Error("no-place"); return hit; }),
-    ]).catch(() => null);
-    return first;
-  } finally {
-    clearTimeout(timer);
-  }
+export async function lookupPlace(lat: number, lon: number, lang = "ar"): Promise<ReverseHit> {
+  const [precise, fast] = await Promise.all([
+    withTimeout(fromNominatim(lat, lon, lang), 2800).catch(() => null),
+    withTimeout(fromBigData(lat, lon, lang), 2800).catch(() => null),
+  ]);
+  return precise || fast;
 }

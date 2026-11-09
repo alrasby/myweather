@@ -9,6 +9,7 @@ const ALLOWED = new Set([
   "www.nhc.noaa.gov",
   "www.metoc.navy.mil",
   "tgftp.nws.noaa.gov",
+  "api.met.no",
 ]);
 
 /** الطلب يمرّ من الخادم حتى لا يطبع المتصفح 429 كخطأ، مع حصر المضيف. */

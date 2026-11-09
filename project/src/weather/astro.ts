@@ -28,6 +28,10 @@ function solarSpan(lat: number, lon: number, noonUtc: number): { rise: number; s
   return { rise: solarNoon - half * 3_600_000, set: solarNoon + half * 3_600_000 };
 }
 
+export function sunArc(lat: number, lon: number, noonUtc: number): { rise: number; set: number } {
+  return solarSpan(lat, lon, noonUtc);
+}
+
 /** هل الشمس فوق الأفق عند هذا التوقيت؟ يغطي اليوم المجاور قرب خط التاريخ. */
 export function solarDaylight(lat: number, lon: number, ms: number): boolean {
   const d = new Date(ms);
