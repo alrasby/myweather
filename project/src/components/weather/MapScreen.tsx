@@ -82,8 +82,11 @@ async function loadLeaflet(): Promise<LeafletNs> {
 }
 
 function minZoomFor(el: HTMLElement): number {
-  const z = Math.ceil(Math.log2(Math.max(el.clientWidth || 360, el.clientHeight || 640) / 256));
-  return Math.min(5, Math.max(2, z));
+  // At minimum zoom, never fit the entire world into the map viewport.
+  // Keep at most half of the world's longitude visible, including landscape screens.
+  const width = Math.max(1, el.clientWidth || 360);
+  const z = Math.ceil(Math.log2((width * 2) / 256));
+  return Math.min(16, Math.max(3, z));
 }
 
 type FetchBox = { south: number; north: number; west: number; lonSpan: number };
