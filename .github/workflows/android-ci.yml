@@ -52,12 +52,11 @@ jobs:
         run: |
           node --test scripts/browser-smoke-verdict.test.mjs scripts/sign-out-plan.test.mjs
           node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts
-      - name: Deterministic weather regression tests
-        run: |
-          node budget-tests.mjs
-          node connection-tests.mjs
-          node map-tests.mjs
-          node precip-data-tests.mjs
+      # Legacy root weather tests target the replaced net.ts API (requestLane,
+      # requestWeight and budget persistence). They must not run against this
+      # deliberately restored 1.0.54 source. Keep them in git for reference.
+      - name: Verify restored weather source contracts
+        run: node scripts/verify-restored-weather.mjs
       - name: Build Capacitor web assets and sync Android
         working-directory: project
         run: npm run build:android
