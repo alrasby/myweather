@@ -81,7 +81,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t(lang, "searchPh")}
-          className="h-12 w-full rounded-full border border-line bg-surface-solid/40 px-4 text-on-sky outline-none placeholder:text-on-sky/60"
+          className="h-12 w-full rounded-full border border-line bg-surface-solid/65 px-4 text-on-sky outline-none placeholder:text-on-sky/60"
         />
       </label>
       {query.trim().length >= 2 ? (
@@ -95,7 +95,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               const saved = kept(hit);
               return (
               <li key={hit.id} className="flex items-center gap-3 px-3 py-2">
-                <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { viewPlace(hit); setQuery(""); onClose(); }}>
+                <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { /* Preview only: saving requires the separate + button. */ viewPlace(hit); setQuery(""); onClose(); }}>
                   <p className="truncate text-sm text-fg">{placeTitle(hit, lang)}</p>
                   <p className="truncate text-xs text-muted">{[hit.admin, placeCountry(hit, lang)].filter(Boolean).join(" · ")}</p>
                 </button>
