@@ -477,6 +477,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const worldAc = new AbortController();
     let viewAc: AbortController | null = null;
     let pendingView: FetchBox | null = null;
+    let loadedView: Awaited<ReturnType<typeof fetchGrid>> | null = null;
     const hours = prefs.mapHours === 72 ? 48 : prefs.mapHours;
     const saver = prefs.dataSaver;
 
@@ -531,6 +532,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       const boxWest = west - padLon;
       const lonSpan = Math.max(6, east + padLon - boxWest);
       const nextBox: FetchBox = { south, north, west: boxWest, lonSpan };
+      // Reuse a loaded rain grid while its padded coverage and resolution remain sufficient.
+      // Avoid aborting/restarting expensive precipitation requests on every small pan.
+      if (loadedView &&
+          covers(loadedView, { south, north, west: boxWest, east: boxWest + lonSpan }) &&
+          loadedView.lonSpan / Math.max(1, loadedView.cols) <= Math.max(0.4, Math.min(1.7, Math.sqrt(Math.max(6, lonSpan * Math.max(1, north - south)) / 4200))) * 1.25) return;
       if (sameFetch(pendingView, nextBox)) return;
       const viewLat = Math.max(1, north - south);
       const budget = 4200;
@@ -571,6 +577,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (eastNow < westNow) eastNow += 360;
         if (Math.min(360, eastNow - westNow) > 200) return;
         if (!covers(grid, { south: seNow.lat, north: nwNow.lat, west: westNow, east: eastNow })) return;
+        loadedView = grid;
         engine.setRainView(grid);
       };
       void (async () => {
