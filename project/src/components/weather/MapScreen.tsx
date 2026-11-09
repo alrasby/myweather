@@ -5,6 +5,7 @@ import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { loadWeather, placeFromCoords } from "@/weather/api";
 import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { covers, gridFailureReason, fetchGrid } from "@/weather/grid";
+import { backgroundCooldownMs } from "@/weather/net";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
 import { compassFrom } from "@/weather/heading";
@@ -302,8 +303,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         return;
       }
       const span = view.span;
-      const padLon = Math.max(0.08, span * 0.2);
-      const padLat = Math.max(0.08, (view.north - view.south) * 0.2);
+      // هامش أوسع: التحريك داخل نصف الشاشة لا يطلب بيانات جديدة.
+      const padLon = Math.max(0.15, span * 0.45);
+      const padLat = Math.max(0.15, (view.north - view.south) * 0.45);
       const south = Math.max(-85, view.south - padLat);
       const north = Math.min(85, view.north + padLat);
       const west = view.west - padLon;
@@ -313,9 +315,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       const mine = ++detailGen;
       detailAc?.abort();
       detailAc = new AbortController();
-      const cell = Math.max(0.025, span / 16);
-      const cols = Math.max(6, Math.min(saver ? 6 : 8, Math.round(lonSpan / cell)));
-      const rows = Math.max(6, Math.min(saver ? 6 : 8, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
+      // الحصة بعدد المواقع: ≤ 256 نقطة للمنطقة الظاهرة (≤ 64 في وضع التوفير).
+      const maxSide = saver ? 8 : 16;
+      const cols = maxSide;
+      const rows = Math.max(8, Math.min(maxSide, Math.round(cols * map.getSize().y / Math.max(1, map.getSize().x))));
       void fetchGrid({
         south,
         north,
@@ -363,7 +366,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       void (async () => {
       try {
         // A shared global field complements independently fetched viewport detail.
-        const globalGrid = await loadWorld(saver ? 6 : 8, saver ? 4 : 5, 0.05, 0.98);
+        const globalGrid = await loadWorld(saver ? 12 : 18, saver ? 6 : 9, 0.05, 0.98);
         if (dead) return;
         engine.setGlobal(globalGrid);
         engine.setRainWorld(globalGrid);
@@ -396,6 +399,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       map.off("zoomend", consider);
     };
   }, [ready, prefs.mapHours, prefs.dataSaver, gridRetry]);
+
+  // عند حدّ الاستخدام: إعادة تلقائية بعد انتهاء المهلة بدل انتظار الضغط على الزر.
+  useEffect(() => {
+    if (!gridFailed || gridErrorKind !== "quota") return;
+    const wait = Math.min(15 * 60_000, Math.max(8_000, backgroundCooldownMs() + 1_000));
+    const id = window.setTimeout(() => setGridRetry((n) => n + 1), wait);
+    return () => window.clearTimeout(id);
+  }, [gridFailed, gridErrorKind]);
 
   useEffect(() => {
     engineRef.current?.setOverlay(lang, prefs.wind);
