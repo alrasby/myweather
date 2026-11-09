@@ -1,0 +1,84 @@
+name: Restore MyWeather 1.0.54 source archive
+on:
+  push:
+    branches:
+      - import/restore-myweather-1.0.54
+    paths:
+      - MyWeather-1.0.54-GitHub-Import.zip
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify approved source archive and fully replace project source
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive='MyWeather-1.0.54-GitHub-Import.zip'
+          test -s "$archive"
+          echo 'ea4d0e72f9c00f2f7d9c26c0a938272c7b1ff488847e88268df30e7ecf3cb81c  MyWeather-1.0.54-GitHub-Import.zip' | sha256sum -c -
+          cp project/index.html /tmp/myweather-android-index.html
+          cp project/vite.android.config.ts /tmp/myweather-vite-android.config.ts
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+          archive=Path('MyWeather-1.0.54-GitHub-Import.zip')
+          required={
+              'project/package.json',
+              'project/package-lock.json',
+              'project/src/weather/net.ts',
+              'project/src/weather/grid.ts',
+              'project/src/components/weather/MapScreen.tsx',
+              'project/android/app/build.gradle',
+              'project/android/gradle/wrapper/gradle-wrapper.jar',
+          }
+          with ZipFile(archive) as z:
+              entries=z.infolist()
+              names={e.filename for e in entries}
+              if not required <= names: raise SystemExit('Missing essential source files')
+              if len(entries)>600 or sum(e.file_size for e in entries)>30000000:
+                  raise SystemExit('Unexpected source archive size')
+              for e in entries:
+                  name=e.filename
+                  p=PurePosixPath(name)
+                  if name.startswith('/') or '\\' in name or '..' in p.parts or not name.startswith('project/'):
+                      raise SystemExit('Unsafe archive entry')
+                  if (e.external_attr >> 16) & 0o170000 == 0o120000:
+                      raise SystemExit('Symlink entry not allowed')
+                  if name in {'project/android/keystore.properties','project/android/keystore/myweather-upload.jks','project/android/release.jks','project/android/local.properties'}:
+                      raise SystemExit('Signing secrets are not permitted in source')
+          PY
+          git rm -qr -- project
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('MyWeather-1.0.54-GitHub-Import.zip') as z:
+              for item in z.infolist():
+                  if item.is_dir(): continue
+                  target=Path(item.filename)
+                  target.parent.mkdir(parents=True,exist_ok=True)
+                  target.write_bytes(z.read(item))
+          PY
+          cp /tmp/myweather-android-index.html project/index.html
+          cp /tmp/myweather-vite-android.config.ts project/vite.android.config.ts
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          file=Path('project/package.json')
+          data=json.loads(file.read_text())
+          data['scripts']['build:android']='vite build --config vite.android.config.ts && npx cap sync android'
+          file.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          PY
+          chmod +x project/android/gradlew
+          node scripts/verify-import.mjs
+          git rm -f -- "$archive"
+          git add -A -- project
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: replace MyWeather project with uploaded 1.0.54 source'
+          git push origin HEAD:import/restore-myweather-1.0.54
