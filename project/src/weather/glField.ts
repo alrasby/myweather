@@ -116,23 +116,25 @@ void main() {
     float fallCm = max(0.0, sn.r * 12.0);
     float cloud = sn.b;
     float rainBody = smoothstep(0.1, 0.65, mm);
-    float snowBody = smoothstep(0.15, 0.45, fallCm);
-    float cloudBody = smoothstep(0.45, 0.9, cloud);
+    float snowBody = smoothstep(0.09, 0.33, fallCm);
+    // Dense cloud banks remain recognizable; widespread light cloud must not
+    // become a uniform white fog over the satellite base.
+    float cloudBody = smoothstep(0.62, 0.94, cloud);
     if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02)) {
       frag = vec4(0.0);
       return;
     }
     float t = clamp((mm - u_range.x) / span, 0.0, 1.0);
     vec3 rainCol = texture(u_lut, vec2(t, 0.5)).rgb;
-    float rainA = rainBody * mix(0.32, 0.9, smoothstep(0.5, 6.0, mm));
+    float rainA = rainBody * mix(0.48, 0.95, smoothstep(0.5, 6.0, mm));
     vec3 snowCol = mix(vec3(0.62, 0.78, 0.96), vec3(0.97, 0.98, 1.0), snowBody);
-    float snowA = snowBody * mix(0.5, 0.82, snowBody);
+    float snowA = snowBody * mix(0.68, 0.94, snowBody);
     float useSnow = snowBody / max(snowBody + rainBody, 0.001);
     vec3 wxCol = mix(rainCol, snowCol, useSnow);
     float wxA = mix(rainA, snowA, useSnow);
     float wx = clamp(max(rainBody, snowBody), 0.0, 1.0);
     col = mix(vec3(0.96, 0.97, 0.99), wxCol, wx);
-    alpha = mix(cloudBody * 0.4, wxA, wx) * u_alphaMul;
+    alpha = mix(cloudBody * mix(0.28, 0.56, cloudBody), wxA, wx) * u_alphaMul;
   }
   frag = vec4(col * alpha * edge, alpha * edge);
 }`;
@@ -1334,22 +1336,22 @@ function shade(
   if (kind === 2) {
     const snowCm = Math.max(s.snow ?? 0, 0);
     const rainBody = smooth(0.1, 0.65, s.rain);
-    const snowBody = smooth(0.15, 0.45, snowCm);
-    const cloudBody = smooth(0.45, 0.9, (s.cloud ?? 0) / 100);
+    const snowBody = smooth(0.09, 0.33, snowCm);
+    const cloudBody = smooth(0.62, 0.94, (s.cloud ?? 0) / 100);
     if (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02) return null;
-    const rainA = rainBody * (0.32 + smooth(0.5, 6, s.rain) * 0.58);
-    const snowI = Math.max(0, Math.min(1, snowCm / 0.45));
+    const rainA = rainBody * (0.48 + smooth(0.5, 6, s.rain) * 0.47);
+    const snowI = Math.max(0, Math.min(1, snowCm / 0.33));
     const sr = Math.round(158 + (247 - 158) * snowI);
     const sg = Math.round(199 + (250 - 199) * snowI);
     const sb = Math.round(245 + (255 - 245) * snowI);
-    const snowA = snowBody * (0.5 + snowBody * 0.32);
+    const snowA = snowBody * (0.68 + snowBody * 0.26);
     const useSnow = snowBody / Math.max(snowBody + rainBody, 0.001);
     const [rr, gg, bb] = colorAt(layer.stops, s.rain);
     const wx = Math.max(rainBody, snowBody);
     const r = Math.round((245 * (1 - wx) + (rr * (1 - useSnow) + sr * useSnow) * wx));
     const g = Math.round((247 * (1 - wx) + (gg * (1 - useSnow) + sg * useSnow) * wx));
     const b = Math.round((252 * (1 - wx) + (bb * (1 - useSnow) + sb * useSnow) * wx));
-    const a = ((cloudBody * 0.4) * (1 - wx) + (rainA * (1 - useSnow) + snowA * useSnow) * wx) * alphaMul;
+    const a = ((cloudBody * (0.28 + 0.28 * cloudBody)) * (1 - wx) + (rainA * (1 - useSnow) + snowA * useSnow) * wx) * alphaMul;
     return `rgba(${r},${g},${b},${Math.min(0.9, a).toFixed(3)})`;
   }
   const value = kind === 0 ? s.spd : s.temp;

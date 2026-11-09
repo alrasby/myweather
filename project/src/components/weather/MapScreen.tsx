@@ -191,8 +191,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           worldCopyJump: true,
           inertia: true,
           // Cap long inertial flings to avoid moving ahead of available satellite tiles.
-          inertiaDeceleration: 4500,
-          inertiaMaxSpeed: 1100,
+          inertiaDeceleration: 5200,
+          inertiaMaxSpeed: 900,
           maxBounds: [[-85.0511287798, -100000], [85.0511287798, 100000]],
           maxBoundsViscosity: 1,
           doubleClickZoom: false,
@@ -272,7 +272,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       return;
     }
     engine.setPaused(document.hidden);
-    map.invalidateSize();
+    // Refresh the container without an implicit pan/jump after tab activation.
+    map.invalidateSize({ pan: false, debounceMoveend: true });
     engine.resize();
   }, [active, ready]);
 
