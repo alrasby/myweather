@@ -1,4 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
+import { modelTileFrameReady } from "@/weather/modelTileReadiness";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -247,6 +248,8 @@ export function installSpatialFetch(): void {
     throw new Error("spatial-fetch");
   };
 }
+/** Read a canvas tile once to detect meaningful weather data.
+ * Do not rewrite the tile's edge pixels: that produces visible grid lines. */
 function tileHasInk(tile?: HTMLElement): boolean {
   if (!(tile instanceof HTMLCanvasElement) || tile.width < 2 || tile.height < 2) return false;
   const ctx = tile.getContext("2d");
@@ -256,13 +259,12 @@ function tileHasInk(tile?: HTMLElement): boolean {
     const data = ctx.getImageData(0, 0, width, height).data;
     const step = Math.max(16, Math.floor(Math.min(width, height) / 10));
     for (let y = 0; y < height; y += step) {
-      const row = y * width;
       for (let x = 0; x < width; x += step) {
-        if ((data[(row + x) * 4 + 3] ?? 0) > 8) return true;
+        if ((data[(y * width + x) * 4 + 3] ?? 0) > 8) return true;
       }
     }
   } catch {
-    return false;
+    // A cancelled canvas decode is not ready to display.
   }
   return false;
 }
@@ -288,10 +290,11 @@ export class ModelField {
   private blend = 0;
   private failed = new Set<number>();
   private loading = new Set<number>();
-  private frames = new Map<number, { layers: AnyLayer[]; ink: boolean; token: number; opacity: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; ink: boolean; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number> }>();
   private seq = 0;
   private orderKey = "";
   private visible = false;
+  private lastSyncAt = 0;
   private ready: Promise<void> = Promise.resolve();
 
   attach(L: unknown, map: LeafletMap) {
@@ -336,6 +339,10 @@ export class ModelField {
 
   sync(ms: number) {
     if (!this.visible) return;
+    // Forecast tile management does not need to run at the 60fps WebGL cadence.
+    const now = performance.now();
+    if (now - this.lastSyncAt < 50) return;
+    this.lastSyncAt = now;
     installSpatialFetch();
     void this.ready.then(() => {
       if (!this.visible || !this.adapter || !this.map || !this.times.length) return;
@@ -386,12 +393,12 @@ export class ModelField {
 
   private newestInk(): number {
     let best = -1;
-    for (const [step, frame] of this.frames) if (frame.ink && step > best) best = step;
+    for (const [step, frame] of this.frames) if (frame.ready && step > best) best = step;
     return best;
   }
 
   private anyInk(): boolean {
-    for (const frame of this.frames.values()) if (frame.ink) return true;
+    for (const frame of this.frames.values()) if (frame.ready) return true;
     return false;
   }
 
@@ -401,18 +408,35 @@ export class ModelField {
     if (!adapter || !map) return;
     const token = ++this.seq;
     this.loading.add(step);
-    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: false, updateWhenZooming: false, keepBuffer: 2 };
-    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: false, updateWhenZooming: false, keepBuffer: 2 };
+    // Model tiles are expensive to decode: keep the current frame stable while
+    // dragging/pinching, then fetch the new viewport once interaction settles.
+    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
+    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
     const made = [
       adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
     ] as AnyLayer[];
-    const frame = { layers: made, ink: false, token, opacity: -1 };
+    const frame = { layers: made, ink: false, token, opacity: -1, ready: false, loaded: Array<boolean>(made.length).fill(false), errored: new Set<number>() };
     this.frames.set(step, frame);
     if (!this.anyInk()) this.onMiss?.();
     let errors = 0;
     const alive = () => this.frames.get(step)?.token === token;
+    const refresh = () => {
+      if (!alive()) return;
+      const ready = modelTileFrameReady(frame.ink, frame.loaded, frame.errored);
+      if (ready === frame.ready) return;
+      frame.ready = ready;
+      this.orderKey = "";
+      if (!ready) {
+        // Partial frames are never exposed: keep the global rain canvas visible.
+        frame.opacity = 0;
+        for (const layer of made) layer.setOpacity?.(0);
+      }
+      if (this.anyInk()) this.onLive?.();
+      else this.onMiss?.();
+      this.applyOpacity();
+    };
     const giveUp = () => {
       if (!alive() || frame.ink) return;
       this.failed.add(step);
@@ -426,21 +450,34 @@ export class ModelField {
       if (!alive() || frame.ink) return;
       giveUp();
     }, 20000);
-    for (const layer of made) {
-      layer.on("tileload", (ev) => {
+    for (const [index, layer] of made.entries()) {
+      // 'tileload' reports ONE tile. 'load' reports that the complete current
+      // viewport tile queue has settled. Only the latter may replace fallback.
+      layer.on("loading", () => {
         if (!alive()) return;
-        if (!tileHasInk(ev?.tile)) return;
-        if (frame.ink) return;
+        frame.loaded[index] = false;
+        frame.errored.delete(index);
+        refresh();
+      });
+      layer.on("load", () => {
+        if (!alive()) return;
+        frame.loaded[index] = true;
+        refresh();
+      });
+      layer.on("tileload", (ev) => {
+        // Canvas readback is expensive on Android; only inspect until the first nonempty tile.
+        if (!alive() || frame.ink || !tileHasInk(ev?.tile)) return;
         frame.ink = true;
         this.loading.delete(step);
         window.clearTimeout(wait);
-        this.orderKey = "";
-        this.applyOpacity();
-        this.onLive?.();
+        refresh();
         this.pump();
       });
       layer.on("tileerror", () => {
-        if (!alive() || frame.ink) return;
+        if (!alive()) return;
+        frame.errored.add(index);
+        refresh();
+        if (frame.ink) return;
         errors += 1;
         if (errors >= 8) {
           window.clearTimeout(wait);
@@ -455,7 +492,7 @@ export class ModelField {
   private applyOpacity() {
     const i = this.base;
     const next = this.blend;
-    const ink = (step: number) => this.frames.get(step)?.ink === true;
+    const ink = (step: number) => this.frames.get(step)?.ready === true;
     const both = ink(i) && ink(i + 1);
     const held = !both && !ink(i) && !ink(i + 1) ? this.newestInk() : -1;
     const key = `${i}:${held}:${both ? "ab" : ink(i) ? "a" : ink(i + 1) ? "b" : ""}`;

@@ -185,22 +185,37 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // world out of its bounded viewport when two fingers move together.
           touchZoom: "center",
           bounceAtZoomLimits: false,
-          zoomAnimation: false,
-          fadeAnimation: false,
+          zoomAnimation: true,
+          fadeAnimation: true,
           // Wrap longitudes continuously while constraining only the polar direction.
           worldCopyJump: true,
           inertia: true,
-          inertiaDeceleration: 4000,
+          // Cap long inertial flings to avoid moving ahead of available satellite tiles.
+          inertiaDeceleration: 4500,
+          inertiaMaxSpeed: 1100,
           maxBounds: [[-85.0511287798, -100000], [85.0511287798, 100000]],
           maxBoundsViscosity: 1,
           doubleClickZoom: false,
         });
         const here = placeRef.current;
         map.setView([here.lat, here.lon], 5);
-        const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-          maxZoom: 16,
+        const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+        // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
+        // are fetched after fast pans. Both layers use the same imagery provider.
+        L.tileLayer(imageryUrl, {
+          maxNativeZoom: 4,
+          maxZoom: 9,
+          zIndex: 0,
           updateWhenIdle: false,
-          keepBuffer: 6,
+          updateInterval: 200,
+          keepBuffer: 1,
+        }).addTo(map);
+        const imagery = L.tileLayer(imageryUrl, {
+          maxZoom: 16,
+          zIndex: 1,
+          updateWhenIdle: false,
+          updateInterval: 150,
+          keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
         const labels = map.createPane("wx-labels");
@@ -208,7 +223,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, keepBuffer: 6 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
