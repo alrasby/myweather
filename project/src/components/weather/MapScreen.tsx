@@ -211,10 +211,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           zoomSnap: 1,
           zoomAnimation: false,
           fadeAnimation: false,
-          worldCopyJump: true,
-          inertia: true,
-          // Constrain vertical dragging at Mercator poles, while retaining horizontal world wrap.
-          maxBounds: [[-85.0511287798, -540], [85.0511287798, 540]],
+          // A single bounded world avoids jumping into unpopulated tile copies on drag.
+          worldCopyJump: false,
+          inertia: false,
+          maxBounds: [[-85.0511287798, -180], [85.0511287798, 180]],
           maxBoundsViscosity: 1,
           doubleClickZoom: false,
         });
@@ -222,7 +222,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         map.setView([here.lat, here.lon], 5);
         const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
           maxZoom: 16,
-          keepBuffer: 4,
+          noWrap: true,
+          updateWhenIdle: false,
+          keepBuffer: 6,
         }).addTo(map);
         imageryRef.current = imagery;
         const labels = map.createPane("wx-labels");
@@ -230,7 +232,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", keepBuffer: 4 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", noWrap: true, updateWhenIdle: false, keepBuffer: 6 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
