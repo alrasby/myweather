@@ -247,51 +247,48 @@ export function installSpatialFetch(): void {
     throw new Error("spatial-fetch");
   };
 }
-/** Weather-model canvas tiles may contain a bright interpolation border.
- * Attenuate only the outer two pixels, never copy interior rows across tile seams. */
-function softenWeatherTileEdge(tile?: HTMLElement) {
-  if (!(tile instanceof HTMLCanvasElement) || tile.width < 8 || tile.height < 8) return;
-  const ctx = tile.getContext("2d");
-  if (!ctx) return;
-  try {
-    const { width: w, height: h } = tile;
-    const edge = 2;
-    const strips = [
-      [0, 0, w, edge], [0, h - edge, w, edge],
-      [0, edge, edge, h - edge * 2], [w - edge, edge, edge, h - edge * 2],
-    ];
-    for (const [x, y, sw, sh] of strips) {
-      const pixels = ctx.getImageData(x, y, sw, sh);
-      for (let row = 0; row < sh; row++) for (let col = 0; col < sw; col++) {
-        const dist = Math.min(x + col, y + row, w - 1 - x - col, h - 1 - y - row);
-        const fade = dist === 0 ? 0 : 0.5;
-        pixels.data[(row * sw + col) * 4 + 3] = Math.round(pixels.data[(row * sw + col) * 4 + 3] * fade);
-      }
-      ctx.putImageData(pixels, x, y);
-    }
-  } catch {
-    // Canvas can be unavailable after an aborted tile render.
-  }
-}
-
-function tileHasInk(tile?: HTMLElement): boolean {
+/** Inspect the model tile and soften its transparent seam in one pixel readback.
+ * Multiple getImageData calls per tile stall mobile canvas rendering during pans. */
+function prepareWeatherTile(tile?: HTMLElement): boolean {
   if (!(tile instanceof HTMLCanvasElement) || tile.width < 2 || tile.height < 2) return false;
   const ctx = tile.getContext("2d");
   if (!ctx) return false;
   try {
-    const { width, height } = tile;
-    const data = ctx.getImageData(0, 0, width, height).data;
-    const step = Math.max(16, Math.floor(Math.min(width, height) / 10));
-    for (let y = 0; y < height; y += step) {
-      const row = y * width;
-      for (let x = 0; x < width; x += step) {
-        if ((data[(row + x) * 4 + 3] ?? 0) > 8) return true;
+    const { width: w, height: h } = tile;
+    const image = ctx.getImageData(0, 0, w, h);
+    const data = image.data;
+    const step = Math.max(16, Math.floor(Math.min(w, h) / 10));
+    let hasInk = false;
+    for (let y = 0; y < h && !hasInk; y += step) {
+      for (let x = 0; x < w; x += step) {
+        if ((data[(y * w + x) * 4 + 3] ?? 0) > 8) {
+          hasInk = true;
+          break;
+        }
       }
     }
+    if (!hasInk || w < 8 || h < 8) return hasInk;
+    // Alpha only; retain the original weather values/colours and tile dimensions.
+    const fadeAlpha = (x: number, y: number, factor: number) => {
+      const offset = (y * w + x) * 4 + 3;
+      data[offset] = Math.round((data[offset] ?? 0) * factor);
+    };
+    for (let d = 0; d < 2; d++) {
+      const factor = d === 0 ? 0 : 0.5;
+      for (let x = d; x < w - d; x++) {
+        fadeAlpha(x, d, factor);
+        fadeAlpha(x, h - 1 - d, factor);
+      }
+      for (let y = d + 1; y < h - 1 - d; y++) {
+        fadeAlpha(d, y, factor);
+        fadeAlpha(w - 1 - d, y, factor);
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+    return true;
   } catch {
     return false;
   }
-  return false;
 }
 
 function tileUrl(variable: string, index: number): string {
@@ -428,8 +425,10 @@ export class ModelField {
     if (!adapter || !map) return;
     const token = ++this.seq;
     this.loading.add(step);
-    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: false, updateWhenZooming: true, updateInterval: 100, keepBuffer: 4 };
-    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: false, updateWhenZooming: true, updateInterval: 100, keepBuffer: 4 };
+    // Model tiles are expensive to decode: keep the current frame stable while
+    // dragging/pinching, then fetch the new viewport once interaction settles.
+    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
+    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
     const made = [
       adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
@@ -456,8 +455,7 @@ export class ModelField {
     for (const layer of made) {
       layer.on("tileload", (ev) => {
         if (!alive()) return;
-        softenWeatherTileEdge(ev?.tile);
-        if (!tileHasInk(ev?.tile)) return;
+        if (!prepareWeatherTile(ev?.tile)) return;
         if (frame.ink) return;
         frame.ink = true;
         this.loading.delete(step);
