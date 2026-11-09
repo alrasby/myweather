@@ -183,7 +183,7 @@ export async function proxyFetch(
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       if (Date.now() < (cooldown.get(cooldownKey) ?? 0)) {
-        if (isForecast) noteForecast("local", 429, (cooldown.get(cooldownKey) ?? 0) - Date.now());
+        if (isForecast) noteForecast("local", 429, (cooldown.get(cooldownKey) ?? 0) - Date.now(), lastForecastDiagnostic?.providerReason);
         throw new NetworkFailure(429);
       }
       if (priority === "background") {
