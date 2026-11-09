@@ -23,35 +23,6 @@ import "leaflet/dist/leaflet.css";
 
 type LeafletNs = typeof import("leaflet");
 
-function coverTileGaps(L: LeafletNs) {
-  const proto = L.GridLayer.prototype as unknown as {
-    __gap?: boolean;
-    _initTile: (tile: HTMLElement) => void;
-  };
-  if (proto.__gap) return;
-  proto.__gap = true;
-  const orig = proto._initTile;
-  proto._initTile = function (this: { getTileSize: () => { x: number; y: number } }, tile: HTMLElement) {
-    orig.call(this, tile);
-    const size = this.getTileSize();
-    if (tile.tagName === "CANVAS") {
-      // بلاطة المطر شفافة: أي تداخل يضاعف البياض فيصير خطاً. المقاس مطابق تماماً.
-      tile.style.width = `${size.x}px`;
-      tile.style.height = `${size.y}px`;
-      tile.style.marginLeft = "0";
-      tile.style.marginTop = "0";
-      tile.style.left = "0";
-      tile.style.top = "0";
-      tile.style.clipPath = "none";
-      return;
-    }
-    // Keep raster tiles at their exact grid dimensions: overlapping opaque imagery
-    // and translucent label tiles by 1px creates visible horizontal/vertical seams.
-    tile.style.width = `${size.x}px`;
-    tile.style.height = `${size.y}px`;
-  };
-}
-
 type SystemCard = {
   kind: PaintedSystem["kind"];
   name: string;
@@ -204,7 +175,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const L = await loadLeaflet();
         if (dead) return;
         leafletRef.current = L;
-        coverTileGaps(L);
         map = L.map(el, {
           zoomControl: false,
           attributionControl: false,
@@ -217,10 +187,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           bounceAtZoomLimits: false,
           zoomAnimation: false,
           fadeAnimation: false,
-          // A single bounded world avoids jumping into unpopulated tile copies on drag.
-          worldCopyJump: false,
-          inertia: false,
-          maxBounds: [[-85.0511287798, -180], [85.0511287798, 180]],
+          // Wrap longitudes continuously while constraining only the polar direction.
+          worldCopyJump: true,
+          inertia: true,
+          inertiaDeceleration: 4000,
+          maxBounds: [[-85.0511287798, -100000], [85.0511287798, 100000]],
           maxBoundsViscosity: 1,
           doubleClickZoom: false,
         });
@@ -228,7 +199,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         map.setView([here.lat, here.lon], 5);
         const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
           maxZoom: 16,
-          noWrap: true,
           updateWhenIdle: false,
           keepBuffer: 6,
         }).addTo(map);
@@ -238,7 +208,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", noWrap: true, updateWhenIdle: false, keepBuffer: 6 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, keepBuffer: 6 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
