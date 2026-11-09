@@ -516,7 +516,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         viewAc?.abort();
         viewAc = null;
         pendingView = null;
-        engine.setRainView(null);
+        // Keep the last regional rain texture cached while zooming out.
+        // The renderer already falls back to the world grid when it no longer covers the view.
         return;
       }
       if (span < 1.2) return;
