@@ -229,7 +229,7 @@ function buildUrl(lats: number[], lons: number[], hours: number): string {
   url.searchParams.set("longitude", lons.join(","));
   url.searchParams.set(
     "hourly",
-    "temperature_2m,precipitation,rain,showers,snowfall,snow_depth,cloud_cover,wind_speed_10m,wind_direction_10m,pressure_msl",
+    "temperature_2m,precipitation,rain,showers,snowfall,snow_depth,cloud_cover,wind_speed_10m,wind_direction_10m",
   );
   url.searchParams.set("timezone", "GMT");
   url.searchParams.set("cell_selection", "nearest");
