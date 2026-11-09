@@ -5,7 +5,7 @@ import { searchLocal } from "@/weather/places-index";
 import { placeCountry, placeTitle } from "@/weather/format";
 import { t } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
-import { activePlace, useWeather } from "@/weather/store";
+import { useWeather } from "@/weather/store";
 import type { Lang, Place } from "@/weather/types";
 
 export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => void }) {
@@ -20,7 +20,6 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Place[]>([]);
   const [settled, setSettled] = useState(false);
-  const active = activePlace({ places, activeId });
   const kept = (hit: Place) =>
     places.some((p) => p.id === hit.id || (Math.abs(p.lat - hit.lat) < 0.02 && Math.abs(p.lon - hit.lon) < 0.02));
 
@@ -81,7 +80,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t(lang, "searchPh")}
-          className="h-12 w-full rounded-full border border-line bg-surface-solid/40 px-4 text-on-sky outline-none placeholder:text-on-sky/60"
+          className="h-12 w-full rounded-full border border-line bg-surface-solid/65 px-4 text-on-sky outline-none placeholder:text-on-sky/60"
         />
       </label>
       {query.trim().length >= 2 ? (
@@ -95,7 +94,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               const saved = kept(hit);
               return (
               <li key={hit.id} className="flex items-center gap-3 px-3 py-2">
-                <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { viewPlace(hit); setQuery(""); onClose(); }}>
+                <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { /* Preview only: saving requires the separate + button. */ viewPlace(hit); setQuery(""); onClose(); }}>
                   <p className="truncate text-sm text-fg">{placeTitle(hit, lang)}</p>
                   <p className="truncate text-xs text-muted">{[hit.admin, placeCountry(hit, lang)].filter(Boolean).join(" · ")}</p>
                 </button>
@@ -119,7 +118,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
       <p className="mb-1.5 mt-4 px-2 text-[0.72rem] font-medium text-muted">{t(lang, "savedCities")}</p>
       <ul className="space-y-2">
         {places.map((place, index) => {
-          const on = place.id === active.id;
+          const on = place.id === activeId;
           return (
             <li key={place.id} className="wx-card flex items-center gap-2 px-3 py-2">
               <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { setActive(place.id); onClose(); }}>

@@ -213,10 +213,9 @@ export const useWeather = create<WeatherState>((set, get) => ({
       get().setActive(saved.id);
       return;
     }
-    const places = get().places.filter((p) => !p.primary);
-    const keep = places[0]?.id ?? "";
-    set({ places, peek: place, activeId: place.id, revision: get().revision + 1 });
-    persistPlaces(places, keep);
+    // Current-location preview must not add or remove saved cities.
+    // Only explicit save/delete actions may change the persisted list.
+    set({ peek: place, activeId: place.id, revision: get().revision + 1 });
   },
   setHere: (place) => {
     saveHere(place);
