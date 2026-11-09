@@ -333,8 +333,8 @@ export class FieldEngine {
     } catch {
       this.fallback2d();
     }
-    map.on("move", this.onMove);
-    map.on("zoom", this.onMove);
+    // requestAnimationFrame already redraws during gestures. Avoid redundant
+    // synchronous WebGL draws on every Leaflet move/zoom event.
     map.on("moveend", this.onMove);
     map.on("zoomend", this.onMove);
     map.on("viewreset", this.onMove);
@@ -470,8 +470,6 @@ export class FieldEngine {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
-    this.map?.off("move", this.onMove);
-    this.map?.off("zoom", this.onMove);
     this.map?.off("moveend", this.onMove);
     this.map?.off("zoomend", this.onMove);
     this.map?.off("viewreset", this.onMove);
@@ -666,11 +664,13 @@ export class FieldEngine {
         canvas.width = w;
         canvas.height = h;
       }
-      canvas.style.width = `${size.x}px`;
-      canvas.style.height = `${size.y}px`;
-      canvas.style.left = "0px";
-      canvas.style.top = "0px";
-      canvas.style.transform = "none";
+      const cssW = `${size.x}px`;
+      const cssH = `${size.y}px`;
+      if (canvas.style.width !== cssW) canvas.style.width = cssW;
+      if (canvas.style.height !== cssH) canvas.style.height = cssH;
+      if (canvas.style.left !== "0px") canvas.style.left = "0px";
+      if (canvas.style.top !== "0px") canvas.style.top = "0px";
+      if (canvas.style.transform !== "none") canvas.style.transform = "none";
     }
     const nw = map.containerPointToLatLng([0, 0]);
     const se = map.containerPointToLatLng([size.x, size.y]);
