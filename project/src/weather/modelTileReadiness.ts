@@ -8,10 +8,13 @@ export const SPATIAL_LAYER_COUNT = 3;
 export function modelTileFrameReady(
   loaded: readonly boolean[],
   errored: ReadonlySet<number>,
+  deliveredTiles?: readonly number[],
 ): boolean {
   return loaded.length === SPATIAL_LAYER_COUNT &&
     loaded.every((ready) => ready === true) &&
-    errored.size === 0;
+    errored.size === 0 &&
+    (!deliveredTiles || (deliveredTiles.length === SPATIAL_LAYER_COUNT &&
+      deliveredTiles.every((count) => count > 0)));
 }
 
 /** Metadata may omit a variable list on older compatible endpoints.
