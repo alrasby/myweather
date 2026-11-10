@@ -8,6 +8,7 @@ import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialFreshness, type SpatialMetadata } from "@/weather/spatialFreshness";
 import { SpatialPerformance, type SpatialPerfSnapshot } from "@/weather/spatialPerformance";
+import { spatialOmFileUrl, spatialForecastIntervalHours, type SpatialRun } from "@/weather/spatialRunPaths";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { CapacitorHttp } from "@capacitor/core";
 import {
@@ -50,6 +51,7 @@ export type WeatherModelDiagnostics = {
   timings: SpatialPerfSnapshot;
   workerSharedMemory: boolean;
   modelRunReference: string | null;
+  runPath: "direct-om" | "capture-api";
 };
 
 type AnyLayer = {
@@ -367,14 +369,24 @@ const measuredOmProtocol: typeof omProtocol = (...args) => {
   ) as ReturnType<typeof omProtocol>;
 };
 
-function tileUrl(variable: string, index: number): string {
-  const q = new URLSearchParams({
-    time_step: `valid_times_${index}`,
+function tileUrl(variable: string, index: number, run: SpatialRun | null): string {
+  // Avoid resolving latest.json for every tile request: the run metadata was
+  // already fetched once and validated. Fall back to Capture API when a model
+  // run lacks a trustworthy reference_time or direct OM data is unavailable.
+  const base = run
+    ? spatialOmFileUrl(META.replace(/\/latest\.json$/, ""), run, index)
+    : null;
+  const query = new URLSearchParams({
     variable,
     interpolation: "linear",
     color_blend: "true",
   });
-  return `om://${META}?${q.toString()}`;
+  if (base && run) {
+    query.set("delta_time_hours", String(spatialForecastIntervalHours(run.validTimes, index)));
+  } else {
+    query.set("time_step", `valid_times_${index}`);
+  }
+  return `om://${base ?? META}?${query.toString()}`;
 }
 
 export class ModelField {
@@ -385,6 +397,7 @@ export class ModelField {
   private adapter: Adapter | null = null;
   private times: number[] = [];
   private modelRunReference: string | null = null;
+  private directRun: SpatialRun | null = null;
   private lastError: string | null = null;
   private base = 0;
   private blend = 0;
@@ -441,6 +454,10 @@ export class ModelField {
           return;
         }
         this.times = freshness.times;
+        const referenceTime = Date.parse(json.reference_time ?? "");
+        this.directRun = Number.isFinite(referenceTime)
+          ? { referenceTime, validTimes: freshness.times }
+          : null;
       })
       .catch((error: unknown) => {
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
@@ -515,6 +532,7 @@ export class ModelField {
       timings: spatialPerformance.snapshot(),
       workerSharedMemory: typeof crossOriginIsolated === "boolean" && crossOriginIsolated,
       modelRunReference: this.modelRunReference,
+      runPath: this.directRun ? "direct-om" : "capture-api",
       layerTimings: Array.from({ length: SPATIAL_LAYER_COUNT }, (_, index) =>
         spatialLayerTiming(Date.now(), frame?.layerStartedAt[index] ?? 0,
           frame?.layerFirstTileAt[index] ?? 0, frame?.layerLastTileAt[index] ?? 0,
@@ -652,9 +670,9 @@ export class ModelField {
     const cloudOpts = spatialTileOptions("wx-clouds");
     const rainOpts = spatialTileOptions("wx-model");
     const made = [
-      adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
-      adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
-      adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
+      adapter.createTileLayer(tileUrl("cloud_cover", step, this.directRun), cloudOpts),
+      adapter.createTileLayer(tileUrl("precipitation", step, this.directRun), rainOpts),
+      adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.directRun), rainOpts),
     ] as AnyLayer[];
     const frame = {
       layers: made, token, opacity: -1, ready: false,
@@ -714,6 +732,17 @@ export class ModelField {
     };
     const giveUp = () => {
       if (!alive() || frame.ready) return;
+      // If a direct run-specific file is missing, retry using the published
+      // Capture API. Do this once per attached model, never a retry loop.
+      // A complete reference run can be valid while the first accumulated
+      // precipitation/snowfall field has not been published.
+      if (frame.errored.size && this.directRun) {
+        this.directRun = null;
+        this.lastError = "Direct ECMWF file unavailable; using compatible capture endpoint";
+        this.discardFrame(step);
+        this.pump();
+        return;
+      }
       // Failed frames are retryable: avoid a permanent weather outage after
       // one transient fetch error or a quick network switch.
       this.failedUntil.set(step, Date.now() + 15_000);
