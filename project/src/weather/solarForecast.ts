@@ -1,5 +1,5 @@
 import { sunArc } from "./astro.ts";
-import { dayKey } from "./format.ts";
+
 import type { Place, WeatherBundle } from "./types.ts";
 
 /** sunArc expects 12:00 UTC of the LOCAL calendar date, NOT local noon
@@ -19,10 +19,19 @@ export function solarEventsForDate(localDate: string, lat: number, lon: number):
 export function repairSolarForecast(bundle: WeatherBundle, place: Pick<Place, "lat" | "lon">): WeatherBundle {
   if (!Number.isFinite(place.lat) || !Number.isFinite(place.lon) || Math.abs(place.lat) >= 60) return bundle;
   let modified = false;
+  const dateFormatter = (() => {
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: bundle.timezone, year: "numeric", month: "2-digit", day: "2-digit",
+      });
+    } catch { return null; }
+  })();
+  if (!dateFormatter) return bundle;
   const days = bundle.daily.map((day) => {
     if (!Number.isFinite(day.t)) return day;
-    let key: string;
-    try { key = dayKey(day.t, bundle.timezone); } catch { return day; }
+    const parts = Object.fromEntries(dateFormatter.formatToParts(new Date(day.t))
+      .filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    const key = `${parts.year}-${parts.month}-${parts.day}`;
     const expected = solarEventsForDate(key, place.lat, place.lon);
     const duration = (expected.set - expected.rise) / 3_600_000;
     if (!Number.isFinite(expected.rise) || duration < 6 || duration > 18) return day;
