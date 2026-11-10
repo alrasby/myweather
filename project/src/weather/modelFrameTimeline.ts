@@ -17,6 +17,11 @@ export function selectSpatialFramePlan(
   const current = ready.has(requested);
   const next = ready.has(requested + 1);
   const goals = new Map<number, number>();
+  // Never show an older OR future model hour for an unavailable requested
+  // hour that the provider has put into retry cooldown.
+  if (requestedInCooldown && !current) {
+    return { goals, anchor: null, holding: false };
+  }
   if (current && next) {
     const t = Math.max(0, Math.min(1, blend));
     goals.set(requested, 1 - t);
@@ -28,9 +33,6 @@ export function selectSpatialFramePlan(
     goals.set(anchor, 1);
     return { goals, anchor, holding: false };
   }
-  // A failed frame in retry cooldown MUST return to the time-matched
-  // global fallback, not keep an older ECMWF image labeled as a new hour.
-  if (requestedInCooldown) return { goals, anchor: null, holding: false };
   // While the requested frame loads, hold the last complete frame, but
   // prevent the playback clock from advancing beyond that ready hour.
   const held = lastDisplayed != null && ready.has(lastDisplayed)
