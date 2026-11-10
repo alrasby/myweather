@@ -6,6 +6,8 @@ import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
+import { spatialFreshness, type SpatialMetadata } from "@/weather/spatialFreshness";
+import { SpatialPerformance, type SpatialPerfSnapshot } from "@/weather/spatialPerformance";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { CapacitorHttp } from "@capacitor/core";
 import {
@@ -45,6 +47,9 @@ export type WeatherModelDiagnostics = {
   cacheEligible: number;
   cacheStored: number;
   cacheRejected: number;
+  timings: SpatialPerfSnapshot;
+  workerSharedMemory: boolean;
+  modelRunReference: string | null;
 };
 
 type AnyLayer = {
@@ -189,6 +194,7 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
 // three Leaflet model layers. Every request still obeys cancellation.
 const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialRangeCache = new SpatialRangeCache();
+const spatialPerformance = new SpatialPerformance();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
 let spatialCacheEligible = 0;
@@ -212,16 +218,23 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
     return responseFrom(cached.status, new Headers(cached.headers), cached.bytes);
   }
   if (cacheKey) spatialCacheEligible++;
-  const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => {
+  const queuedAt = performance.now();
+  const result = await spatialNativeQueue.run(init?.signal ?? undefined, async () => {
+    spatialPerformance.observe("nativeQueue", performance.now() - queuedAt);
     spatialNativeReads++;
-    return CapacitorHttp.request({
+    const nativeStarted = performance.now();
+    try {
+      return await CapacitorHttp.request({
     url,
     method,
     headers: bag,
     responseType: method === "HEAD" ? "text" : "arraybuffer",
     connectTimeout: 20000,
     readTimeout: 25000,
-    });
+      });
+    } finally {
+      spatialPerformance.observe("network", performance.now() - nativeStarted);
+    }
   });
   const out = new Headers();
   for (const [key, value] of Object.entries(result.headers ?? {})) {
@@ -263,16 +276,23 @@ async function probeLength(url: string, headers: Headers, signal?: AbortSignal):
   });
   bag.Range = "bytes=0-0";
   bag["Accept-Encoding"] = "identity";
-  const result = await spatialNativeQueue.run(signal, () => {
+  const queuedAt = performance.now();
+  const result = await spatialNativeQueue.run(signal, async () => {
+    spatialPerformance.observe("nativeQueue", performance.now() - queuedAt);
     spatialNativeReads++;
-    return CapacitorHttp.request({
+    const nativeStarted = performance.now();
+    try {
+      return await CapacitorHttp.request({
       url,
       method: "GET",
       headers: bag,
       responseType: "text",
       connectTimeout: 15000,
       readTimeout: 15000,
-    });
+      });
+    } finally {
+      spatialPerformance.observe("network", performance.now() - nativeStarted);
+    }
   });
   const map = result.headers ?? {};
   for (const [key, value] of Object.entries(map)) {
@@ -331,6 +351,22 @@ export function installSpatialFetch(): void {
     throw new Error("spatial-fetch");
   };
 }
+// End-to-end OM protocol timing includes S3 range reads, variable transfer,
+ // worker decode and tile generation. It is NOT pure CPU decode time.
+const measuredOmProtocol: typeof omProtocol = (...args) => {
+  const started = performance.now();
+  return Promise.resolve(omProtocol(...args)).then(
+    (result) => {
+      spatialPerformance.observe("workerTile", performance.now() - started);
+      return result;
+    },
+    (error) => {
+      spatialPerformance.observe("workerTile", performance.now() - started);
+      throw error;
+    },
+  ) as ReturnType<typeof omProtocol>;
+};
+
 function tileUrl(variable: string, index: number): string {
   const q = new URLSearchParams({
     time_step: `valid_times_${index}`,
@@ -348,6 +384,7 @@ export class ModelField {
   private map: LeafletMap | null = null;
   private adapter: Adapter | null = null;
   private times: number[] = [];
+  private modelRunReference: string | null = null;
   private lastError: string | null = null;
   private base = 0;
   private blend = 0;
@@ -383,11 +420,18 @@ export class ModelField {
       pane.style.pointerEvents = "none";
     }
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
-    this.adapter.addProtocol("om", omProtocol, modelSettings());
+    this.adapter.addProtocol("om", measuredOmProtocol, modelSettings());
     this.lastError = null;
-    this.ready = fetch(META)
+    this.ready = fetch(META, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((json: { valid_times?: string[]; variables?: string[] }) => {
+      .then((json: SpatialMetadata) => {
+        const freshness = spatialFreshness(json, Date.now());
+        this.modelRunReference = json.reference_time ?? null;
+        if (!freshness.valid) {
+          this.lastError = freshness.reason;
+          this.times = [];
+          return;
+        }
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -396,7 +440,7 @@ export class ModelField {
           this.times = [];
           return;
         }
-        this.times = (json.valid_times ?? []).map((t) => Date.parse(t)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+        this.times = freshness.times;
       })
       .catch((error: unknown) => {
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
@@ -468,6 +512,9 @@ export class ModelField {
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
+      timings: spatialPerformance.snapshot(),
+      workerSharedMemory: typeof crossOriginIsolated === "boolean" && crossOriginIsolated,
+      modelRunReference: this.modelRunReference,
       layerTimings: Array.from({ length: SPATIAL_LAYER_COUNT }, (_, index) =>
         spatialLayerTiming(Date.now(), frame?.layerStartedAt[index] ?? 0,
           frame?.layerFirstTileAt[index] ?? 0, frame?.layerLastTileAt[index] ?? 0,
@@ -690,6 +737,12 @@ export class ModelField {
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     for (const [index, layer] of made.entries()) {
+      // Track Leaflet tile creation -> painted delivery. WeakMap prevents
+      // retaining DOM tile objects after pan/zoom or frame disposal.
+      const tileStarts = new WeakMap<HTMLElement, number>();
+      layer.on("tileloadstart", (event) => {
+        if (alive() && event?.tile) tileStarts.set(event.tile, performance.now());
+      });
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
       layer.on("loading", () => {
@@ -710,8 +763,15 @@ export class ModelField {
         frame.layerFinishedAt[index] = Date.now();
         refresh();
       });
-      layer.on("tileload", () => {
+      layer.on("tileload", (event) => {
         if (!alive()) return;
+        if (event?.tile) {
+          const started = tileStarts.get(event.tile);
+          if (started !== undefined) {
+            spatialPerformance.observe("leafletTile", performance.now() - started);
+            tileStarts.delete(event.tile);
+          }
+        }
         frame.tileCounts[index] += 1;
         lastProgressAt = Date.now();
         frame.layerFirstTileAt[index] ||= lastProgressAt;
