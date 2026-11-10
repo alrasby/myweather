@@ -24,3 +24,14 @@ test("metadata refuses models missing any essential weather field", () => {
   assert.equal(modelVariablesReady(["precipitation", "snowfall_water_equivalent"]), false);
   assert.equal(modelVariablesReady(), true);
 });
+
+test("a layer load event with no tile delivery cannot replace the fallback", () => {
+  assert.equal(modelTileFrameReady([true, true, true], new Set(), [3, 2, 0]), false);
+  assert.equal(modelTileFrameReady([true, true, true], new Set(), [3, 2, 1]), true);
+  assert.equal(modelTileFrameReady([true, true, true], new Set(), [3, 2]), false);
+  assert.equal(modelTileFrameReady([true, true, true], new Set([1]), [3, 2, 1]), false);
+});
+
+test("dry tiles count as delivered even when they have no coloured precipitation pixels", () => {
+  assert.equal(modelTileFrameReady([true, true, true], new Set(), [1, 1, 1]), true);
+});

@@ -15,6 +15,18 @@ import {
 
 const META = "https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/latest.json";
 
+export type WeatherDiagnosticMode = "all" | "cloud" | "rain" | "snow" | "fallback";
+export type WeatherModelDiagnostics = {
+  mode: WeatherDiagnosticMode;
+  source: "spatial" | "fallback";
+  frame: number;
+  loaded: boolean[];
+  tileCounts: number[];
+  errors: number[];
+  visibleOpacity: number;
+  metadataAvailable: boolean;
+};
+
 type AnyLayer = {
   addTo: (map: LeafletMap) => AnyLayer;
   remove: () => void;
@@ -271,7 +283,9 @@ export class ModelField {
   private blend = 0;
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number> }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[] }>();
+  private diagnosticMode: WeatherDiagnosticMode = "all";
+  private spatialVisible = false;
   private seq = 0;
   private orderKey = "";
   private visible = false;
@@ -314,6 +328,38 @@ export class ModelField {
     return this.ready.then(() => this.times.length);
   }
 
+  /** A deliberately hidden, read-only map diagnostic for comparing independent
+   * weather fields without changing wind/temperature or map preferences. */
+  setDiagnosticMode(mode: WeatherDiagnosticMode) {
+    if (this.diagnosticMode === mode) return;
+    this.diagnosticMode = mode;
+    // Reapply each tile's visibility even if the frame opacity itself did
+    // not change, so diagnostic isolation takes effect immediately.
+    for (const frame of this.frames.values()) {
+      if (!frame.ready) continue;
+      frame.layers.forEach((layer, idx) => {
+        const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
+          (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
+        layer.setOpacity?.(allowed ? Math.max(0, frame.opacity) : 0);
+      });
+    }
+    this.applyOpacity();
+  }
+
+  diagnostics(): WeatherModelDiagnostics {
+    const frame = this.frames.get(this.base) ?? this.frames.get(this.base + 1);
+    return {
+      mode: this.diagnosticMode,
+      source: this.spatialVisible ? "spatial" : "fallback",
+      frame: this.base,
+      loaded: frame?.loaded.slice() ?? [false, false, false],
+      tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
+      errors: frame?.errorCounts.slice() ?? [0, 0, 0],
+      visibleOpacity: frame?.opacity ?? 0,
+      metadataAvailable: this.times.length > 0,
+    };
+  }
+
   setVisible(on: boolean) {
     this.visible = on;
     if (!on) {
@@ -321,6 +367,7 @@ export class ModelField {
       this.failedUntil.clear();
       this.loading.clear();
       this.orderKey = "";
+      this.spatialVisible = false;
       this.clear();
     }
   }
@@ -409,14 +456,16 @@ export class ModelField {
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
     ] as AnyLayer[];
-    const frame = { layers: made, token, opacity: -1, ready: false, loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false), errored: new Set<number>() };
+    const frame = { layers: made, token, opacity: -1, ready: false, loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false), errored: new Set<number>(), tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0), errorCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0) };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
     let errors = 0;
     const alive = () => this.frames.get(step)?.token === token;
     const refresh = () => {
       if (!alive()) return;
-      const ready = modelTileFrameReady(frame.loaded, frame.errored);
+      // A 'load' event without any tile delivery cannot prove that the
+      // corresponding weather field is present in the current viewport.
+      const ready = modelTileFrameReady(frame.loaded, frame.errored, frame.tileCounts);
       if (ready === frame.ready) return;
       frame.ready = ready;
       this.orderKey = "";
@@ -456,6 +505,7 @@ export class ModelField {
       layer.on("loading", () => {
         if (!alive()) return;
         frame.loaded[index] = false;
+        frame.tileCounts[index] = 0;
         frame.errored.delete(index);
         refresh();
       });
@@ -464,8 +514,14 @@ export class ModelField {
         frame.loaded[index] = true;
         refresh();
       });
+      layer.on("tileload", () => {
+        if (!alive()) return;
+        frame.tileCounts[index] += 1;
+        refresh();
+      });
       layer.on("tileerror", () => {
         if (!alive()) return;
+        frame.errorCounts[index] += 1;
         frame.errored.add(index);
         refresh();
         errors += 1;
@@ -514,7 +570,12 @@ export class ModelField {
       const value = Math.abs(goal - shown) < 0.02 ? goal : shown;
       if (Math.abs(frame.opacity - value) < 0.01) continue;
       frame.opacity = value;
-      for (const layer of frame.layers) layer.setOpacity?.(value);
+      for (const [idx, layer] of frame.layers.entries()) {
+        const mode = this.diagnosticMode;
+        const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
+          (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
+        layer.setOpacity?.(allowed ? value : 0);
+      }
     }
     // Reveal the model only after sufficient tile opacity is actually present,
     // avoiding the abrupt disappearance of visible rain/snow during blending.
@@ -522,7 +583,8 @@ export class ModelField {
       (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
       0,
     );
-    if (visibleOpacity >= 0.88) this.onLive?.();
+    this.spatialVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
+    if (this.spatialVisible) this.onLive?.();
     else this.onMiss?.();
   }
 
