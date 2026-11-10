@@ -227,10 +227,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
-          // Sparse regional precipitation tiles can contain valid rain while leaving
-          // other visible cells transparent. Keep the global rain/snow field
-          // underneath so those areas never become rectangular holes.
-          modelRef.current.onLive = () => engine.setModelCover(false);
+          // Show one coherent model at a time. The earlier permanent overlap
+          // doubled precipitation colours and allowed coarse 72x36 fallback
+          // cells to remain visible as rectangles over real ECMWF spatial tiles.
+          // The global model is restored immediately when the spatial frame
+          // is incomplete, unavailable, or fails to load.
+          modelRef.current.onLive = () => engine.setModelCover(true);
           modelRef.current.onMiss = () => engine.setModelCover(false);
         }
         map.on("click", (event) => {

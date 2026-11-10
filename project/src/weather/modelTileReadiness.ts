@@ -1,15 +1,25 @@
-/** Two spatial weather tiles: precipitation then snowfall. Cloud cover is
- * drawn continuously by the global grid rather than tiled opaque sheets. */
-export function isPrecipitationTile(index: number): boolean {
-  return index === 0 || index === 1;
-}
+/** Spatial ECMWF layers are cloud cover, precipitation and snowfall.
+ * A transparent rain/snow tile can be a valid dry forecast; transparency is NOT
+ * evidence of a failed data request. */
+export const SPATIAL_LAYER_COUNT = 3;
 
-/** Regional precipitation/snow may overlay the continuous global field only
- * after a rain or snow tile has actual data and both tile queues finish. */
+/** A full weather-model frame can replace the coarse fallback only when all
+ * weather layers have finished loading without errors. */
 export function modelTileFrameReady(
-  hasPrecipitationInk: boolean,
   loaded: readonly boolean[],
   errored: ReadonlySet<number>,
 ): boolean {
-  return hasPrecipitationInk && loaded.length === 2 && loaded.every(Boolean) && errored.size === 0;
+  return loaded.length === SPATIAL_LAYER_COUNT &&
+    loaded.every((ready) => ready === true) &&
+    errored.size === 0;
+}
+
+/** Metadata may omit a variable list on older compatible endpoints.
+ * When a list is supplied, a complete spatial frame requires all three.
+ * Never replace a snowfall layer using a model run missing snow data. */
+export function modelVariablesReady(variables?: readonly string[]): boolean {
+  if (!variables) return true;
+  return ["cloud_cover", "precipitation", "snowfall_water_equivalent"].every(
+    (variable) => variables.includes(variable),
+  );
 }

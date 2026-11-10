@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { modelTileFrameReady, isPrecipitationTile } from "@/weather/modelTileReadiness";
+import { modelTileFrameReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -250,28 +250,6 @@ export function installSpatialFetch(): void {
     throw new Error("spatial-fetch");
   };
 }
-/** Read a canvas tile once to detect meaningful weather data.
- * Do not rewrite the tile's edge pixels: that produces visible grid lines. */
-function tileHasInk(tile?: HTMLElement): boolean {
-  if (!(tile instanceof HTMLCanvasElement) || tile.width < 2 || tile.height < 2) return false;
-  const ctx = tile.getContext("2d");
-  if (!ctx) return false;
-  try {
-    const { width, height } = tile;
-    const data = ctx.getImageData(0, 0, width, height).data;
-    // Small but real precipitation or snow cells must not be missed.
-    const step = 8;
-    for (let y = 0; y < height; y += step) {
-      for (let x = 0; x < width; x += step) {
-        if ((data[(y * width + x) * 4 + 3] ?? 0) > 8) return true;
-      }
-    }
-  } catch {
-    // A cancelled canvas decode is not ready to display.
-  }
-  return false;
-}
-
 function tileUrl(variable: string, index: number): string {
   const q = new URLSearchParams({
     time_step: `valid_times_${index}`,
@@ -291,9 +269,9 @@ export class ModelField {
   private times: number[] = [];
   private base = 0;
   private blend = 0;
-  private failed = new Set<number>();
+  private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
-  private frames = new Map<number, { layers: AnyLayer[]; ink: boolean; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number> }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number> }>();
   private seq = 0;
   private orderKey = "";
   private visible = false;
@@ -317,7 +295,14 @@ export class ModelField {
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.ready = fetch(META)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((json: { valid_times?: string[] }) => {
+      .then((json: { valid_times?: string[]; variables?: string[] }) => {
+        // Do not launch a partly available spatial frame: it would suppress
+        // the global snowfall field even if the ECMWF snow file is absent.
+        if (!modelVariablesReady(json.variables)) {
+          console.warn("MyWeather: ECMWF spatial layer unavailable; retaining global rain/snow fallback");
+          this.times = [];
+          return;
+        }
         this.times = (json.valid_times ?? []).map((t) => Date.parse(t)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
       })
       .catch(() => {
@@ -333,7 +318,7 @@ export class ModelField {
     this.visible = on;
     if (!on) {
       this.seq += 1;
-      this.failed.clear();
+      this.failedUntil.clear();
       this.loading.clear();
       this.orderKey = "";
       this.clear();
@@ -378,7 +363,8 @@ export class ModelField {
     this.dropFar(i);
     for (const step of [i, i + 1]) {
       if (step < 0 || step >= this.times.length) continue;
-      if (this.failed.has(step) || this.frames.has(step) || this.loading.has(step)) continue;
+      if ((this.failedUntil.get(step) ?? 0) > Date.now() || this.frames.has(step) || this.loading.has(step)) continue;
+      this.failedUntil.delete(step);
       this.mount(step);
     }
   }
@@ -388,19 +374,19 @@ export class ModelField {
     for (const [step, frame] of this.frames) {
       if (keep.has(step) || this.loading.has(step)) continue;
       // ساعة ابتعدت عن المؤشر تُترك حتى تخفت، فلا تختفي الكتلة قفزاً.
-      if (frame.ink && frame.opacity > 0.04) continue;
+      if (frame.ready && frame.opacity > 0.04) continue;
       frame.layers.forEach((layer) => layer.remove());
       this.frames.delete(step);
     }
   }
 
-  private newestInk(): number {
+  private newestReady(): number {
     let best = -1;
     for (const [step, frame] of this.frames) if (frame.ready && step > best) best = step;
     return best;
   }
 
-  private anyInk(): boolean {
+  private anyReady(): boolean {
     for (const frame of this.frames.values()) if (frame.ready) return true;
     return false;
   }
@@ -413,27 +399,32 @@ export class ModelField {
     this.loading.add(step);
     // Model tiles are expensive to decode: keep the current frame stable while
     // dragging/pinching, then fetch the new viewport once interaction settles.
-    // The ECMWF cloud-cover tile layer can produce large rectangular, opaque
-    // cloud sheets at tile boundaries on Android. The continuous global
-    // model-backed cloud field already paints cloud cover below these tiles.
-    // Reserve spatial tiles for precipitation and snowfall, where the local
-    // high-resolution data is materially useful and has separate palettes.
-    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
+    // Use coherent ECMWF model fields for actual cloud shape, precipitation
+    // and snowfall instead of inflating low-resolution point forecasts.
+    // Keep already-loaded tiles during gestures; load new coverage after idle.
+    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 3 };
+    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 3 };
     const made = [
+      adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
     ] as AnyLayer[];
-    const frame = { layers: made, ink: false, token, opacity: -1, ready: false, loaded: Array<boolean>(made.length).fill(false), errored: new Set<number>() };
+    const frame = { layers: made, token, opacity: -1, ready: false, loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false), errored: new Set<number>() };
     this.frames.set(step, frame);
-    if (!this.anyInk()) this.onMiss?.();
+    if (!this.anyReady()) this.onMiss?.();
     let errors = 0;
     const alive = () => this.frames.get(step)?.token === token;
     const refresh = () => {
       if (!alive()) return;
-      const ready = modelTileFrameReady(frame.ink, frame.loaded, frame.errored);
+      const ready = modelTileFrameReady(frame.loaded, frame.errored);
       if (ready === frame.ready) return;
       frame.ready = ready;
       this.orderKey = "";
+      if (ready) {
+        this.loading.delete(step);
+        this.failedUntil.delete(step);
+        window.clearTimeout(wait);
+      }
       if (!ready) {
         // Partial frames are never exposed: keep the global rain/snow canvas visible.
         frame.opacity = 0;
@@ -442,16 +433,21 @@ export class ModelField {
       this.applyOpacity();
     };
     const giveUp = () => {
-      if (!alive() || frame.ink) return;
-      this.failed.add(step);
+      if (!alive() || frame.ready) return;
+      // Failed frames are retryable: avoid a permanent weather outage after
+      // one transient fetch error or a quick network switch.
+      this.failedUntil.set(step, Date.now() + 15_000);
+      if (frame.errored.size) {
+        console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
+      }
       this.loading.delete(step);
       for (const layer of made) layer.remove();
       if (this.frames.get(step) === frame) this.frames.delete(step);
-      if (!this.anyInk()) this.onMiss?.();
+      if (!this.anyReady()) this.onMiss?.();
       this.pump();
     };
     const wait = window.setTimeout(() => {
-      if (!alive() || frame.ink) return;
+      if (!alive() || frame.ready) return;
       giveUp();
     }, 20000);
     for (const [index, layer] of made.entries()) {
@@ -468,23 +464,12 @@ export class ModelField {
         frame.loaded[index] = true;
         refresh();
       });
-      layer.on("tileload", (ev) => {
-        // Canvas readback is expensive on Android; only inspect until the first nonempty tile.
-        // Only rain/snow tiles are mounted; both must finish loading.
-        if (!alive() || frame.ink || !isPrecipitationTile(index) || !tileHasInk(ev?.tile)) return;
-        frame.ink = true;
-        this.loading.delete(step);
-        window.clearTimeout(wait);
-        refresh();
-        this.pump();
-      });
       layer.on("tileerror", () => {
         if (!alive()) return;
         frame.errored.add(index);
         refresh();
-        if (frame.ink) return;
         errors += 1;
-        if (errors >= 8) {
+        if (errors >= 3) {
           window.clearTimeout(wait);
           giveUp();
         }
@@ -499,13 +484,13 @@ export class ModelField {
     const next = this.blend;
     const ink = (step: number) => this.frames.get(step)?.ready === true;
     const both = ink(i) && ink(i + 1);
-    const held = !both && !ink(i) && !ink(i + 1) ? this.newestInk() : -1;
+    const held = !both && !ink(i) && !ink(i + 1) ? this.newestReady() : -1;
     const key = `${i}:${held}:${both ? "ab" : ink(i) ? "a" : ink(i + 1) ? "b" : ""}`;
     if (key !== this.orderKey) {
       this.orderKey = key;
       for (const step of [i, i + 1]) {
         const frame = this.frames.get(step);
-        if (!frame?.ink) continue;
+        if (!frame?.ready) continue;
         for (const layer of frame.layers) layer.bringToFront?.();
       }
     }
@@ -522,7 +507,7 @@ export class ModelField {
       return 0;
     };
     for (const [step, frame] of this.frames) {
-      if (!frame.ink) continue;
+      if (!frame.ready) continue;
       const goal = goalFor(step);
       const cur = frame.opacity < 0 ? 0 : frame.opacity;
       const shown = cur + (goal - cur) * 0.28;
