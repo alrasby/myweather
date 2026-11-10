@@ -2,6 +2,7 @@ import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
+import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -170,6 +171,8 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
   return new Response(bytes.byteLength ? body : null, { status: status || 0, headers });
 }
 
+const spatialNativeQueue = new SpatialNativeQueue(4);
+
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
@@ -177,14 +180,14 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
   });
   bag["Accept-Encoding"] = "identity";
   const method = (init?.method ?? "GET").toUpperCase();
-  const result = await CapacitorHttp.request({
+  const result = await spatialNativeQueue.run(init?.signal, () => CapacitorHttp.request({
     url,
     method,
     headers: bag,
     responseType: method === "HEAD" ? "text" : "arraybuffer",
     connectTimeout: 20000,
     readTimeout: 25000,
-  });
+  }));
   const out = new Headers();
   for (const [key, value] of Object.entries(result.headers ?? {})) {
     if (value != null && headerName(key)) out.set(key, String(value));
@@ -240,17 +243,20 @@ export function installSpatialFetch(): void {
     if (!spatialUrl(url)) return proxied(input, init);
     const headers = headerBag(input, init);
     const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     if (native) {
       try {
-        return await pluginSpatial(url, { ...init, method }, headers);
+        return await pluginSpatial(url, { ...init, method, signal }, headers);
       } catch {
+        // A cancelled Leaflet frame must never start another network request.
+        if (signal?.aborted) throw new Error("spatial-request-aborted");
         /* الطلب الأصلي للمتصفح إن رفضت الإضافة الطول */
       }
     }
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => ctrl.abort(), 12000);
     const onAbort = () => ctrl.abort();
-    init?.signal?.addEventListener("abort", onAbort);
+    signal?.addEventListener("abort", onAbort);
     try {
       const res = await direct(input, { ...init, signal: ctrl.signal });
       const expect = rangeLength(headers);
@@ -263,7 +269,7 @@ export function installSpatialFetch(): void {
       /* بلا بديل سليم: تُحسب البلاطة فاشلة ويظهر الاحتياط */
     } finally {
       window.clearTimeout(timer);
-      init?.signal?.removeEventListener("abort", onAbort);
+      signal?.removeEventListener("abort", onAbort);
     }
     throw new Error("spatial-fetch");
   };
