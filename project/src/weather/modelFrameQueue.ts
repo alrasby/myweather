@@ -14,7 +14,11 @@ export function planSpatialRequests(
   currentViewportRefreshing = false,
   visibleRefreshAgeMs = 0,
 ): { cancel: number[]; start: number | null } {
-  const candidates = [requested, requested + 1].filter(
+  // Keep two upcoming hours prepared without decoding more than one
+  // incomplete frame at a time. The second lookahead becomes eligible only
+  // after both the requested and next forecast are fully available.
+  const lookahead = ready.has(requested) && ready.has(requested + 1) ? requested + 2 : -1;
+  const candidates = [requested, requested + 1, lookahead].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
   // Existing in-flight prefetch is not cancelled just because Leaflet
@@ -25,7 +29,7 @@ export function planSpatialRequests(
   const prefetch = requested + 1;
   const deferred = currentViewportRefreshing && ready.has(requested) &&
     visibleRefreshAgeMs < SPATIAL_PREFETCH_GRACE_MS &&
-    !loading.has(prefetch);
+    loading.size === 0;
   const desired = deferred ? null : candidates[0] ?? null;
   const cancel = [...loading].filter((step) => step !== desired);
   return {
