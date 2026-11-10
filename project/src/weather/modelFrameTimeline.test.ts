@@ -38,3 +38,18 @@ test("clamps interpolation to valid weights", () => {
   assert.deepEqual([...selectSpatialFramePlan(1, -3, new Set([1,2]), 1).goals.values()], [1,0]);
   assert.deepEqual([...selectSpatialFramePlan(1, 3, new Set([1,2]), 1).goals.values()], [0,1]);
 });
+
+test("provider retry cooldown prevents old or future spatial clouds being shown for a different hour", () => {
+  const oldReady = selectSpatialFramePlan(18, 0.3, new Set([10]), 10, true);
+  assert.equal(oldReady.anchor, null);
+  assert.equal(oldReady.goals.size, 0);
+  const futureOnly = selectSpatialFramePlan(18, 0.3, new Set([19]), 19, true);
+  assert.equal(futureOnly.anchor, null);
+  assert.equal(futureOnly.goals.size, 0);
+});
+
+test("pending hour temporarily holds old imagery ONLY while playback remains gated", () => {
+  const pending = selectSpatialFramePlan(18, 0.3, new Set([10]), 10, false);
+  assert.equal(pending.anchor, 10);
+  assert.equal(pending.holding, true);
+});
