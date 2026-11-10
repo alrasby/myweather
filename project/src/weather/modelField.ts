@@ -29,6 +29,8 @@ export type WeatherModelDiagnostics = {
   frame: number;
   requestedFrame: number;
   displayedFrame: number | null;
+  requestedValidTime: string | null;
+  displayedValidTime: string | null;
   holdingPreviousFrame: boolean;
   loaded: boolean[];
   tileCounts: number[];
@@ -451,6 +453,9 @@ export class ModelField {
       frame: this.base,
       requestedFrame: this.base,
       displayedFrame: this.spatialVisible ? displayed : null,
+      requestedValidTime: this.times[this.base] != null ? new Date(this.times[this.base]).toISOString() : null,
+      displayedValidTime: this.spatialVisible && displayed !== null && this.times[displayed] != null
+        ? new Date(this.times[displayed]).toISOString() : null,
       holdingPreviousFrame: this.holdingPreviousFrame,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
@@ -739,7 +744,8 @@ export class ModelField {
   private applyOpacity() {
     const readySteps = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) readySteps.add(step);
-    const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep);
+    const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
+    const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
     this.holdingPreviousFrame = plan.holding && plan.anchor !== null;
     const key = [...plan.goals.entries()].map(([step, weight]) => `${step}:${weight.toFixed(3)}`).join("|");
     if (key !== this.orderKey) {
@@ -757,7 +763,10 @@ export class ModelField {
       if (!frame.ready) continue;
       const goal = plan.goals.get(step) ?? 0;
       const cur = frame.opacity < 0 ? 0 : frame.opacity;
-      const shown = cur + (goal - cur) * 0.28;
+      // On a failed model hour the forecast clock is allowed to continue
+      // using the matching global field. Hide stale ECMWF imagery immediately
+      // instead of letting it linger as a seemingly current cloud pattern.
+      const shown = cooldown && goal === 0 ? 0 : cur + (goal - cur) * 0.28;
       const value = Math.abs(goal - shown) < 0.02 ? goal : shown;
       if (Math.abs(frame.opacity - value) < 0.01) continue;
       frame.opacity = value;
