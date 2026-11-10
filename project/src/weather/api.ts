@@ -1,4 +1,4 @@
-import { daylightNow, solarDaylight, sunArc } from "@/weather/astro";
+import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
 import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
 import { dayKey } from "@/weather/format";
