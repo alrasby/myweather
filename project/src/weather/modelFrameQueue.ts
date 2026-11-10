@@ -13,8 +13,14 @@ export function planSpatialRequests(
   blocked: ReadonlySet<number>,
   currentViewportRefreshing = false,
   visibleRefreshAgeMs = 0,
+  lookahead = 1,
 ): { cancel: number[]; start: number | null } {
-  const candidates = [requested, requested + 1].filter(
+  // At low zoom, opportunistically decode one extra forecast hour in series,
+  // never more than ONE incomplete frame. Nearby hours already loaded remain
+  // reusable when the slider advances. At high zoom keep the old lower-memory
+  // one-hour prefetch policy.
+  const maxAhead = Math.max(1, Math.min(2, Math.trunc(lookahead) || 1));
+  const candidates = Array.from({ length: maxAhead + 1 }, (_, n) => requested + n).filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
   // Existing in-flight prefetch is not cancelled just because Leaflet
@@ -22,10 +28,10 @@ export function planSpatialRequests(
   // expensive native HTTP churn. Defer only NEW prefetch during the grace
   // interval; after the deadline allow it even if map movement never stops.
   // A missing requested frame is always more important than prefetch.
-  const prefetch = requested + 1;
+  const prefetch = candidates[0];
   const deferred = currentViewportRefreshing && ready.has(requested) &&
     visibleRefreshAgeMs < SPATIAL_PREFETCH_GRACE_MS &&
-    !loading.has(prefetch);
+    (prefetch === undefined || !loading.has(prefetch));
   const desired = deferred ? null : candidates[0] ?? null;
   const cancel = [...loading].filter((step) => step !== desired);
   return {
@@ -53,4 +59,10 @@ export function canAdvanceSpatialTime(
   // No spatial frame exists: allow global fallback only when no model request
   // is in progress, so playback never silently outruns an active decode.
   return ready.size === 0 && loading.size === 0;
+}
+
+/** Keep the expanded cache only for broad low-zoom animations; heavy zoom
+ * levels require denser per-frame tiles and get one-hour lookahead. */
+export function spatialPrefetchDepth(zoom: number): 1 | 2 {
+  return Number.isFinite(zoom) && zoom <= 5 ? 2 : 1;
 }
