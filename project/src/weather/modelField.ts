@@ -3,6 +3,7 @@ import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUN
 import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
+import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -510,8 +511,8 @@ export class ModelField {
     // Use coherent ECMWF model fields for actual cloud shape, precipitation
     // and snowfall instead of inflating low-resolution point forecasts.
     // Keep already-loaded tiles during gestures; load new coverage after idle.
-    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 3 };
-    const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 3 };
+    const cloudOpts = spatialTileOptions("wx-clouds");
+    const rainOpts = spatialTileOptions("wx-model");
     const made = [
       adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
