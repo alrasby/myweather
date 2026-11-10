@@ -3,6 +3,7 @@ import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUN
 import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
+import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { CapacitorHttp } from "@capacitor/core";
@@ -173,7 +174,11 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
   return new Response(bytes.byteLength ? body : null, { status: status || 0, headers });
 }
 
-const spatialNativeQueue = new SpatialNativeQueue(4);
+// Six bounded native reads improve spatial decoding throughput on mobile
+// without allowing the dozens of simultaneous Range fetches triggered by
+// three Leaflet model layers. Every request still obeys cancellation.
+const spatialNativeQueue = new SpatialNativeQueue(6);
+const spatialRangeCache = new SpatialRangeCache();
 
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
@@ -182,6 +187,11 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
   });
   bag["Accept-Encoding"] = "identity";
   const method = (init?.method ?? "GET").toUpperCase();
+  const range = method === "GET" ? headers.get("range") : null;
+  const cacheKey = range && /^bytes=\d+-\d+$/i.test(range) ? `${url}|${range}` : null;
+  if (init?.signal?.aborted) throw new Error("spatial-request-aborted");
+  const cached = cacheKey ? spatialRangeCache.get(cacheKey) : null;
+  if (cached) return responseFrom(cached.status, new Headers(cached.headers), cached.bytes);
   const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => CapacitorHttp.request({
     url,
     method,
@@ -204,6 +214,11 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
     throw new Error(`range ${bytes.byteLength}!=${expect}`);
   }
   if ((result.status || 0) >= 400 || result.status === 0) throw new Error(`spatial ${result.status}`);
+  if (cacheKey && result.status === 206 && bytes.byteLength > 0) {
+    const savedHeaders: Record<string, string> = {};
+    out.forEach((value, key) => { savedHeaders[key] = value; });
+    spatialRangeCache.put(cacheKey, { bytes, status: 206, headers: savedHeaders });
+  }
   return responseFrom(result.status || 200, out, bytes);
 }
 
