@@ -5,7 +5,7 @@ import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { loadWeather, placeFromCoords } from "@/weather/api";
 import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { covers, fetchGrid } from "@/weather/grid";
-import { ModelField } from "@/weather/modelField";
+import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -112,6 +112,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const openRef = useRef<(lat: number, lon: number) => void>(() => undefined);
   const openSystemRef = useRef<(hit: PaintedSystem) => void>(() => undefined);
   const [ready, setReady] = useState(false);
+  const [weatherDiagnosticsOpen, setWeatherDiagnosticsOpen] = useState(false);
+  const [weatherDiagnosticMode, setWeatherDiagnosticMode] = useState<WeatherDiagnosticMode>("all");
+  const [weatherDiagnostics, setWeatherDiagnostics] = useState<WeatherModelDiagnostics | null>(null);
+  const diagnosticsOpenRef = useRef(false);
+  const diagnosticsTickRef = useRef(0);
+  const rainTapRef = useRef({ count: 0, last: 0 });
+  diagnosticsOpenRef.current = weatherDiagnosticsOpen;
   const [kind, setKind] = useState<ShadeKind>(prefs.mapLayer);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -166,6 +173,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (!dragRef.current) sliderRef.current.value = String(info.hour);
       }
       if (kindRef.current === 2) modelRef.current?.sync(info.timeMs);
+      // Diagnostics are opt-in and sampled at 1Hz, not on every map frame.
+      if (diagnosticsOpenRef.current && performance.now() - diagnosticsTickRef.current > 1000) {
+        diagnosticsTickRef.current = performance.now();
+        setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
+      }
     };
     engine.onFrame = paint;
     const onVis = () => engine.setPaused(document.hidden || !el.offsetParent);
@@ -287,6 +299,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     if (!map || !ready) return;
     map.flyTo([place.lat, place.lon], Math.max(map.getZoom(), 6), { duration: 0.7 });
   }, [place.id, ready]);
+
+  useEffect(() => {
+    modelRef.current?.setDiagnosticMode(weatherDiagnosticsOpen ? weatherDiagnosticMode : "all");
+  }, [weatherDiagnosticsOpen, weatherDiagnosticMode]);
 
   useEffect(() => {
     engineRef.current?.setKind(kind);
@@ -835,6 +851,20 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             key={id}
             type="button"
             onClick={() => {
+              // Tap the selected rain-layer icon three times quickly to reveal
+              // a temporary read-only diagnostic. Default UI stays unchanged.
+              if (id === 2 && kindRef.current === 2) {
+                const now = Date.now();
+                const previous = rainTapRef.current;
+                const count = now - previous.last < 2400 ? previous.count + 1 : 1;
+                rainTapRef.current = { count, last: now };
+                if (count >= 3) {
+                  setWeatherDiagnosticsOpen((open) => !open);
+                  rainTapRef.current = { count: 0, last: 0 };
+                }
+              } else {
+                rainTapRef.current = { count: 0, last: 0 };
+              }
               setKind(id);
               setPrefs({ mapLayer: id });
             }}
@@ -852,6 +882,37 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <MinusMark />
         </button>
       </div>
+      {weatherDiagnosticsOpen && kind === 2 ? (
+        <div dir={lang === "ar" ? "rtl" : "ltr"} className="pointer-events-auto absolute left-3 top-16 z-[600] max-w-[min(92vw,340px)] rounded-xl bg-slate-950/90 p-3 text-xs text-white shadow-xl">
+          <div className="mb-2 flex items-center justify-between gap-4">
+            <strong>{lang === "ar" ? "تشخيص طبقات الطقس" : "Weather layer diagnostics"}</strong>
+            <button type="button" className="rounded px-2 py-1 text-white" onClick={() => setWeatherDiagnosticsOpen(false)} aria-label={lang === "ar" ? "إغلاق التشخيص" : "Close diagnostics"}>✕</button>
+          </div>
+          <div className="mb-2 flex flex-wrap gap-1">
+            {([
+              ["all", lang === "ar" ? "الكل" : "All"],
+              ["cloud", lang === "ar" ? "الغيوم" : "Clouds"],
+              ["rain", lang === "ar" ? "المطر" : "Rain"],
+              ["snow", lang === "ar" ? "الثلج" : "Snow"],
+              ["fallback", lang === "ar" ? "الاحتياطي" : "Fallback"],
+            ] as const).map(([mode, title]) => (
+              <button key={mode} type="button" className={`rounded border px-2 py-1 ${weatherDiagnosticMode === mode ? "border-white bg-white/25" : "border-white/30"}`} onClick={() => setWeatherDiagnosticMode(mode)}>
+                {title}
+              </button>
+            ))}
+          </div>
+          <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
+          <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"} · {lang === "ar" ? "الإطار" : "Frame"} {weatherDiagnostics?.frame ?? "—"}</p>
+          {(["cloud", "rain", "snow"] as const).map((name, index) => (
+            <p key={name}>
+              {name}: {weatherDiagnostics?.loaded[index] ? "loaded" : "pending"}
+              {" · "}tiles {weatherDiagnostics?.tileCounts[index] ?? 0}
+              {" · "}errors {weatherDiagnostics?.errors[index] ?? 0}
+            </p>
+          ))}
+          <p className="mt-1 text-white/65">{lang === "ar" ? "للمقارنة فقط؛ لا يغير البيانات أو إعدادات الطبقات." : "Comparison only; does not alter forecast values."}</p>
+        </div>
+      ) : null}
       <div className="map-sheet pointer-events-none absolute inset-0 flex flex-col">
         {progress < 1 ? (
           <div className="mx-3 mt-1 h-1 overflow-hidden rounded-full bg-line">
