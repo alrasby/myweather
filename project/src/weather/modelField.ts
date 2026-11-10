@@ -1,5 +1,6 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
+import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -20,6 +21,9 @@ export type WeatherModelDiagnostics = {
   mode: WeatherDiagnosticMode;
   source: "spatial" | "fallback";
   frame: number;
+  requestedFrame: number;
+  displayedFrame: number | null;
+  holdingPreviousFrame: boolean;
   loaded: boolean[];
   tileCounts: number[];
   errors: number[];
@@ -288,6 +292,8 @@ export class ModelField {
   private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[] }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
+  private lastDisplayedStep: number | null = null;
+  private holdingPreviousFrame = false;
   private seq = 0;
   private orderKey = "";
   private visible = false;
@@ -353,11 +359,19 @@ export class ModelField {
   }
 
   diagnostics(): WeatherModelDiagnostics {
+    // Report the frame actually dominating the display, not merely the hour
+    // being requested. The requested frame may still be pending/loading.
+    const displayed = [...this.frames.entries()]
+      .filter(([, frame]) => frame.ready && frame.opacity > 0.01)
+      .sort((a, b) => b[1].opacity - a[1].opacity)[0]?.[0] ?? null;
     const frame = this.frames.get(this.base) ?? this.frames.get(this.base + 1);
     return {
       mode: this.diagnosticMode,
       source: this.spatialVisible ? "spatial" : "fallback",
       frame: this.base,
+      requestedFrame: this.base,
+      displayedFrame: this.spatialVisible ? displayed : null,
+      holdingPreviousFrame: this.holdingPreviousFrame,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
       errors: frame?.errorCounts.slice() ?? [0, 0, 0],
@@ -375,6 +389,8 @@ export class ModelField {
       this.loading.clear();
       this.orderKey = "";
       this.spatialVisible = false;
+      this.lastDisplayedStep = null;
+      this.holdingPreviousFrame = false;
       this.clear();
     }
   }
@@ -415,7 +431,13 @@ export class ModelField {
     if (!this.visible || !this.adapter || !this.map) return;
     const i = this.base;
     this.dropFar(i);
-    for (const step of [i, i + 1]) {
+    // i+1 is preloaded while i is displayed. Once the adjacent hour is ready
+    // and playback approaches it, prepare i+2 before the timeline advances.
+    const steps = [i, i + 1];
+    if (this.blend > 0.55 && this.frames.get(i + 1)?.ready && i + 2 < this.times.length) {
+      steps.push(i + 2);
+    }
+    for (const step of steps) {
       if (step < 0 || step >= this.times.length) continue;
       if ((this.failedUntil.get(step) ?? 0) > Date.now() || this.frames.has(step) || this.loading.has(step)) continue;
       this.failedUntil.delete(step);
@@ -424,7 +446,8 @@ export class ModelField {
   }
 
   private dropFar(i: number) {
-    const keep = new Set([i, i + 1]);
+    const keep = new Set([i, i + 1, i + 2]);
+    if (this.lastDisplayedStep != null) keep.add(this.lastDisplayedStep);
     for (const [step, frame] of this.frames) {
       if (keep.has(step) || this.loading.has(step)) continue;
       // ساعة ابتعدت عن المؤشر تُترك حتى تخفت، فلا تختفي الكتلة قفزاً.
@@ -476,6 +499,11 @@ export class ModelField {
       // the visible viewport; do not expose the low-resolution global fallback
       // every time a cloud/rain/snow tile queue enters "loading".
       const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
+      // A completed successful reload clears stale timeout errors, even when
+      // the previous frame already remained visible during the refresh.
+      if (frame.loaded.every(Boolean) && frame.errored.size === 0 && frame.tileCounts.every((n) => n > 0)) {
+        this.lastError = null;
+      }
       if (ready === frame.ready) return;
       frame.ready = ready;
       this.orderKey = "";
@@ -554,35 +582,25 @@ export class ModelField {
 
   /** الساعة الأقدم تخفت بينما الساعة الأحدث تظهر، فتنساب الكتل بدل القفزة. */
   private applyOpacity() {
-    const i = this.base;
-    const next = this.blend;
-    const ink = (step: number) => this.frames.get(step)?.ready === true;
-    const both = ink(i) && ink(i + 1);
-    const held = !both && !ink(i) && !ink(i + 1) ? this.newestReady() : -1;
-    const key = `${i}:${held}:${both ? "ab" : ink(i) ? "a" : ink(i + 1) ? "b" : ""}`;
+    const readySteps = new Set<number>();
+    for (const [step, frame] of this.frames) if (frame.ready) readySteps.add(step);
+    const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep);
+    this.holdingPreviousFrame = plan.holding && plan.anchor !== null;
+    const key = [...plan.goals.entries()].map(([step, weight]) => `${step}:${weight.toFixed(3)}`).join("|");
     if (key !== this.orderKey) {
       this.orderKey = key;
-      for (const step of [i, i + 1]) {
+      // Explicitly bring the chosen forecast above an older held frame.
+      // Never discard the previous frame until a replacement is ready.
+      for (const step of plan.goals.keys()) {
         const frame = this.frames.get(step);
         if (!frame?.ready) continue;
         for (const layer of frame.layers) layer.bringToFront?.();
       }
     }
-    const goalFor = (step: number): number => {
-      if (!ink(step)) return 0;
-      if (both) {
-        if (step === i) return 1 - next;
-        if (step === i + 1) return next;
-        return 0;
-      }
-      if (ink(i) && step === i) return 1;
-      if (!ink(i) && ink(i + 1) && step === i + 1) return 1;
-      if (step === held) return 1;
-      return 0;
-    };
+    if (plan.anchor !== null) this.lastDisplayedStep = plan.anchor;
     for (const [step, frame] of this.frames) {
       if (!frame.ready) continue;
-      const goal = goalFor(step);
+      const goal = plan.goals.get(step) ?? 0;
       const cur = frame.opacity < 0 ? 0 : frame.opacity;
       const shown = cur + (goal - cur) * 0.28;
       const value = Math.abs(goal - shown) < 0.02 ? goal : shown;
@@ -595,8 +613,6 @@ export class ModelField {
         layer.setOpacity?.(allowed ? value : 0);
       }
     }
-    // Reveal the model only after sufficient tile opacity is actually present,
-    // avoiding the abrupt disappearance of visible rain/snow during blending.
     const visibleOpacity = Array.from(this.frames.values()).reduce(
       (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
       0,
