@@ -180,7 +180,7 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
   });
   bag["Accept-Encoding"] = "identity";
   const method = (init?.method ?? "GET").toUpperCase();
-  const result = await spatialNativeQueue.run(init?.signal, () => CapacitorHttp.request({
+  const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => CapacitorHttp.request({
     url,
     method,
     headers: bag,
