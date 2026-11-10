@@ -930,7 +930,21 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
-          <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"}</p>
+          <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"}
+            {" · "}{weatherDiagnostics?.runPath ?? "—"}
+          </p>
+          <p>{lang === "ar" ? "تاريخ تشغيل النموذج" : "Forecast run"}: {weatherDiagnostics?.modelRunReference ?? "—"}</p>
+          <p>{lang === "ar" ? "ذاكرة مشتركة" : "Shared worker memory"}: {weatherDiagnostics?.workerSharedMemory ? "enabled" : "unavailable"}</p>
+          {(["nativeQueue", "network", "workerTile", "leafletTile"] as const).map((metric) => (
+            <p key={metric} className="text-[0.7rem]">
+              {metric}: {weatherDiagnostics?.timings[metric].count ?? 0}
+              {" · "}avg {weatherDiagnostics?.timings[metric].meanMs ?? 0}ms
+              {" · "}p95 {weatherDiagnostics?.timings[metric].p95Ms ?? 0}ms
+            </p>
+          ))}
+          <p className="text-[0.65rem] text-white/65">{lang === "ar"
+            ? "workerTile يشمل الشبكة ونقل البيانات وفكها؛ وليس زمن فك البيانات وحده."
+            : "workerTile includes fetch, transfer and decode; not decode-only."}</p>
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
