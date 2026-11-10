@@ -6,6 +6,7 @@ import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
+import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -37,6 +38,8 @@ export type WeatherModelDiagnostics = {
   error: string | null;
   cacheHits: number;
   nativeReads: number;
+  layerTimings: SpatialLayerTiming[];
+  loadingFrames: number[];
 };
 
 type AnyLayer = {
@@ -333,7 +336,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[] }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[] }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -437,6 +440,11 @@ export class ModelField {
       error: this.lastError,
       cacheHits: spatialCacheHits,
       nativeReads: spatialNativeReads,
+      layerTimings: Array.from({ length: SPATIAL_LAYER_COUNT }, (_, index) =>
+        spatialLayerTiming(Date.now(), frame?.layerStartedAt[index] ?? 0,
+          frame?.layerFirstTileAt[index] ?? 0, frame?.layerLastTileAt[index] ?? 0,
+          frame?.layerFinishedAt[index] ?? 0)),
+      loadingFrames: [...this.loading].sort((a, b) => a - b),
     };
   }
 
@@ -492,7 +500,10 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    const plan = planSpatialRequests(this.base, this.times.length, ready, this.loading, blocked);
+    // Current viewport refresh has priority over speculative future hours.
+    const current = this.frames.get(this.base);
+    const viewportRefreshing = !!current?.ready && current.loaded.some((complete) => !complete);
+    const plan = planSpatialRequests(this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing);
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
     // A stale request must not occupy the bandwidth while the slider moves.
@@ -555,7 +566,17 @@ export class ModelField {
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
     ] as AnyLayer[];
-    const frame = { layers: made, token, opacity: -1, ready: false, loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false), errored: new Set<number>(), tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0), errorCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0) };
+    const frame = {
+      layers: made, token, opacity: -1, ready: false,
+      loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
+      errored: new Set<number>(),
+      tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      errorCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      layerStartedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      layerFirstTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      layerLastTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      layerFinishedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+    };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
     let errors = 0;
@@ -575,7 +596,12 @@ export class ModelField {
       if (frame.loaded.every(Boolean) && frame.errored.size === 0 && frame.tileCounts.every((n) => n > 0)) {
         this.lastError = null;
       }
-      if (ready === frame.ready) return;
+      if (ready === frame.ready) {
+        // On a successful viewport refresh the existing frame stays visible;
+        // resume prefetch once all queues finish, without hiding its imagery.
+        if (ready && frame.loaded.every(Boolean)) this.pump();
+        return;
+      }
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
@@ -626,6 +652,10 @@ export class ModelField {
       layer.on("loading", () => {
         if (!alive()) return;
         frame.loaded[index] = false;
+        frame.layerStartedAt[index] = Date.now();
+        frame.layerFirstTileAt[index] = 0;
+        frame.layerLastTileAt[index] = 0;
+        frame.layerFinishedAt[index] = 0;
         // Keep proof of previously delivered tiles: a viewport refresh may
         // reuse cached tiles without firing tileload for each of them.
         frame.errored.delete(index);
@@ -634,12 +664,15 @@ export class ModelField {
       layer.on("load", () => {
         if (!alive()) return;
         frame.loaded[index] = true;
+        frame.layerFinishedAt[index] = Date.now();
         refresh();
       });
       layer.on("tileload", () => {
         if (!alive()) return;
         frame.tileCounts[index] += 1;
         lastProgressAt = Date.now();
+        frame.layerFirstTileAt[index] ||= lastProgressAt;
+        frame.layerLastTileAt[index] = lastProgressAt;
         refresh();
       });
       layer.on("tileerror", (ev) => {
