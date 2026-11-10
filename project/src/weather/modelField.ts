@@ -352,7 +352,7 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    return canAdvanceSpatialTime(i, ready, blocked);
+    return canAdvanceSpatialTime(i, ready, blocked, this.loading);
   }
 
   /** A deliberately hidden, read-only map diagnostic for comparing independent
