@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planSpatialRequests, canAdvanceSpatialTime, SPATIAL_PREFETCH_GRACE_MS } from "./modelFrameQueue.ts";
+import { planSpatialRequests, canAdvanceSpatialTime, SPATIAL_PREFETCH_GRACE_MS, spatialPrefetchDepth } from "./modelFrameQueue.ts";
 
 test("only one current ECMWF frame loads; next is prefetched after it becomes ready", () => {
   assert.deepEqual(planSpatialRequests(6, 30, new Set(), new Set(), new Set()), { cancel: [], start: 6 });
@@ -66,4 +66,21 @@ test("clouds cannot remain frozen while the time slider skips unready model hour
 
 test("a genuinely failed spatial hour may continue only via explicit fallback", () => {
   assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set([16]), new Set()), true);
+});
+
+test("low zoom prewarms the second upcoming ECMWF hour without concurrent incomplete frames", () => {
+  const ready = new Set([8,9]);
+  assert.deepEqual(planSpatialRequests(8, 24, ready, new Set(), new Set(), false, 0, 2),
+    { cancel: [], start: 10 });
+  assert.deepEqual(planSpatialRequests(8, 24, ready, new Set([10]), new Set(), false, 0, 2),
+    { cancel: [], start: null });
+});
+test("high zoom retains modest one-hour lookahead and memory budget", () => {
+  const ready = new Set([8,9]);
+  assert.deepEqual(planSpatialRequests(8,24,ready,new Set(),new Set(),false,0,1),
+    { cancel: [], start: null });
+  assert.equal(spatialPrefetchDepth(4), 2);
+  assert.equal(spatialPrefetchDepth(5), 2);
+  assert.equal(spatialPrefetchDepth(6), 1);
+  assert.equal(spatialPrefetchDepth(12), 1);
 });
