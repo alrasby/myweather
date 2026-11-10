@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { selectSpatialFramePlan } from "./modelFrameTimeline.ts";
+import { selectSpatialFramePlan, spatialStackKey } from "./modelFrameTimeline.ts";
 
 test("holds the last valid spatial frame during an unloaded time seek", () => {
   const plan = selectSpatialFramePlan(12, 0.4, new Set([6]), 6);
@@ -52,4 +52,12 @@ test("pending hour temporarily holds old imagery ONLY while playback remains gat
   const pending = selectSpatialFramePlan(18, 0.3, new Set([10]), 10, false);
   assert.equal(pending.anchor, 10);
   assert.equal(pending.holding, true);
+});
+
+test("weather layers are not reordered for every animation opacity change", () => {
+  const first = new Map([[8, 0.15], [9, 0.85]]);
+  const second = new Map([[8, 0.95], [9, 0.05]]);
+  const moved = new Map([[9, 0.15], [10, 0.85]]);
+  assert.equal(spatialStackKey(first), spatialStackKey(second));
+  assert.notEqual(spatialStackKey(first), spatialStackKey(moved));
 });
