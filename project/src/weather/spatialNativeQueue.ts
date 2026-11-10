@@ -11,8 +11,10 @@ export class SpatialNativeQueue {
     reject: (reason: Error) => void;
   }> = [];
 
-  constructor(private readonly limit = 4) {
+  private readonly limit: number;
+  constructor(limit = 4) {
     if (!Number.isInteger(limit) || limit < 1) throw new Error("invalid concurrency limit");
+    this.limit = limit;
   }
 
   private abortError(): Error {
