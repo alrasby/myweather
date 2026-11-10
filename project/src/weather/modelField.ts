@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { modelTileFrameReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
+import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -472,7 +472,10 @@ export class ModelField {
       if (!alive()) return;
       // A 'load' event without any tile delivery cannot prove that the
       // corresponding weather field is present in the current viewport.
-      const ready = modelTileFrameReady(frame.loaded, frame.errored, frame.tileCounts);
+      // Preserve the last fully rendered spatial frame while Leaflet refreshes
+      // the visible viewport; do not expose the low-resolution global fallback
+      // every time a cloud/rain/snow tile queue enters "loading".
+      const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
       if (ready === frame.ready) return;
       frame.ready = ready;
       this.orderKey = "";
@@ -513,7 +516,8 @@ export class ModelField {
       layer.on("loading", () => {
         if (!alive()) return;
         frame.loaded[index] = false;
-        frame.tileCounts[index] = 0;
+        // Keep proof of previously delivered tiles: a viewport refresh may
+        // reuse cached tiles without firing tileload for each of them.
         frame.errored.delete(index);
         refresh();
       });
@@ -537,6 +541,10 @@ export class ModelField {
         errors += 1;
         if (errors >= 3) {
           window.clearTimeout(wait);
+          // An already-rendered frame must be retired on repeated errors,
+          // rather than remaining indefinitely marked "ready" on a failed
+          // refresh. The backoff path retries the model after 15 seconds.
+          frame.ready = false;
           giveUp();
         }
       });
