@@ -7,6 +7,7 @@ import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
+import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -45,6 +46,7 @@ export type WeatherModelDiagnostics = {
   cacheEligible: number;
   cacheStored: number;
   cacheRejected: number;
+  performance: SpatialPerformanceSnapshot;
 };
 
 type AnyLayer = {
@@ -188,6 +190,7 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
 // without allowing the dozens of simultaneous Range fetches triggered by
 // three Leaflet model layers. Every request still obeys cancellation.
 const spatialNativeQueue = new SpatialNativeQueue(6);
+const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
@@ -195,6 +198,34 @@ let spatialCacheEligible = 0;
 let spatialCacheStored = 0;
 let spatialCacheRejected = 0;
 const spatialFileLengths = new Map<string, { value: string; expires: number }>();
+
+/** Measure queue wait and native transport independently. These values do NOT
+ * include OM-file WASM decoding or worker rasterization; the tileload probe
+ * separately measures their combined end-to-end tile pipeline. */
+async function measuredNativeRequest(
+  signal: AbortSignal | undefined,
+  options: Parameters<typeof CapacitorHttp.request>[0],
+): Promise<Awaited<ReturnType<typeof CapacitorHttp.request>>> {
+  const queued = performance.now();
+  let started = queued;
+  try {
+    const result = await spatialNativeQueue.run(signal, () => {
+      started = performance.now();
+      spatialNativeReads++;
+      return CapacitorHttp.request(options);
+    });
+    const headerValue = Object.entries(result.headers ?? {}).find(([key]) => key.toLowerCase() === "content-length")?.[1];
+    const bytes = Number(headerValue);
+    spatialPerformance.networkRequest(
+      started - queued, performance.now() - started,
+      Number.isFinite(bytes) && bytes >= 0 ? bytes : 0, result.status >= 200 && result.status < 400,
+    );
+    return result;
+  } catch (error) {
+    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false);
+    throw error;
+  }
+}
 
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
@@ -212,16 +243,13 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
     return responseFrom(cached.status, new Headers(cached.headers), cached.bytes);
   }
   if (cacheKey) spatialCacheEligible++;
-  const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => {
-    spatialNativeReads++;
-    return CapacitorHttp.request({
+  const result = await measuredNativeRequest(init?.signal ?? undefined, {
     url,
     method,
     headers: bag,
     responseType: method === "HEAD" ? "text" : "arraybuffer",
     connectTimeout: 20000,
     readTimeout: 25000,
-    });
   });
   const out = new Headers();
   for (const [key, value] of Object.entries(result.headers ?? {})) {
@@ -263,16 +291,13 @@ async function probeLength(url: string, headers: Headers, signal?: AbortSignal):
   });
   bag.Range = "bytes=0-0";
   bag["Accept-Encoding"] = "identity";
-  const result = await spatialNativeQueue.run(signal, () => {
-    spatialNativeReads++;
-    return CapacitorHttp.request({
+  const result = await measuredNativeRequest(signal, {
       url,
       method: "GET",
       headers: bag,
       responseType: "text",
       connectTimeout: 15000,
       readTimeout: 15000,
-    });
   });
   const map = result.headers ?? {};
   for (const [key, value] of Object.entries(map)) {
@@ -468,6 +493,10 @@ export class ModelField {
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
+      performance: spatialPerformance.snapshot(
+        globalThis.crossOriginIsolated === true,
+        (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize ?? null,
+      ),
       layerTimings: Array.from({ length: SPATIAL_LAYER_COUNT }, (_, index) =>
         spatialLayerTiming(Date.now(), frame?.layerStartedAt[index] ?? 0,
           frame?.layerFirstTileAt[index] ?? 0, frame?.layerLastTileAt[index] ?? 0,
@@ -690,6 +719,11 @@ export class ModelField {
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     for (const [index, layer] of made.entries()) {
+      const tileStart = new WeakMap<object, number>();
+      layer.on("tileloadstart", (event) => {
+        if (!alive() || !event?.tile) return;
+        tileStart.set(event.tile, performance.now());
+      });
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
       layer.on("loading", () => {
@@ -710,8 +744,13 @@ export class ModelField {
         frame.layerFinishedAt[index] = Date.now();
         refresh();
       });
-      layer.on("tileload", () => {
+      layer.on("tileload", (event) => {
         if (!alive()) return;
+        const since = event?.tile ? tileStart.get(event.tile) : undefined;
+        if (since !== undefined) {
+          spatialPerformance.tile(index, performance.now() - since, true);
+          tileStart.delete(event!.tile!);
+        }
         frame.tileCounts[index] += 1;
         lastProgressAt = Date.now();
         frame.layerFirstTileAt[index] ||= lastProgressAt;
@@ -720,6 +759,7 @@ export class ModelField {
       });
       layer.on("tileerror", (ev) => {
         if (!alive()) return;
+        spatialPerformance.tile(index, 0, false);
         const err = (ev as { error?: unknown } | undefined)?.error;
         if (err) this.lastError = String(err instanceof Error ? err.message : err).slice(0, 160);
         frame.errorCounts[index] += 1;
