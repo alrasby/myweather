@@ -1,4 +1,4 @@
-import { sunArc } from "./astro.ts";
+import { daylightNow, sunArc } from "./astro.ts";
 
 import type { Place, WeatherBundle } from "./types.ts";
 
@@ -42,5 +42,13 @@ export function repairSolarForecast(bundle: WeatherBundle, place: Pick<Place, "l
     modified = true;
     return { ...day, sunrise: expected.rise, sunset: expected.set };
   });
-  return modified ? { ...bundle, daily: days } : bundle;
+  if (!modified) return bundle;
+  const corrected = { ...bundle, daily: days };
+  if (bundle.current) {
+    corrected.current = {
+      ...bundle.current,
+      isDay: daylightNow(Date.now(), place.lat, place.lon, days, bundle.hourly),
+    };
+  }
+  return corrected;
 }
