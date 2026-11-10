@@ -119,7 +119,12 @@ void main() {
     float snowBody = smoothstep(0.09, 0.33, fallCm);
     // Dense cloud banks remain recognizable; widespread light cloud must not
     // become a uniform white fog over the satellite base.
-    float cloudBody = smoothstep(0.62, 0.94, cloud);
+    // Cloud cover is not precipitation. Earlier versions painted every broad
+    // overcast region as a pale weather sheet, producing giant white rectangles
+    // over dry oceans even after the separate cloud tile layer was removed.
+    // In the rain/snow view, show a cloud halo only near measured precipitation.
+    float stormPresence = smoothstep(0.035, 0.28, max(mm, fallCm));
+    float cloudBody = smoothstep(0.62, 0.94, cloud) * stormPresence;
     if (s.a < 0.01 || (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02)) {
       frag = vec4(0.0);
       return;
@@ -1339,7 +1344,10 @@ function shade(
     const snowCm = Math.max(s.snow ?? 0, 0);
     const rainBody = smooth(0.1, 0.65, s.rain);
     const snowBody = smooth(0.09, 0.33, snowCm);
-    const cloudBody = smooth(0.62, 0.94, (s.cloud ?? 0) / 100);
+    // Mirror the WebGL rain-only cloud mask in the Canvas 2D fallback.
+    // Dry overcast must not become a solid white precipitation tile.
+    const stormPresence = smooth(0.035, 0.28, Math.max(s.rain, snowCm));
+    const cloudBody = smooth(0.62, 0.94, (s.cloud ?? 0) / 100) * stormPresence;
     if (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02) return null;
     const rainA = rainBody * (0.48 + smooth(0.5, 6, s.rain) * 0.47);
     const snowI = Math.max(0, Math.min(1, snowCm / 0.33));
