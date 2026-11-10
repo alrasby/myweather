@@ -1,6 +1,7 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
+import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -289,6 +290,7 @@ export class ModelField {
   private blend = 0;
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
+  private pendingTimers = new Map<number, number>();
   private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[] }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
@@ -338,6 +340,19 @@ export class ModelField {
 
   whenReady(): Promise<number> {
     return this.ready.then(() => this.times.length);
+  }
+
+  /** Playback safety gate for the rain/snow map only. Frame decoding is
+   * bounded; hold playback at a temporal boundary until ECMWF can show it.
+   * Never freeze playback permanently when the upstream request is in cooldown. */
+  canAdvanceTo(ms: number): boolean {
+    if (!this.visible || !this.times.length) return true;
+    const { i } = this.bracket(ms);
+    const ready = new Set<number>();
+    for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
+    const blocked = new Set<number>();
+    for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
+    return canAdvanceSpatialTime(i, ready, blocked);
   }
 
   /** A deliberately hidden, read-only map diagnostic for comparing independent
@@ -429,31 +444,41 @@ export class ModelField {
 
   private pump() {
     if (!this.visible || !this.adapter || !this.map) return;
-    const i = this.base;
-    this.dropFar(i);
-    // i+1 is preloaded while i is displayed. Once the adjacent hour is ready
-    // and playback approaches it, prepare i+2 before the timeline advances.
-    const steps = [i, i + 1];
-    if (this.blend > 0.55 && this.frames.get(i + 1)?.ready && i + 2 < this.times.length) {
-      steps.push(i + 2);
-    }
-    for (const step of steps) {
-      if (step < 0 || step >= this.times.length) continue;
-      if ((this.failedUntil.get(step) ?? 0) > Date.now() || this.frames.has(step) || this.loading.has(step)) continue;
-      this.failedUntil.delete(step);
-      this.mount(step);
+    const ready = new Set<number>();
+    for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
+    const blocked = new Set<number>();
+    for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
+    const plan = planSpatialRequests(this.base, this.times.length, ready, this.loading, blocked);
+
+    // Cancel obsolete decoding before scheduling the most relevant forecast.
+    // A stale request must not occupy the bandwidth while the slider moves.
+    for (const step of plan.cancel) this.discardFrame(step);
+    this.dropFar(this.base);
+    if (plan.start !== null && !this.frames.has(plan.start) && !this.loading.has(plan.start)) {
+      this.failedUntil.delete(plan.start);
+      this.mount(plan.start);
     }
   }
 
+  private discardFrame(step: number) {
+    const timer = this.pendingTimers.get(step);
+    if (timer !== undefined) window.clearTimeout(timer);
+    this.pendingTimers.delete(step);
+    const frame = this.frames.get(step);
+    this.frames.delete(step);
+    this.loading.delete(step);
+    // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
+    // callbacks are ignored because their frame is no longer in the map.
+    frame?.layers.forEach((layer) => layer.remove());
+  }
+
   private dropFar(i: number) {
-    const keep = new Set([i, i + 1, i + 2]);
+    const keep = new Set([i, i + 1]);
     if (this.lastDisplayedStep != null) keep.add(this.lastDisplayedStep);
     for (const [step, frame] of this.frames) {
       if (keep.has(step) || this.loading.has(step)) continue;
-      // ساعة ابتعدت عن المؤشر تُترك حتى تخفت، فلا تختفي الكتلة قفزاً.
       if (frame.ready && frame.opacity > 0.04) continue;
-      frame.layers.forEach((layer) => layer.remove());
-      this.frames.delete(step);
+      this.discardFrame(step);
     }
   }
 
@@ -510,7 +535,12 @@ export class ModelField {
       if (ready) {
         this.loading.delete(step);
         this.failedUntil.delete(step);
+        this.lastError = null;
         window.clearTimeout(wait);
+        this.pendingTimers.delete(step);
+        // Start preloading the adjacent forecast as soon as the requested
+        // frame finishes, rather than waiting for another gesture.
+        this.pump();
       }
       if (!ready) {
         // Partial frames are never exposed: keep the global rain/snow canvas visible.
@@ -528,9 +558,7 @@ export class ModelField {
       if (frame.errored.size) {
         console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
       }
-      this.loading.delete(step);
-      for (const layer of made) layer.remove();
-      if (this.frames.get(step) === frame) this.frames.delete(step);
+      this.discardFrame(step);
       if (!this.anyReady()) this.onMiss?.();
       this.pump();
     };
@@ -538,6 +566,7 @@ export class ModelField {
       if (!alive() || frame.ready) return;
       giveUp();
     }, 20000);
+    this.pendingTimers.set(step, wait);
     for (const [index, layer] of made.entries()) {
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
@@ -623,8 +652,9 @@ export class ModelField {
   }
 
   private clear() {
-    for (const frame of this.frames.values()) frame.layers.forEach((layer) => layer.remove());
-    this.frames.clear();
+    for (const step of [...this.frames.keys()]) this.discardFrame(step);
+    for (const timer of this.pendingTimers.values()) window.clearTimeout(timer);
+    this.pendingTimers.clear();
     this.loading.clear();
   }
 }
