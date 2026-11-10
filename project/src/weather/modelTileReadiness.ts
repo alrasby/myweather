@@ -1,14 +1,15 @@
-/** The three model tile layers: cloud, precipitation, snowfall. */
+/** Two spatial weather tiles: precipitation then snowfall. Cloud cover is
+ * drawn continuously by the global grid rather than tiled opaque sheets. */
 export function isPrecipitationTile(index: number): boolean {
-  return index === 1 || index === 2;
+  return index === 0 || index === 1;
 }
 
-/** A regional weather-model frame may replace the global fallback only
- * after rain or snow has actual data and all current tile queues finish. */
+/** Regional precipitation/snow may overlay the continuous global field only
+ * after a rain or snow tile has actual data and both tile queues finish. */
 export function modelTileFrameReady(
   hasPrecipitationInk: boolean,
   loaded: readonly boolean[],
   errored: ReadonlySet<number>,
 ): boolean {
-  return hasPrecipitationInk && loaded.length === 3 && loaded.every(Boolean) && errored.size === 0;
+  return hasPrecipitationInk && loaded.length === 2 && loaded.every(Boolean) && errored.size === 0;
 }
