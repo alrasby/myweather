@@ -1,6 +1,6 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
-import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
+import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
@@ -751,7 +751,7 @@ export class ModelField {
     // the interpolation weight. Including the weight in this key caused
     // Leaflet bringToFront() (DOM reordering of 3–6 image layers) on every
     // playback tick, competing with network tile paint/decode.
-    const key = [...plan.goals.keys()].join("|");
+    const key = spatialStackKey(plan.goals);
     if (key !== this.orderKey) {
       this.orderKey = key;
       // Explicitly bring the chosen forecast above an older held frame.
