@@ -4,6 +4,7 @@ import type { LayerGroup, Map as LeafletMap, TileLayer } from "leaflet";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { loadWeather, placeFromCoords } from "@/weather/api";
 import { FieldEngine, type FrameInfo } from "@/weather/glField";
+import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { estimateGrid } from "@/weather/estimate";
@@ -121,6 +122,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   diagnosticsOpenRef.current = weatherDiagnosticsOpen;
   const [kind, setKind] = useState<ShadeKind>(prefs.mapLayer);
   const [playing, setPlaying] = useState(false);
+  const [weatherLoadPhase, setWeatherLoadPhase] = useState<0 | 1 | 2>(0);
+  const weatherLoadPhaseRef = useRef<0 | 1 | 2>(0);
   const [progress, setProgress] = useState(0);
   const [pins, setPins] = useState<Array<LiveCyclone & { x: number; y: number }>>([]);
   const [cycloneMsg, setCycloneMsg] = useState<string | null>(null);
@@ -145,6 +148,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engine.canAdvanceRainTime = (timeMs) => modelRef.current?.canAdvanceTo(timeMs) ?? true;
     engineRef.current = engine;
     const paint = (info: FrameInfo) => {
+      // State changes only when the message phase changes, never at 60fps.
+      // Skip brief cached-tile refreshes to keep the controls visually stable.
+      const phase = kindRef.current === 2 ? weatherLoadingPhase(info.playbackWaitingMs) : 0;
+      if (phase !== weatherLoadPhaseRef.current) {
+        weatherLoadPhaseRef.current = phase;
+        setWeatherLoadPhase(phase);
+      }
       const current = prefsRef.current;
       const language = langRef.current;
       if (timeRef.current) {
@@ -1041,6 +1051,21 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 onInput={(e) => engineRef.current?.setHour(Number(e.currentTarget.value))}
               />
             </div>
+            {kind === 2 && playing && weatherLoadPhase > 0 ? (
+              <div
+                className="mt-1 flex items-center gap-1.5 rounded-md bg-accent/10 px-2 py-1 text-[0.67rem] leading-tight text-fg"
+                dir={lang === "ar" ? "rtl" : "ltr"}
+                role="status"
+                aria-live="polite"
+              >
+                <svg className="size-3 shrink-0 animate-spin text-accent" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3a9 9 0 1 1-9 9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+                <span>{weatherLoadPhase === 2
+                  ? (lang === "ar" ? "تحميل التوقعات أبطأ من المعتاد — يمكنك اختيار ساعة أخرى" : "Forecast loading is slow — you can select another hour")
+                  : (lang === "ar" ? "جاري تجهيز التوقع التالي…" : "Preparing next forecast…")}</span>
+              </div>
+            ) : null}
             <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
               <span className="font-semibold text-fg">{t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
               <span ref={valueRef} className="font-semibold text-accent">—</span>
