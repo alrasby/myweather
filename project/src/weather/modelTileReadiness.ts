@@ -26,3 +26,20 @@ export function modelVariablesReady(variables?: readonly string[]): boolean {
     (variable) => variables.includes(variable),
   );
 }
+
+/** Keep an already-painted spatial frame on screen while Leaflet fetches tiles
+ * for a new viewport. Its previous tiles remain buffered by Leaflet; clearing
+ * the entire frame at the first loading event exposes the coarse 72x36 global
+ * fallback on every pan, producing the observed gelatinous rain/cloud shapes.
+ *
+ * For a first-ever frame all three queues must complete, and after a refresh
+ * fully settles we accept only a complete error-free set. */
+export function spatialFrameReadyDuringRefresh(
+  wasReady: boolean,
+  loaded: readonly boolean[],
+  errored: ReadonlySet<number>,
+  deliveredTiles: readonly number[],
+): boolean {
+  if (wasReady && loaded.some((isLoaded) => !isLoaded)) return true;
+  return modelTileFrameReady(loaded, errored, deliveredTiles);
+}
