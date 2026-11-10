@@ -25,6 +25,7 @@ export type WeatherModelDiagnostics = {
   errors: number[];
   visibleOpacity: number;
   metadataAvailable: boolean;
+  error: string | null;
 };
 
 type AnyLayer = {
@@ -279,6 +280,7 @@ export class ModelField {
   private map: LeafletMap | null = null;
   private adapter: Adapter | null = null;
   private times: number[] = [];
+  private lastError: string | null = null;
   private base = 0;
   private blend = 0;
   private failedUntil = new Map<number, number>();
@@ -307,19 +309,23 @@ export class ModelField {
     }
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
+    this.lastError = null;
     this.ready = fetch(META)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { valid_times?: string[]; variables?: string[] }) => {
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
+          this.lastError = "ECMWF model missing one or more cloud/rain/snow variables";
           console.warn("MyWeather: ECMWF spatial layer unavailable; retaining global rain/snow fallback");
           this.times = [];
           return;
         }
         this.times = (json.valid_times ?? []).map((t) => Date.parse(t)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
+        console.warn("MyWeather: spatial metadata fetch failed", this.lastError);
         this.times = [];
       });
   }
@@ -357,6 +363,7 @@ export class ModelField {
       errors: frame?.errorCounts.slice() ?? [0, 0, 0],
       visibleOpacity: frame?.opacity ?? 0,
       metadataAvailable: this.times.length > 0,
+      error: this.lastError,
     };
   }
 
@@ -486,6 +493,7 @@ export class ModelField {
       // Failed frames are retryable: avoid a permanent weather outage after
       // one transient fetch error or a quick network switch.
       this.failedUntil.set(step, Date.now() + 15_000);
+      this.lastError = frame.errored.size ? "ECMWF tile request failed" : "ECMWF tile readiness timeout";
       if (frame.errored.size) {
         console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
       }
@@ -519,8 +527,10 @@ export class ModelField {
         frame.tileCounts[index] += 1;
         refresh();
       });
-      layer.on("tileerror", () => {
+      layer.on("tileerror", (ev) => {
         if (!alive()) return;
+        const err = (ev as { error?: unknown } | undefined)?.error;
+        if (err) this.lastError = String(err instanceof Error ? err.message : err).slice(0, 160);
         frame.errorCounts[index] += 1;
         frame.errored.add(index);
         refresh();
