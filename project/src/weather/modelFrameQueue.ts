@@ -1,7 +1,10 @@
+/** Maximum time a refreshed visible viewport can defer *starting* the
+ * next forecast. Continuous panning must not starve animation forever. */
+export const SPATIAL_PREFETCH_GRACE_MS = 2500;
+
 /** Limit ECMWF decoding to one incomplete forecast hour at a time.
- * Prioritize the current requested frame; prefetch the following frame only
- * after the requested frame has completed. This prevents playing a 20-second
- * tile workload for every obsolete hour while the timeline advances. */
+ * Prioritize the requested frame and visible tiles, but give the following
+ * hour a bounded turn even while the user continuously pans. */
 export function planSpatialRequests(
   requested: number,
   total: number,
@@ -9,16 +12,21 @@ export function planSpatialRequests(
   loading: ReadonlySet<number>,
   blocked: ReadonlySet<number>,
   currentViewportRefreshing = false,
+  visibleRefreshAgeMs = 0,
 ): { cancel: number[]; start: number | null } {
   const candidates = [requested, requested + 1].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
-  // Loading the CURRENT visible viewport has priority over speculative
-  // next-hour decoding. Pause/cancel prefetch until its map tiles settle.
-  // If requested hour has not yet loaded, it remains the mandatory target.
-  const desired = currentViewportRefreshing && ready.has(requested)
-    ? null
-    : candidates[0] ?? null;
+  // Existing in-flight prefetch is not cancelled just because Leaflet
+  // briefly restarts a viewport tile queue. Doing that on every pan caused
+  // expensive native HTTP churn. Defer only NEW prefetch during the grace
+  // interval; after the deadline allow it even if map movement never stops.
+  // A missing requested frame is always more important than prefetch.
+  const prefetch = requested + 1;
+  const deferred = currentViewportRefreshing && ready.has(requested) &&
+    visibleRefreshAgeMs < SPATIAL_PREFETCH_GRACE_MS &&
+    !loading.has(prefetch);
+  const desired = deferred ? null : candidates[0] ?? null;
   const cancel = [...loading].filter((step) => step !== desired);
   return {
     cancel,
