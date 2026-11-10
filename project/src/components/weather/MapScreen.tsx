@@ -917,7 +917,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
-          <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"} · {lang === "ar" ? "الإطار" : "Frame"} {weatherDiagnostics?.frame ?? "—"}</p>
+          <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"}</p>
+          <p>{lang === "ar" ? "الإطار المطلوب" : "Requested frame"}: {weatherDiagnostics?.requestedFrame ?? "—"}</p>
+          <p>{lang === "ar" ? "الإطار المعروض فعليًا" : "Displayed frame"}: {weatherDiagnostics?.displayedFrame ?? "—"}
+            {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
+          </p>
           {weatherDiagnostics?.error ? (
             <p className="my-1 break-words text-amber-200" role="status">
               {lang === "ar" ? "الخطأ" : "Error"}: {weatherDiagnostics.error}
