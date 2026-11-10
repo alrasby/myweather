@@ -120,7 +120,7 @@ void main() {
     // Dense cloud banks remain recognizable; widespread light cloud must not
     // become a uniform white fog over the satellite base.
     float cloudBody = smoothstep(0.62, 0.94, cloud);
-    if (s.a < 0.5 || (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02)) {
+    if (s.a < 0.01 || (rainBody < 0.02 && snowBody < 0.02 && cloudBody < 0.02)) {
       frag = vec4(0.0);
       return;
     }
@@ -134,7 +134,9 @@ void main() {
     float wxA = mix(rainA, snowA, useSnow);
     float wx = clamp(max(rainBody, snowBody), 0.0, 1.0);
     col = mix(vec3(0.96, 0.97, 0.99), wxCol, wx);
-    alpha = mix(cloudBody * mix(0.28, 0.56, cloudBody), wxA, wx) * u_alphaMul;
+    // Missing precipitation cells fade via their interpolated validity mask
+    // rather than making hard square edges at the 50% threshold.
+    alpha = mix(cloudBody * mix(0.28, 0.56, cloudBody), wxA, wx) * u_alphaMul * smoothstep(0.0, 1.0, s.a);
   }
   frag = vec4(col * alpha * edge, alpha * edge);
 }`;

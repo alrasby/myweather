@@ -392,6 +392,11 @@ function pack(req: GridRequest, cells: Cell[][], times: number[], id: string): G
 
 /** ثقوب صغيرة فقط. الشبكة العالمية لا تسحب حرارة صفّ بعيد حتى لا يغطي هواء الشمال الجزيرة. */
 function fillGaps(grid: GridField, dryRain = false) {
+  // Missing precipitation observations are UNKNOWN, not zero rainfall.
+  // Filling gaps with dry values marks failed batches as valid and paints
+  // rectangular dry patches (including missing snowfall) on the map.
+  // Preserve their validity mask for the precipitation-only renderer.
+  if (dryRain) return;
   if (grid.full) {
     fillSameRow(grid, dryRain);
     return;
@@ -550,7 +555,10 @@ async function fetchGridUncached(req: GridRequest, key: string): Promise<GridFie
 
   if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
   const ratio = fillRatio(cells);
-  if (req.full ? ratio < 0.35 : ratio < 0.28) throw new Error("thin");
+  // Rain/snow fields must not be published from mostly missing API batches.
+  // The normal wind/temperature coverage thresholds remain unchanged.
+  const minCoverage = req.dryRain ? (req.full ? 0.82 : 0.88) : (req.full ? 0.35 : 0.28);
+  if (ratio < minCoverage) throw new Error("thin");
   if (!times.list.length || times.list.some((t) => !Number.isFinite(t))) {
     const start = Date.now();
     times.list = Array.from({ length: req.hours }, (_, i) => start + i * 3_600_000);
