@@ -600,7 +600,9 @@ export class ModelField {
   }
 
   private dropFar(i: number) {
-    const keep = new Set([i, i + 1]);
+    // Two-hour lookahead is prepared one at a time, and retained until used.
+    // At most three adjacent spatial hours plus the last fading frame remain.
+    const keep = new Set([i, i + 1, i + 2]);
     if (this.lastDisplayedStep != null) keep.add(this.lastDisplayedStep);
     for (const [step, frame] of this.frames) {
       if (keep.has(step) || this.loading.has(step)) continue;
