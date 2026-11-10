@@ -949,6 +949,38 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {lang === "ar" ? "الخطأ" : "Error"}: {weatherDiagnostics.error}
             </p>
           ) : null}
+          <div className="my-1 rounded-md border border-white/15 bg-white/5 p-1.5 text-[0.66rem] leading-relaxed">
+            <p>{lang === "ar" ? "قياس أداء ECMWF (آخر 120 طلبًا/بلاطة)" : "ECMWF performance (last 120 samples)"}</p>
+            {(["nativeQueue", "nativeNetwork"] as const).map((key) => (
+              <p key={key}>{key === "nativeQueue"
+                  ? (lang === "ar" ? "انتظار الشبكة" : "Native queue wait")
+                  : (lang === "ar" ? "نقل الشبكة" : "Native transport")}:
+                {" p50 "}{weatherDiagnostics?.performance[key].p50Ms?.toFixed(0) ?? "—"}
+                {" ms · p95 "}{weatherDiagnostics?.performance[key].p95Ms?.toFixed(0) ?? "—"}{" ms"}
+                {" · n="}{weatherDiagnostics?.performance[key].count ?? 0}
+              </p>
+            ))}
+            {(["cloud", "rain", "snow"] as const).map((layer, i) => (
+              <p key={layer}>{layer} {"tile total p50 "}
+                {weatherDiagnostics?.performance.tilePipeline[i]?.p50Ms?.toFixed(0) ?? "—"}
+                {" ms · p95 "}
+                {weatherDiagnostics?.performance.tilePipeline[i]?.p95Ms?.toFixed(0) ?? "—"}
+                {" ms"}
+                {" · n="}{weatherDiagnostics?.performance.tilePipeline[i]?.count ?? 0}
+              </p>
+            ))}
+            <p>{"native errors "}{weatherDiagnostics?.performance.nativeFailures ?? 0}
+              {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
+              {" · MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
+            </p>
+            <p>{"SharedArrayBuffer: "}{weatherDiagnostics?.performance.runtime.crossOriginIsolated ? "available" : "unavailable"}
+              {" · JS heap: "}{weatherDiagnostics?.performance.runtime.heapUsedMb == null
+                ? "N/A" : `${weatherDiagnostics.performance.runtime.heapUsedMb} MB`}
+            </p>
+            <p className="text-white/60">{lang === "ar"
+                ? "زمن البلاطة يشمل فك البيانات ورسمها ونقلها؛ لا يمكن فصلهما دون أدوات داخل عامل OM."
+                : "Tile time includes decoding, rendering and delivery; worker-level breakdown is not exposed."}</p>
+          </div>
           <p>{lang === "ar" ? "الإطارات الجاري تجهيزها" : "Decoding forecast frames"}: {weatherDiagnostics?.loadingFrames.join(", ") || "—"}</p>
           {(["cloud", "rain", "snow"] as const).map((name, index) => (
             <p key={name}>
