@@ -4,6 +4,7 @@ import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid"
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
+import { nextPlaybackHour, secondsPerForecastHour } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -16,6 +17,8 @@ export type FrameInfo = {
   timeMs: number;
   sample: FieldSample | null;
   estimated: boolean;
+  /** True while the rain/snow clock is deliberately waiting for forecast data. */
+  playbackWaitingMs: number;
 };
 
 const VERT = `#version 300 es
@@ -271,6 +274,7 @@ export class FieldEngine {
   /** Optional gate for rain/snow timeline playback; wind and temperature
    * retain their original unrestricted playback cadence. */
   canAdvanceRainTime: ((timeMs: number) => boolean) | null = null;
+  private weatherWaitSince: number | null = null;
 
   private map: LeafletMap | null = null;
   private fieldCanvas: HTMLCanvasElement;
@@ -385,6 +389,7 @@ export class FieldEngine {
 
   setKind(kind: ShadeKind) {
     this.kind = kind;
+    this.weatherWaitSince = null;
     this.particles = [];
     this.clearParticles();
     this.drawField();
@@ -406,6 +411,7 @@ export class FieldEngine {
 
   setPlaying(on: boolean) {
     this.playing = on;
+    if (!on) this.weatherWaitSince = null;
     if (on) this.kick();
   }
 
@@ -716,13 +722,14 @@ export class FieldEngine {
       const grid = this.pick();
       const max = grid ? Math.max(0, grid.hours - 1) : this.hourMax;
       this.hourMax = max;
-      const candidate = this.hour + dt / 1.7 >= max ? 0 : this.hour + dt / 1.7;
-      // Avoid jumping many ECMWF hours ahead of the rendered image while the
-      // spatial provider is still decoding. Other map layers stay untouched.
-      if (this.kind !== 2 || !this.canAdvanceRainTime ||
-          this.canAdvanceRainTime(grid ? indexToMs(grid.times, candidate) : Date.now())) {
-        this.hour = candidate;
-      }
+      const step = nextPlaybackHour(
+        this.hour, dt, max, secondsPerForecastHour(this.kind),
+        (candidate) => this.kind !== 2 || !this.canAdvanceRainTime ||
+          this.canAdvanceRainTime(grid ? indexToMs(grid.times, candidate) : Date.now()),
+      );
+      this.hour = step.hour;
+      if (step.waiting) this.weatherWaitSince ??= now;
+      else this.weatherWaitSince = null;
     }
     this.pinView();
     this.drawField();
@@ -745,6 +752,9 @@ export class FieldEngine {
       timeMs,
       sample,
       estimated: !!grid?.id.startsWith("est|"),
+      playbackWaitingMs: this.playing && this.kind === 2 && this.weatherWaitSince !== null
+        ? Math.max(0, performance.now() - this.weatherWaitSince)
+        : 0,
     });
   }
 
