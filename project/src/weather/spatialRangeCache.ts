@@ -6,11 +6,14 @@ export type CachedSpatialRange = { bytes: Uint8Array; headers: Record<string, st
 export class SpatialRangeCache {
   private entries = new Map<string, { value: CachedSpatialRange; expires: number }>();
   private used = 0;
-  constructor(
-    private readonly maxBytes = 8 * 1024 * 1024,
-    private readonly itemMaxBytes = 256 * 1024,
-    private readonly ttlMs = 90_000,
-  ) {}
+  private readonly maxBytes: number;
+  private readonly itemMaxBytes: number;
+  private readonly ttlMs: number;
+  constructor(maxBytes = 8 * 1024 * 1024, itemMaxBytes = 256 * 1024, ttlMs = 90_000) {
+    this.maxBytes = maxBytes;
+    this.itemMaxBytes = itemMaxBytes;
+    this.ttlMs = ttlMs;
+  }
 
   get(key: string, now = Date.now()): CachedSpatialRange | null {
     const item = this.entries.get(key);
