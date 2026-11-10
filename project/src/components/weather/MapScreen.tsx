@@ -851,8 +851,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             key={id}
             type="button"
             onClick={() => {
-              // Tap the selected rain-layer icon three times quickly to reveal
-              // a temporary read-only diagnostic. Default UI stays unchanged.
+              // The visible information button is the reliable primary entry.
+              // Retain the previous multi-tap shortcut as an alternative.
               if (id === 2 && kindRef.current === 2) {
                 const now = Date.now();
                 const previous = rainTapRef.current;
@@ -875,6 +875,21 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             <Icon />
           </button>
         ))}
+        {kind === 2 ? (
+          <button
+            type="button"
+            className="map-tool"
+            onClick={() => {
+              setWeatherDiagnosticsOpen((isOpen) => !isOpen);
+              setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
+            }}
+            aria-label={lang === "ar" ? "تشخيص مصدر الغيوم والمطر والثلوج" : "Diagnose cloud, rain and snow sources"}
+            title={lang === "ar" ? "تشخيص الطقس" : "Weather diagnostics"}
+            aria-expanded={weatherDiagnosticsOpen}
+          >
+            <span aria-hidden="true" className="text-lg font-semibold">ⓘ</span>
+          </button>
+        ) : null}
         <button type="button" className="map-tool map-tool-gap" onClick={() => mapRef.current?.zoomIn()} aria-label="+">
           <PlusMark />
         </button>
@@ -903,6 +918,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
           <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"} · {lang === "ar" ? "الإطار" : "Frame"} {weatherDiagnostics?.frame ?? "—"}</p>
+          {weatherDiagnostics?.error ? (
+            <p className="my-1 break-words text-amber-200" role="status">
+              {lang === "ar" ? "الخطأ" : "Error"}: {weatherDiagnostics.error}
+            </p>
+          ) : null}
           {(["cloud", "rain", "snow"] as const).map((name, index) => (
             <p key={name}>
               {name}: {weatherDiagnostics?.loaded[index] ? "loaded" : "pending"}

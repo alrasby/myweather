@@ -901,7 +901,9 @@ export class FieldEngine {
   /** غيوم الساعة وأبيضها في الأزرق، والثلج المتساقط فقط في الأحمر. */
   private cloudTexFor(grid: GridField, hour: number): WebGLTexture | null {
     const gl = this.gl;
-    if (!gl || !grid.snow || !grid.snowDepth) return this.blank;
+    // Snowfall is independent of snow depth on the ground. Never suppress
+    // falling snow simply because the provider omitted snow-depth samples.
+    if (!gl || !grid.snow) return this.blank;
     const h = Math.max(0, Math.min(grid.hours - 1, hour));
     const key = `${grid.id}:${h}:snow`;
     const hit = this.textures.get(key);
