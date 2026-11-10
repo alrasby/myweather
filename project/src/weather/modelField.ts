@@ -4,6 +4,7 @@ import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
+import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -522,6 +523,8 @@ export class ModelField {
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
     let errors = 0;
+    const startedAt = Date.now();
+    let lastProgressAt = startedAt;
     const alive = () => this.frames.get(step)?.token === token;
     const refresh = () => {
       if (!alive()) return;
@@ -543,7 +546,8 @@ export class ModelField {
         this.loading.delete(step);
         this.failedUntil.delete(step);
         this.lastError = null;
-        window.clearTimeout(wait);
+        const timer = this.pendingTimers.get(step);
+        if (timer !== undefined) window.clearTimeout(timer);
         this.pendingTimers.delete(step);
         // Start preloading the adjacent forecast as soon as the requested
         // frame finishes, rather than waiting for another gesture.
@@ -569,11 +573,17 @@ export class ModelField {
       if (!this.anyReady()) this.onMiss?.();
       this.pump();
     };
-    const wait = window.setTimeout(() => {
+    // A spatial frame may require dozens of range reads. Continue while real
+    // tiles arrive, but terminate after a prolonged idle or bounded total time.
+    const checkProgress = () => {
       if (!alive() || frame.ready) return;
-      giveUp();
-    }, 20000);
-    this.pendingTimers.set(step, wait);
+      if (spatialFrameTimedOut(Date.now(), startedAt, lastProgressAt)) {
+        giveUp();
+        return;
+      }
+      this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+    };
+    this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     for (const [index, layer] of made.entries()) {
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
@@ -593,6 +603,7 @@ export class ModelField {
       layer.on("tileload", () => {
         if (!alive()) return;
         frame.tileCounts[index] += 1;
+        lastProgressAt = Date.now();
         refresh();
       });
       layer.on("tileerror", (ev) => {
@@ -604,7 +615,8 @@ export class ModelField {
         refresh();
         errors += 1;
         if (errors >= 3) {
-          window.clearTimeout(wait);
+          const timer = this.pendingTimers.get(step);
+          if (timer !== undefined) window.clearTimeout(timer);
           // An already-rendered frame must be retired on repeated errors,
           // rather than remaining indefinitely marked "ready" on a failed
           // refresh. The backoff path retries the model after 15 seconds.

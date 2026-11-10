@@ -1,5 +1,6 @@
-import { daylightNow, solarDaylight, sunArc } from "@/weather/astro";
+import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
+import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
@@ -26,10 +27,20 @@ export function readCacheFile(): CacheFile {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return emptyCache();
     const parsed = JSON.parse(raw) as Partial<CacheFile>;
+    const places = Array.isArray(parsed.places) ? parsed.places.slice(0, MAX_CACHED_PLACES) : [];
+    const entries = parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {};
+    // Repair legacy MET.no solar times in place without invalidating the
+    // cache key, saved cities, settings, or other weather values on upgrades.
+    const corrected: Record<string, CacheEntry> = {};
+    for (const [id, entry] of Object.entries(entries)) {
+      if (!entry?.bundle || !Number.isFinite(entry.at)) continue;
+      const place = places.find((item) => item.id === id);
+      corrected[id] = place ? { ...entry, bundle: repairSolarForecast(entry.bundle, place) } : entry;
+    }
     return {
-      places: Array.isArray(parsed.places) ? parsed.places.slice(0, MAX_CACHED_PLACES) : [],
+      places,
       activeId: typeof parsed.activeId === "string" ? parsed.activeId : "",
-      entries: parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {},
+      entries: corrected,
     };
   } catch {
     return emptyCache();
@@ -441,7 +452,10 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     const temps = rows.map((row) => row.hour.temp);
     const precip = rows.reduce((sum, row) => sum + row.period, 0);
     const mid = rows.reduce((best, row) => (Math.abs(row.hour.t - noon) < Math.abs(best.hour.t - noon) ? row : best));
-    const sun = sunArc(place.lat, place.lon, noon);
+    // sunArc's argument is UTC noon of the city's calendar DATE.
+    // 'noon' above is already timezone-adjusted local noon. Passing it to
+    // sunArc shifted sunrise/sunset by the UTC offset a second time.
+    const sun = solarEventsForDate(key, place.lat, place.lon);
     return {
       t: noon,
       code: mid.hour.code,
