@@ -3,6 +3,7 @@ import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUN
 import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
+import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { CapacitorHttp } from "@capacitor/core";
@@ -34,6 +35,8 @@ export type WeatherModelDiagnostics = {
   visibleOpacity: number;
   metadataAvailable: boolean;
   error: string | null;
+  cacheHits: number;
+  nativeReads: number;
 };
 
 type AnyLayer = {
@@ -173,7 +176,14 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
   return new Response(bytes.byteLength ? body : null, { status: status || 0, headers });
 }
 
-const spatialNativeQueue = new SpatialNativeQueue(4);
+// Six bounded native reads improve spatial decoding throughput on mobile
+// without allowing the dozens of simultaneous Range fetches triggered by
+// three Leaflet model layers. Every request still obeys cancellation.
+const spatialNativeQueue = new SpatialNativeQueue(6);
+const spatialRangeCache = new SpatialRangeCache();
+let spatialCacheHits = 0;
+let spatialNativeReads = 0;
+const spatialFileLengths = new Map<string, { value: string; expires: number }>();
 
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
@@ -182,21 +192,32 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
   });
   bag["Accept-Encoding"] = "identity";
   const method = (init?.method ?? "GET").toUpperCase();
-  const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => CapacitorHttp.request({
+  const range = method === "GET" ? headers.get("range") : null;
+  const cacheKey = range && /^bytes=\d+-\d+$/i.test(range) ? `${url}|${range}` : null;
+  if (init?.signal?.aborted) throw new Error("spatial-request-aborted");
+  const cached = cacheKey ? spatialRangeCache.get(cacheKey) : null;
+  if (cached) {
+    spatialCacheHits++;
+    return responseFrom(cached.status, new Headers(cached.headers), cached.bytes);
+  }
+  const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => {
+    spatialNativeReads++;
+    return CapacitorHttp.request({
     url,
     method,
     headers: bag,
     responseType: method === "HEAD" ? "text" : "arraybuffer",
     connectTimeout: 20000,
     readTimeout: 25000,
-  }));
+    });
+  });
   const out = new Headers();
   for (const [key, value] of Object.entries(result.headers ?? {})) {
     if (value != null && headerName(key)) out.set(key, String(value));
   }
   const bytes = bytesOf(result.data, method);
   if (method === "HEAD" && !out.get("content-length")) {
-    const total = await probeLength(url, headers);
+    const total = await probeLength(url, headers, init?.signal ?? undefined);
     if (total) out.set("content-length", total);
   }
   const expect = rangeLength(headers);
@@ -204,29 +225,42 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
     throw new Error(`range ${bytes.byteLength}!=${expect}`);
   }
   if ((result.status || 0) >= 400 || result.status === 0) throw new Error(`spatial ${result.status}`);
+  if (cacheKey && result.status === 206 && bytes.byteLength > 0) {
+    const savedHeaders: Record<string, string> = {};
+    out.forEach((value, key) => { savedHeaders[key] = value; });
+    spatialRangeCache.put(cacheKey, { bytes, status: 206, headers: savedHeaders });
+  }
   return responseFrom(result.status || 200, out, bytes);
 }
 
-async function probeLength(url: string, headers: Headers): Promise<string | null> {
+async function probeLength(url: string, headers: Headers, signal?: AbortSignal): Promise<string | null> {
+  const cached = spatialFileLengths.get(url);
+  if (cached && cached.expires > Date.now()) return cached.value;
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key) && key.toLowerCase() !== "range") bag[key] = value;
   });
   bag.Range = "bytes=0-0";
   bag["Accept-Encoding"] = "identity";
-  const result = await CapacitorHttp.request({
-    url,
-    method: "GET",
-    headers: bag,
-    responseType: "text",
-    connectTimeout: 15000,
-    readTimeout: 15000,
+  const result = await spatialNativeQueue.run(signal, () => {
+    spatialNativeReads++;
+    return CapacitorHttp.request({
+      url,
+      method: "GET",
+      headers: bag,
+      responseType: "text",
+      connectTimeout: 15000,
+      readTimeout: 15000,
+    });
   });
   const map = result.headers ?? {};
   for (const [key, value] of Object.entries(map)) {
     if (key.toLowerCase() !== "content-range" || value == null) continue;
     const total = String(value).match(/\/(\d+)\s*$/)?.[1];
-    if (total) return total;
+    if (total) {
+      spatialFileLengths.set(url, { value: total, expires: Date.now() + 90_000 });
+      return total;
+    }
   }
   return null;
 }
@@ -401,6 +435,8 @@ export class ModelField {
       visibleOpacity: frame?.opacity ?? 0,
       metadataAvailable: this.times.length > 0,
       error: this.lastError,
+      cacheHits: spatialCacheHits,
+      nativeReads: spatialNativeReads,
     };
   }
 

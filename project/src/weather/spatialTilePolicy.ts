@@ -17,9 +17,9 @@ export function spatialTileOptions(pane: "wx-clouds" | "wx-model") {
     updateWhenIdle: false,
     updateWhenZooming: false,
     updateInterval: 400,
-    // Two rings preserve nearby imagery without decoding a third ring
-    // of offscreen OM tiles for all three forecast layers on every pan.
-    keepBuffer: 2,
+    // A single surrounding ring covers normal short drags without
+    // scheduling two extra rings of expensive OM decoding for every hour.
+    keepBuffer: 1,
     maxNativeZoom: 12,
     maxZoom: 16,
   };

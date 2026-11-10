@@ -8,7 +8,7 @@ test("all ECMWF forecast layers fetch new viewport tiles during map movement", (
     assert.equal(opts.updateWhenIdle, false);
     assert.equal(opts.updateWhenZooming, false);
     assert.ok(opts.updateInterval >= 200);
-    assert.ok(opts.keepBuffer >= 2);
+    assert.equal(opts.keepBuffer, 1);
   }
 });
 test("ECMWF native zoom is bounded without limiting user map zoom", () => {
