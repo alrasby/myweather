@@ -67,3 +67,32 @@ test("clouds cannot remain frozen while the time slider skips unready model hour
 test("a genuinely failed spatial hour may continue only via explicit fallback", () => {
   assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set([16]), new Set()), true);
 });
+
+test("second-hour lookahead starts only when current and next are complete", () => {
+  assert.deepEqual(
+    planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set()),
+    { cancel: [], start: 10 },
+  );
+  assert.deepEqual(
+    planSpatialRequests(8, 32, new Set([8]), new Set(), new Set()),
+    { cancel: [], start: 9 },
+  );
+  assert.deepEqual(
+    planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set()),
+    { cancel: [], start: null },
+  );
+});
+
+test("two-hour prefetch is bounded to existing forecast horizon", () => {
+  assert.deepEqual(
+    planSpatialRequests(30, 32, new Set([30, 31]), new Set(), new Set()),
+    { cancel: [], start: null },
+  );
+});
+
+test("continuous viewport refresh does not cancel active second-hour prefetch", () => {
+  assert.deepEqual(
+    planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), true, 200),
+    { cancel: [], start: null },
+  );
+});
