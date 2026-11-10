@@ -28,8 +28,8 @@ export class SpatialNativeQueue {
         const waiter = {
           signal,
           releaseAbort: () => {},
-          resolve,
-          reject,
+          resolve: () => resolve(),
+          reject: (reason: Error) => reject(reason),
         };
         const onAbort = () => {
           const index = this.waiters.indexOf(waiter);
