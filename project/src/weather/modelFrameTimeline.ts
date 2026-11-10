@@ -12,6 +12,7 @@ export function selectSpatialFramePlan(
   blend: number,
   ready: ReadonlySet<number>,
   lastDisplayed: number | null,
+  requestedInCooldown = false,
 ): SpatialFramePlan {
   const current = ready.has(requested);
   const next = ready.has(requested + 1);
@@ -27,8 +28,11 @@ export function selectSpatialFramePlan(
     goals.set(anchor, 1);
     return { goals, anchor, holding: false };
   }
-  // The requested hour is still loading or has failed. Hold the last
-  // complete frame, even when seeking across several hours.
+  // A failed frame in retry cooldown MUST return to the time-matched
+  // global fallback, not keep an older ECMWF image labeled as a new hour.
+  if (requestedInCooldown) return { goals, anchor: null, holding: false };
+  // While the requested frame loads, hold the last complete frame, but
+  // prevent the playback clock from advancing beyond that ready hour.
   const held = lastDisplayed != null && ready.has(lastDisplayed)
     ? lastDisplayed
     : [...ready].sort((a, b) =>
