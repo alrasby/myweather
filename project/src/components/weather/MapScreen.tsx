@@ -191,8 +191,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           worldCopyJump: true,
           inertia: true,
           // Cap long inertial flings to avoid moving ahead of available satellite tiles.
-          inertiaDeceleration: 5200,
-          inertiaMaxSpeed: 900,
+          inertiaDeceleration: 6800,
+          inertiaMaxSpeed: 600,
           maxBounds: [[-85.0511287798, -100000], [85.0511287798, 100000]],
           maxBoundsViscosity: 1,
           doubleClickZoom: false,
@@ -227,7 +227,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
-          modelRef.current.onLive = () => engine.setModelCover(true);
+          // Sparse regional precipitation tiles can contain valid rain while leaving
+          // other visible cells transparent. Keep the global rain/snow field
+          // underneath so those areas never become rectangular holes.
+          modelRef.current.onLive = () => engine.setModelCover(false);
           modelRef.current.onMiss = () => engine.setModelCover(false);
         }
         map.on("click", (event) => {
