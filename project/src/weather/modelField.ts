@@ -1,6 +1,8 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan } from "@/weather/modelFrameTimeline";
+import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
+import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -169,6 +171,8 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
   return new Response(bytes.byteLength ? body : null, { status: status || 0, headers });
 }
 
+const spatialNativeQueue = new SpatialNativeQueue(4);
+
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
@@ -176,14 +180,14 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
   });
   bag["Accept-Encoding"] = "identity";
   const method = (init?.method ?? "GET").toUpperCase();
-  const result = await CapacitorHttp.request({
+  const result = await spatialNativeQueue.run(init?.signal ?? undefined, () => CapacitorHttp.request({
     url,
     method,
     headers: bag,
     responseType: method === "HEAD" ? "text" : "arraybuffer",
     connectTimeout: 20000,
     readTimeout: 25000,
-  });
+  }));
   const out = new Headers();
   for (const [key, value] of Object.entries(result.headers ?? {})) {
     if (value != null && headerName(key)) out.set(key, String(value));
@@ -239,17 +243,20 @@ export function installSpatialFetch(): void {
     if (!spatialUrl(url)) return proxied(input, init);
     const headers = headerBag(input, init);
     const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     if (native) {
       try {
-        return await pluginSpatial(url, { ...init, method }, headers);
+        return await pluginSpatial(url, { ...init, method, signal }, headers);
       } catch {
+        // A cancelled Leaflet frame must never start another network request.
+        if (signal?.aborted) throw new Error("spatial-request-aborted");
         /* الطلب الأصلي للمتصفح إن رفضت الإضافة الطول */
       }
     }
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => ctrl.abort(), 12000);
     const onAbort = () => ctrl.abort();
-    init?.signal?.addEventListener("abort", onAbort);
+    signal?.addEventListener("abort", onAbort);
     try {
       const res = await direct(input, { ...init, signal: ctrl.signal });
       const expect = rangeLength(headers);
@@ -262,7 +269,7 @@ export function installSpatialFetch(): void {
       /* بلا بديل سليم: تُحسب البلاطة فاشلة ويظهر الاحتياط */
     } finally {
       window.clearTimeout(timer);
-      init?.signal?.removeEventListener("abort", onAbort);
+      signal?.removeEventListener("abort", onAbort);
     }
     throw new Error("spatial-fetch");
   };
@@ -289,6 +296,7 @@ export class ModelField {
   private blend = 0;
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
+  private pendingTimers = new Map<number, number>();
   private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[] }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
@@ -338,6 +346,19 @@ export class ModelField {
 
   whenReady(): Promise<number> {
     return this.ready.then(() => this.times.length);
+  }
+
+  /** Playback safety gate for the rain/snow map only. Frame decoding is
+   * bounded; hold playback at a temporal boundary until ECMWF can show it.
+   * Never freeze playback permanently when the upstream request is in cooldown. */
+  canAdvanceTo(ms: number): boolean {
+    if (!this.visible || !this.times.length) return true;
+    const { i } = this.bracket(ms);
+    const ready = new Set<number>();
+    for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
+    const blocked = new Set<number>();
+    for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
+    return canAdvanceSpatialTime(i, ready, blocked, this.loading);
   }
 
   /** A deliberately hidden, read-only map diagnostic for comparing independent
@@ -429,31 +450,41 @@ export class ModelField {
 
   private pump() {
     if (!this.visible || !this.adapter || !this.map) return;
-    const i = this.base;
-    this.dropFar(i);
-    // i+1 is preloaded while i is displayed. Once the adjacent hour is ready
-    // and playback approaches it, prepare i+2 before the timeline advances.
-    const steps = [i, i + 1];
-    if (this.blend > 0.55 && this.frames.get(i + 1)?.ready && i + 2 < this.times.length) {
-      steps.push(i + 2);
-    }
-    for (const step of steps) {
-      if (step < 0 || step >= this.times.length) continue;
-      if ((this.failedUntil.get(step) ?? 0) > Date.now() || this.frames.has(step) || this.loading.has(step)) continue;
-      this.failedUntil.delete(step);
-      this.mount(step);
+    const ready = new Set<number>();
+    for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
+    const blocked = new Set<number>();
+    for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
+    const plan = planSpatialRequests(this.base, this.times.length, ready, this.loading, blocked);
+
+    // Cancel obsolete decoding before scheduling the most relevant forecast.
+    // A stale request must not occupy the bandwidth while the slider moves.
+    for (const step of plan.cancel) this.discardFrame(step);
+    this.dropFar(this.base);
+    if (plan.start !== null && !this.frames.has(plan.start) && !this.loading.has(plan.start)) {
+      this.failedUntil.delete(plan.start);
+      this.mount(plan.start);
     }
   }
 
+  private discardFrame(step: number) {
+    const timer = this.pendingTimers.get(step);
+    if (timer !== undefined) window.clearTimeout(timer);
+    this.pendingTimers.delete(step);
+    const frame = this.frames.get(step);
+    this.frames.delete(step);
+    this.loading.delete(step);
+    // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
+    // callbacks are ignored because their frame is no longer in the map.
+    frame?.layers.forEach((layer) => layer.remove());
+  }
+
   private dropFar(i: number) {
-    const keep = new Set([i, i + 1, i + 2]);
+    const keep = new Set([i, i + 1]);
     if (this.lastDisplayedStep != null) keep.add(this.lastDisplayedStep);
     for (const [step, frame] of this.frames) {
       if (keep.has(step) || this.loading.has(step)) continue;
-      // ساعة ابتعدت عن المؤشر تُترك حتى تخفت، فلا تختفي الكتلة قفزاً.
       if (frame.ready && frame.opacity > 0.04) continue;
-      frame.layers.forEach((layer) => layer.remove());
-      this.frames.delete(step);
+      this.discardFrame(step);
     }
   }
 
@@ -510,7 +541,12 @@ export class ModelField {
       if (ready) {
         this.loading.delete(step);
         this.failedUntil.delete(step);
+        this.lastError = null;
         window.clearTimeout(wait);
+        this.pendingTimers.delete(step);
+        // Start preloading the adjacent forecast as soon as the requested
+        // frame finishes, rather than waiting for another gesture.
+        this.pump();
       }
       if (!ready) {
         // Partial frames are never exposed: keep the global rain/snow canvas visible.
@@ -528,9 +564,7 @@ export class ModelField {
       if (frame.errored.size) {
         console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
       }
-      this.loading.delete(step);
-      for (const layer of made) layer.remove();
-      if (this.frames.get(step) === frame) this.frames.delete(step);
+      this.discardFrame(step);
       if (!this.anyReady()) this.onMiss?.();
       this.pump();
     };
@@ -538,6 +572,7 @@ export class ModelField {
       if (!alive() || frame.ready) return;
       giveUp();
     }, 20000);
+    this.pendingTimers.set(step, wait);
     for (const [index, layer] of made.entries()) {
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
@@ -623,8 +658,9 @@ export class ModelField {
   }
 
   private clear() {
-    for (const frame of this.frames.values()) frame.layers.forEach((layer) => layer.remove());
-    this.frames.clear();
+    for (const step of [...this.frames.keys()]) this.discardFrame(step);
+    for (const timer of this.pendingTimers.values()) window.clearTimeout(timer);
+    this.pendingTimers.clear();
     this.loading.clear();
   }
 }

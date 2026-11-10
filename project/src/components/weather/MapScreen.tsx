@@ -140,6 +140,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     let dead = false;
     let map: LeafletMap | null = null;
     const engine = new FieldEngine(el);
+    // Only the rain/snow animation follows ECMWF frame readiness. The
+    // wind and temperature playback paths remain unchanged.
+    engine.canAdvanceRainTime = (timeMs) => modelRef.current?.canAdvanceTo(timeMs) ?? true;
     engineRef.current = engine;
     const paint = (info: FrameInfo) => {
       const current = prefsRef.current;

@@ -268,6 +268,9 @@ export class FieldEngine {
   hour = 0;
   playing = false;
   onFrame: ((info: FrameInfo) => void) | null = null;
+  /** Optional gate for rain/snow timeline playback; wind and temperature
+   * retain their original unrestricted playback cadence. */
+  canAdvanceRainTime: ((timeMs: number) => boolean) | null = null;
 
   private map: LeafletMap | null = null;
   private fieldCanvas: HTMLCanvasElement;
@@ -713,8 +716,13 @@ export class FieldEngine {
       const grid = this.pick();
       const max = grid ? Math.max(0, grid.hours - 1) : this.hourMax;
       this.hourMax = max;
-      this.hour += dt / 1.7;
-      if (this.hour >= max) this.hour = 0;
+      const candidate = this.hour + dt / 1.7 >= max ? 0 : this.hour + dt / 1.7;
+      // Avoid jumping many ECMWF hours ahead of the rendered image while the
+      // spatial provider is still decoding. Other map layers stay untouched.
+      if (this.kind !== 2 || !this.canAdvanceRainTime ||
+          this.canAdvanceRainTime(grid ? indexToMs(grid.times, candidate) : Date.now())) {
+        this.hour = candidate;
+      }
     }
     this.pinView();
     this.drawField();
