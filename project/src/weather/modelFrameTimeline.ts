@@ -46,3 +46,9 @@ export function selectSpatialFramePlan(
   }
   return { goals, anchor: null, holding: true };
 }
+
+/** Stacking only changes when the participating forecast hour IDs change;
+ * changes to blend opacity must not reorder DOM layers on every frame. */
+export function spatialStackKey(goals: ReadonlyMap<number, number>): string {
+  return [...goals.keys()].join("|");
+}
