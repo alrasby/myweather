@@ -333,6 +333,16 @@ export class ModelField {
   setDiagnosticMode(mode: WeatherDiagnosticMode) {
     if (this.diagnosticMode === mode) return;
     this.diagnosticMode = mode;
+    // Reapply each tile's visibility even if the frame opacity itself did
+    // not change, so diagnostic isolation takes effect immediately.
+    for (const frame of this.frames.values()) {
+      if (!frame.ready) continue;
+      frame.layers.forEach((layer, idx) => {
+        const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
+          (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
+        layer.setOpacity?.(allowed ? Math.max(0, frame.opacity) : 0);
+      });
+    }
     this.applyOpacity();
   }
 
@@ -455,8 +465,7 @@ export class ModelField {
       if (!alive()) return;
       // A 'load' event without any tile delivery cannot prove that the
       // corresponding weather field is present in the current viewport.
-      const ready = modelTileFrameReady(frame.loaded, frame.errored) &&
-        frame.tileCounts.every((count) => count > 0);
+      const ready = modelTileFrameReady(frame.loaded, frame.errored, frame.tileCounts);
       if (ready === frame.ready) return;
       frame.ready = ready;
       this.orderKey = "";
@@ -496,6 +505,7 @@ export class ModelField {
       layer.on("loading", () => {
         if (!alive()) return;
         frame.loaded[index] = false;
+        frame.tileCounts[index] = 0;
         frame.errored.delete(index);
         refresh();
       });
