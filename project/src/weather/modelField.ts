@@ -361,6 +361,10 @@ export class ModelField {
   private orderKey = "";
   private visible = false;
   private lastSyncAt = 0;
+  // Continuous pan refreshes must not reset the prefetch grace window every
+  // time Leaflet emits another 'loading' for the same requested hour.
+  private refreshBase: number | null = null;
+  private refreshSince = 0;
   private ready: Promise<void> = Promise.resolve();
 
   attach(L: unknown, map: LeafletMap) {
@@ -477,6 +481,8 @@ export class ModelField {
       this.spatialVisible = false;
       this.lastDisplayedStep = null;
       this.holdingPreviousFrame = false;
+      this.refreshBase = null;
+      this.refreshSince = 0;
       this.clear();
     }
   }
@@ -519,10 +525,23 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    // Current viewport refresh has priority over speculative future hours.
+    // Favor the visible tile queues briefly, but DO NOT restart this clock
+    // on each Leaflet pan/loading event. This guarantees that the next forecast
+    // can begin within the configured grace period during continuous panning.
     const current = this.frames.get(this.base);
     const viewportRefreshing = !!current?.ready && current.loaded.some((complete) => !complete);
-    const plan = planSpatialRequests(this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing);
+    const now = Date.now();
+    if (!viewportRefreshing) {
+      this.refreshBase = null;
+      this.refreshSince = 0;
+    } else if (this.refreshBase !== this.base || !this.refreshSince) {
+      this.refreshBase = this.base;
+      this.refreshSince = now;
+    }
+    const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
+    const plan = planSpatialRequests(
+      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge,
+    );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
     // A stale request must not occupy the bandwidth while the slider moves.
