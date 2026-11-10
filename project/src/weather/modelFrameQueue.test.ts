@@ -25,4 +25,6 @@ test("playback waits at unready boundaries, but never hangs on a provider error"
   assert.equal(canAdvanceSpatialTime(9, new Set([10]), new Set()), true);
   assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set([9])), true);
   assert.equal(canAdvanceSpatialTime(9, new Set(), new Set()), true);
+  assert.equal(canAdvanceSpatialTime(9, new Set(), new Set(), new Set([9])), false);
+  assert.equal(canAdvanceSpatialTime(9, new Set(), new Set([9]), new Set([9])), true);
 });
