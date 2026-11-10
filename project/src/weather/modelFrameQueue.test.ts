@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planSpatialRequests, canAdvanceSpatialTime } from "./modelFrameQueue.ts";
+import { planSpatialRequests, canAdvanceSpatialTime, SPATIAL_PREFETCH_GRACE_MS } from "./modelFrameQueue.ts";
 
 test("only one current ECMWF frame loads; next is prefetched after it becomes ready", () => {
   assert.deepEqual(planSpatialRequests(6, 30, new Set(), new Set(), new Set()), { cancel: [], start: 6 });
@@ -29,13 +29,26 @@ test("playback waits at unready boundaries, but never hangs on a provider error"
   assert.equal(canAdvanceSpatialTime(9, new Set(), new Set([9]), new Set([9])), true);
 });
 
-test("visible ECMWF viewport refresh preempts speculative next-hour decoding", () => {
+test("viewport refresh temporarily defers starting new prefetch", () => {
   const ready = new Set([8]);
-  const busy = planSpatialRequests(8, 32, ready, new Set([9]), new Set(), true);
-  assert.deepEqual(busy, { cancel: [9], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), true, 0), { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PREFETCH_GRACE_MS - 1), { cancel: [], start: null });
   const settled = planSpatialRequests(8, 32, ready, new Set(), new Set(), false);
   assert.deepEqual(settled, { cancel: [], start: 9 });
 });
+
+test("continuous panning cannot starve the next forecast after 2.5 seconds", () => {
+  const ready = new Set([8]);
+  const plan = planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PREFETCH_GRACE_MS);
+  assert.deepEqual(plan, { cancel: [], start: 9 });
+});
+
+test("an in-flight next hour is preserved when the map starts refreshing", () => {
+  const ready = new Set([8]);
+  const plan = planSpatialRequests(8, 32, ready, new Set([9]), new Set(), true, 100);
+  assert.deepEqual(plan, { cancel: [], start: null });
+});
+
 
 test("map movement never blocks the requested hour when that hour is missing", () => {
   assert.deepEqual(
