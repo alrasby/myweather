@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { modelTileFrameReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
+import { modelTileFrameReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -298,9 +298,7 @@ export class ModelField {
       .then((json: { valid_times?: string[]; variables?: string[] }) => {
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
-        const variables = json.variables;
-        const required = ["cloud_cover", "precipitation", "snowfall_water_equivalent"];
-        if (Array.isArray(variables) && required.some((name) => !variables.includes(name))) {
+        if (!modelVariablesReady(json.variables)) {
           console.warn("MyWeather: ECMWF spatial layer unavailable; retaining global rain/snow fallback");
           this.times = [];
           return;
@@ -439,6 +437,9 @@ export class ModelField {
       // Failed frames are retryable: avoid a permanent weather outage after
       // one transient fetch error or a quick network switch.
       this.failedUntil.set(step, Date.now() + 15_000);
+      if (frame.errored.size) {
+        console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
+      }
       this.loading.delete(step);
       for (const layer of made) layer.remove();
       if (this.frames.get(step) === frame) this.frames.delete(step);
