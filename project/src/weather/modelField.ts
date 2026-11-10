@@ -336,6 +336,7 @@ export function installSpatialFetch(): void {
     const timer = window.setTimeout(() => ctrl.abort(), 12000);
     const onAbort = () => ctrl.abort();
     signal?.addEventListener("abort", onAbort);
+    const retryStarted = performance.now();
     try {
       const res = await direct(input, { ...init, signal: ctrl.signal });
       const expect = rangeLength(headers);
@@ -347,6 +348,7 @@ export function installSpatialFetch(): void {
     } catch {
       /* بلا بديل سليم: تُحسب البلاطة فاشلة ويظهر الاحتياط */
     } finally {
+      spatialPerformance.observe("browserRetry", performance.now() - retryStarted);
       window.clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     }
