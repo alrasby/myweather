@@ -747,7 +747,11 @@ export class ModelField {
     const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
     const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
     this.holdingPreviousFrame = plan.holding && plan.anchor !== null;
-    const key = [...plan.goals.entries()].map(([step, weight]) => `${step}:${weight.toFixed(3)}`).join("|");
+    // Layer stacking depends on which forecast frames participate, not on
+    // the interpolation weight. Including the weight in this key caused
+    // Leaflet bringToFront() (DOM reordering of 3–6 image layers) on every
+    // playback tick, competing with network tile paint/decode.
+    const key = [...plan.goals.keys()].join("|");
     if (key !== this.orderKey) {
       this.orderKey = key;
       // Explicitly bring the chosen forecast above an older held frame.
