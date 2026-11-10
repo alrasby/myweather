@@ -8,11 +8,17 @@ export function planSpatialRequests(
   ready: ReadonlySet<number>,
   loading: ReadonlySet<number>,
   blocked: ReadonlySet<number>,
+  currentViewportRefreshing = false,
 ): { cancel: number[]; start: number | null } {
   const candidates = [requested, requested + 1].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
-  const desired = candidates[0] ?? null;
+  // Loading the CURRENT visible viewport has priority over speculative
+  // next-hour decoding. Pause/cancel prefetch until its map tiles settle.
+  // If requested hour has not yet loaded, it remains the mandatory target.
+  const desired = currentViewportRefreshing && ready.has(requested)
+    ? null
+    : candidates[0] ?? null;
   const cancel = [...loading].filter((step) => step !== desired);
   return {
     cancel,
