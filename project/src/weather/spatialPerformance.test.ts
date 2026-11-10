@@ -5,11 +5,13 @@ test("separates network, queue, protocol tile and Leaflet delivery timings", () 
   const m = new SpatialPerformance(4);
   m.observe("network", 100);
   m.observe("nativeQueue", 20);
+  m.observe("browserRetry", 12000);
   m.observe("workerTile", 200);
   m.observe("leafletTile", 230);
   const s = m.snapshot();
   assert.equal(s.network.meanMs, 100);
   assert.equal(s.nativeQueue.meanMs, 20);
+  assert.equal(s.browserRetry.meanMs, 12000);
   assert.equal(s.workerTile.meanMs, 200);
   assert.equal(s.leafletTile.meanMs, 230);
 });
