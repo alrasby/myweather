@@ -16,8 +16,10 @@ export class SpatialPerformance {
   private sums: Record<SpatialPerfKey, number> = {
     network: 0, nativeQueue: 0, workerTile: 0, leafletTile: 0,
   };
-  constructor(private readonly capacity = 128) {
+  private readonly capacity: number;
+  constructor(capacity = 128) {
     if (!Number.isInteger(capacity) || capacity < 1) throw new Error("invalid sample capacity");
+    this.capacity = capacity;
   }
   observe(key: SpatialPerfKey, elapsedMs: number): void {
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return;
