@@ -28,7 +28,11 @@ export function canAdvanceSpatialTime(
   requested: number,
   ready: ReadonlySet<number>,
   blocked: ReadonlySet<number>,
+  loading: ReadonlySet<number> = new Set(),
 ): boolean {
-  if (!ready.size) return true;
+  // While the first model frame is decoding, hold playback instead of
+  // generating dozens of obsolete requests. If decoding failed and the frame
+  // is cooling down, let the coarse fallback continue to play.
+  if (!ready.size) return !loading.size || blocked.has(requested);
   return ready.has(requested) || ready.has(requested + 1) || blocked.has(requested);
 }
