@@ -1,7 +1,7 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
-import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
+import { planSpatialRequests, canAdvanceSpatialTime, spatialPrefetchDepth } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
@@ -613,6 +613,7 @@ export class ModelField {
     const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
     const plan = planSpatialRequests(
       this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge,
+      spatialPrefetchDepth(this.map.getZoom()),
     );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
@@ -639,6 +640,7 @@ export class ModelField {
 
   private dropFar(i: number) {
     const keep = new Set([i, i + 1]);
+    if (this.map && spatialPrefetchDepth(this.map.getZoom()) === 2) keep.add(i + 2);
     if (this.lastDisplayedStep != null) keep.add(this.lastDisplayedStep);
     for (const [step, frame] of this.frames) {
       if (keep.has(step) || this.loading.has(step)) continue;
