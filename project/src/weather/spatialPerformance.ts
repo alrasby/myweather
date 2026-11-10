@@ -3,18 +3,18 @@
  * transfer, decoding and painting; they must NOT be labelled "decode only".
  */
 export type PerfSample = { count: number; meanMs: number; p95Ms: number; maxMs: number };
-export type SpatialPerfKey = "network" | "nativeQueue" | "workerTile" | "leafletTile";
+export type SpatialPerfKey = "network" | "nativeQueue" | "browserRetry" | "workerTile" | "leafletTile";
 export type SpatialPerfSnapshot = Record<SpatialPerfKey, PerfSample>;
-const KEYS: readonly SpatialPerfKey[] = ["network", "nativeQueue", "workerTile", "leafletTile"];
+const KEYS: readonly SpatialPerfKey[] = ["network", "nativeQueue", "browserRetry", "workerTile", "leafletTile"];
 export class SpatialPerformance {
   private samples: Record<SpatialPerfKey, number[]> = {
-    network: [], nativeQueue: [], workerTile: [], leafletTile: [],
+    network: [], nativeQueue: [], browserRetry: [], workerTile: [], leafletTile: [],
   };
   private counts: Record<SpatialPerfKey, number> = {
-    network: 0, nativeQueue: 0, workerTile: 0, leafletTile: 0,
+    network: 0, nativeQueue: 0, browserRetry: 0, workerTile: 0, leafletTile: 0,
   };
   private sums: Record<SpatialPerfKey, number> = {
-    network: 0, nativeQueue: 0, workerTile: 0, leafletTile: 0,
+    network: 0, nativeQueue: 0, browserRetry: 0, workerTile: 0, leafletTile: 0,
   };
   private readonly capacity: number;
   constructor(capacity = 128) {
