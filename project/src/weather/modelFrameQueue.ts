@@ -44,9 +44,13 @@ export function canAdvanceSpatialTime(
   blocked: ReadonlySet<number>,
   loading: ReadonlySet<number> = new Set(),
 ): boolean {
-  // While the first model frame is decoding, hold playback instead of
-  // generating dozens of obsolete requests. If decoding failed and the frame
-  // is cooling down, let the coarse fallback continue to play.
-  if (!ready.size) return !loading.size || blocked.has(requested);
-  return ready.has(requested) || ready.has(requested + 1) || blocked.has(requested);
+  // A ready FUTURE hour must not authorize displaying an unavailable
+  // requested hour. That advanced the clock over stale older cloud tiles.
+  // Failed hours may advance only via the explicitly selected global fallback
+  // (modelFrameTimeline suppresses any stale held spatial frame in cooldown).
+  if (blocked.has(requested)) return true;
+  if (ready.has(requested)) return true;
+  // No spatial frame exists: allow global fallback only when no model request
+  // is in progress, so playback never silently outruns an active decode.
+  return ready.size === 0 && loading.size === 0;
 }

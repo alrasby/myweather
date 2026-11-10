@@ -12,10 +12,16 @@ export function selectSpatialFramePlan(
   blend: number,
   ready: ReadonlySet<number>,
   lastDisplayed: number | null,
+  requestedInCooldown = false,
 ): SpatialFramePlan {
   const current = ready.has(requested);
   const next = ready.has(requested + 1);
   const goals = new Map<number, number>();
+  // Never show an older OR future model hour for an unavailable requested
+  // hour that the provider has put into retry cooldown.
+  if (requestedInCooldown && !current) {
+    return { goals, anchor: null, holding: false };
+  }
   if (current && next) {
     const t = Math.max(0, Math.min(1, blend));
     goals.set(requested, 1 - t);
@@ -27,8 +33,8 @@ export function selectSpatialFramePlan(
     goals.set(anchor, 1);
     return { goals, anchor, holding: false };
   }
-  // The requested hour is still loading or has failed. Hold the last
-  // complete frame, even when seeking across several hours.
+  // While the requested frame loads, hold the last complete frame, but
+  // prevent the playback clock from advancing beyond that ready hour.
   const held = lastDisplayed != null && ready.has(lastDisplayed)
     ? lastDisplayed
     : [...ready].sort((a, b) =>
@@ -39,4 +45,10 @@ export function selectSpatialFramePlan(
     return { goals, anchor: held, holding: true };
   }
   return { goals, anchor: null, holding: true };
+}
+
+/** Stacking only changes when the participating forecast hour IDs change;
+ * changes to blend opacity must not reorder DOM layers on every frame. */
+export function spatialStackKey(goals: ReadonlyMap<number, number>): string {
+  return [...goals.keys()].join("|");
 }

@@ -22,7 +22,7 @@ test("a new requested frame takes priority over obsolete prefetch", () => {
 test("playback waits at unready boundaries, but never hangs on a provider error", () => {
   assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set()), false);
   assert.equal(canAdvanceSpatialTime(9, new Set([9]), new Set()), true);
-  assert.equal(canAdvanceSpatialTime(9, new Set([10]), new Set()), true);
+  assert.equal(canAdvanceSpatialTime(9, new Set([10]), new Set()), false);
   assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set([9])), true);
   assert.equal(canAdvanceSpatialTime(9, new Set(), new Set()), true);
   assert.equal(canAdvanceSpatialTime(9, new Set(), new Set(), new Set([9])), false);
@@ -55,4 +55,15 @@ test("map movement never blocks the requested hour when that hour is missing", (
     planSpatialRequests(12, 32, new Set([9]), new Set([13]), new Set(), true),
     { cancel: [13], start: 12 },
   );
+});
+
+test("clouds cannot remain frozen while the time slider skips unready model hours", () => {
+  assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set(), new Set([16])), false);
+  assert.equal(canAdvanceSpatialTime(16, new Set([16]), new Set(), new Set()), true);
+  // A future forecast alone cannot authorize showing the current time.
+  assert.equal(canAdvanceSpatialTime(16, new Set([17]), new Set(), new Set()), false);
+});
+
+test("a genuinely failed spatial hour may continue only via explicit fallback", () => {
+  assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set([16]), new Set()), true);
 });
