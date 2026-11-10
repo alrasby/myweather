@@ -934,6 +934,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
+          <p>{lang === "ar" ? "طلبات مؤهلة للتخزين" : "Cache-eligible misses"}: {weatherDiagnostics?.cacheEligible ?? 0}
+            {" · "}{lang === "ar" ? "حُفظت" : "stored"}: {weatherDiagnostics?.cacheStored ?? 0}
+            {" · "}{lang === "ar" ? "غير قابلة للتخزين" : "rejected"}: {weatherDiagnostics?.cacheRejected ?? 0}
+          </p>
           <p>{lang === "ar" ? "الإطار المطلوب" : "Requested frame"}: {weatherDiagnostics?.requestedFrame ?? "—"}</p>
           <p>{lang === "ar" ? "الإطار المعروض فعليًا" : "Displayed frame"}: {weatherDiagnostics?.displayedFrame ?? "—"}
             {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
@@ -943,11 +947,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {lang === "ar" ? "الخطأ" : "Error"}: {weatherDiagnostics.error}
             </p>
           ) : null}
+          <p>{lang === "ar" ? "الإطارات الجاري تجهيزها" : "Decoding forecast frames"}: {weatherDiagnostics?.loadingFrames.join(", ") || "—"}</p>
           {(["cloud", "rain", "snow"] as const).map((name, index) => (
             <p key={name}>
               {name}: {weatherDiagnostics?.loaded[index] ? "loaded" : "pending"}
               {" · "}tiles {weatherDiagnostics?.tileCounts[index] ?? 0}
               {" · "}errors {weatherDiagnostics?.errors[index] ?? 0}
+              {" · "}{lang === "ar" ? "المدة" : "elapsed"} {Math.round((weatherDiagnostics?.layerTimings[index]?.elapsedMs ?? 0) / 1000)}s
+              {" · "}{lang === "ar" ? "أول بلاطة" : "first tile"} {weatherDiagnostics?.layerTimings[index]?.firstTileMs == null
+                ? "—" : `${(weatherDiagnostics.layerTimings[index]!.firstTileMs! / 1000).toFixed(1)}s`}
+              {weatherDiagnostics?.layerTimings[index]?.idleMs != null
+                ? ` · idle ${Math.round(weatherDiagnostics.layerTimings[index]!.idleMs! / 1000)}s` : ""}
             </p>
           ))}
           <p className="mt-1 text-white/65">{lang === "ar" ? "للمقارنة فقط؛ لا يغير البيانات أو إعدادات الطبقات." : "Comparison only; does not alter forecast values."}</p>

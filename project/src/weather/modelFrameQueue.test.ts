@@ -28,3 +28,18 @@ test("playback waits at unready boundaries, but never hangs on a provider error"
   assert.equal(canAdvanceSpatialTime(9, new Set(), new Set(), new Set([9])), false);
   assert.equal(canAdvanceSpatialTime(9, new Set(), new Set([9]), new Set([9])), true);
 });
+
+test("visible ECMWF viewport refresh preempts speculative next-hour decoding", () => {
+  const ready = new Set([8]);
+  const busy = planSpatialRequests(8, 32, ready, new Set([9]), new Set(), true);
+  assert.deepEqual(busy, { cancel: [9], start: null });
+  const settled = planSpatialRequests(8, 32, ready, new Set(), new Set(), false);
+  assert.deepEqual(settled, { cancel: [], start: 9 });
+});
+
+test("map movement never blocks the requested hour when that hour is missing", () => {
+  assert.deepEqual(
+    planSpatialRequests(12, 32, new Set([9]), new Set([13]), new Set(), true),
+    { cancel: [13], start: 12 },
+  );
+});
