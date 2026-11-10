@@ -413,10 +413,13 @@ export class ModelField {
     this.loading.add(step);
     // Model tiles are expensive to decode: keep the current frame stable while
     // dragging/pinching, then fetch the new viewport once interaction settles.
-    const cloudOpts = { pane: "wx-clouds", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
+    // The ECMWF cloud-cover tile layer can produce large rectangular, opaque
+    // cloud sheets at tile boundaries on Android. The continuous global
+    // model-backed cloud field already paints cloud cover below these tiles.
+    // Reserve spatial tiles for precipitation and snowfall, where the local
+    // high-resolution data is materially useful and has separate palettes.
     const rainOpts = { pane: "wx-model", opacity: 0, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2 };
     const made = [
-      adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
       adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
     ] as AnyLayer[];
@@ -467,8 +470,7 @@ export class ModelField {
       });
       layer.on("tileload", (ev) => {
         // Canvas readback is expensive on Android; only inspect until the first nonempty tile.
-        // Cloud-only tiles are NOT sufficient to hide real rain/snow from
-        // the global fallback. Wait for precipitation or snowfall data.
+        // Only rain/snow tiles are mounted; both must finish loading.
         if (!alive() || frame.ink || !isPrecipitationTile(index) || !tileHasInk(ev?.tile)) return;
         frame.ink = true;
         this.loading.delete(step);
