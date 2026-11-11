@@ -429,6 +429,18 @@ html:not(.light) .pop-chance {
   max-height: none !important;
 }
 
+/* Chromium/Android high-DPR raster grids can expose narrow horizontal seams
+   between adjacent 256px Esri PNG/JPEG tiles when translated by subpixels.
+   Bleed ONE CSS pixel on the satellite and reference-label grids only.
+   ECMWF .om cloud/rain/snow panes, field canvases and temperature/wind never
+   receive this styling. Re-evaluate against physical-device recordings. */
+.wx-android-raster-bleed .leaflet-tile-pane img.leaflet-tile,
+.wx-android-raster-bleed .wx-labels img.leaflet-tile {
+  width: 257px !important;
+  height: 257px !important;
+}
+
+
 .map-tools {
   position: absolute;
   top: 50%;
