@@ -48,3 +48,9 @@ export function needsRainOverlay(showCyclones: boolean, cycloneCount: number): b
 export function shouldUpdateRainOverlay(nowMs: number, lastMs: number): boolean {
   return lastMs === 0 || nowMs - lastMs >= 80;
 }
+
+/** Point-grid fallback is a temporary safety net, not a 60fps weather layer.
+ * Throttle only the rain-mode fallback while native ECMWF tiles decode. */
+export function shouldUpdateRainFallback(nowMs: number, lastPaintMs: number): boolean {
+  return lastPaintMs === 0 || nowMs - lastPaintMs >= 100;
+}
