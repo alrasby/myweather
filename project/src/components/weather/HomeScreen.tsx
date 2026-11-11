@@ -52,6 +52,12 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const [openDay, setOpenDay] = useState<number | null>(null);
   const [hideMorning, setHideMorning] = useState(false);
   const [pinnedAlerts, setPinnedAlerts] = useState<Record<string, string[]>>({});
+  const [refreshHiddenCities, setRefreshHiddenCities] = useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(sessionStorage.getItem("myweather-alert-refresh-hidden") || "[]");
+      return Array.isArray(saved) ? saved.filter((v): v is string => typeof v === "string").slice(-32) : [];
+    } catch { return []; }
+  });
   const [dismissed, setDismissed] = useState<string[]>(() => {
     if (typeof sessionStorage === "undefined") return [];
     try {
@@ -113,8 +119,18 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     // alerts are intentionally represented by their stable joined signature.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alertScope, alertSignature, prefs.alerts]);
-  const shownAlerts = (prefs.alerts ? pinnedAlerts[alertScope] ?? alerts : [])
+  const shownAlerts = (prefs.alerts && !refreshHiddenCities.includes(place.id)
+    ? pinnedAlerts[alertScope] ?? alerts : [])
     .filter((item) => !dismissed.includes(`${place.id}|${item}`));
+  const hideAlertsAfterPull = () => {
+    setRefreshHiddenCities((prev) => {
+      if (prev.includes(place.id)) return prev;
+      const next = [...prev, place.id].slice(-32);
+      try { sessionStorage.setItem("myweather-alert-refresh-hidden", JSON.stringify(next)); }
+      catch { /* session storage may be disabled */ }
+      return next;
+    });
+  };
   const dismissAlert = (key: string) => {
     setDismissed((prev) => {
       const next = prev.includes(key) ? prev : [...prev, key].slice(-40);
@@ -147,8 +163,13 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         const dy = (e.touches[0]?.clientY ?? 0) - pull.current;
         if (dy > 0) setPulling(Math.min(80, dy));
       }}
-      onTouchEnd={() => {
-        if (pulling > 64) refresh();
+      onTouchEnd={(e) => {
+        // Use measured gesture distance, not a potentially stale React render.
+        const moved = pull.current > 0 ? (e.changedTouches[0]?.clientY ?? pull.current) - pull.current : 0;
+        if (moved > 64) {
+          hideAlertsAfterPull();
+          refresh();
+        }
         pull.current = 0;
         setPulling(0);
       }}
