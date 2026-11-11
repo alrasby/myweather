@@ -61,6 +61,7 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         ensureCompass();
+        if (compass != null) compass.onHostResume();
         ensureWidget();
         pushStatusInset();
         if (returnHome) {
@@ -80,7 +81,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onPause() {
-        if (compass != null) compass.stop();
+        if (compass != null) compass.onHostPause();
         super.onPause();
     }
 
@@ -125,6 +126,8 @@ public class MainActivity extends BridgeActivity {
         private WebView web;
         private SensorManager sensors;
         private boolean listening;
+        private boolean requested;
+        private boolean foreground;
         private float last = -999f;
         private float declination = 0f;
         private boolean hasLocation;
@@ -153,16 +156,32 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void start() {
-            main.post(this::listen);
+            main.post(() -> {
+                requested = true;
+                listen();
+            });
         }
 
         @JavascriptInterface
         public void stop() {
-            main.post(this::halt);
+            main.post(() -> {
+                requested = false;
+                halt();
+            });
+        }
+
+        void onHostPause() {
+            foreground = false;
+            halt();
+        }
+
+        void onHostResume() {
+            foreground = true;
+            if (requested) listen();
         }
 
         private void listen() {
-            if (listening || web == null) return;
+            if (!foreground || !requested || listening || web == null) return;
             sensors = (SensorManager) activity.getSystemService(SENSOR_SERVICE);
             if (sensors == null) return;
             Sensor sensor = sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
@@ -221,7 +240,11 @@ public class MainActivity extends BridgeActivity {
 
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
-            this.accuracy = accuracy;
+            if (this.accuracy != accuracy) {
+                this.accuracy = accuracy;
+                // Publish calibration change even when the device is stationary.
+                last = -999f;
+            }
         }
     }
 }
