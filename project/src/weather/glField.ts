@@ -754,7 +754,6 @@ export class FieldEngine {
       if (step.waiting) this.weatherWaitSince ??= now;
       else this.weatherWaitSince = null;
     }
-    const rainCovered = this.kind === 2 && this.modelCover;
     const hasRainOverlay = needsRainOverlay(this.showCyclones, this.cyclones.length);
     // The hidden fallback frameBox is irrelevant while ECMWF covers the map
     // and no cyclone marker is enabled. Avoid Leaflet coordinate conversion,
