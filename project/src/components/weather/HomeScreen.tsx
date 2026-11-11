@@ -29,7 +29,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const peek = useWeather((s) => s.peek);
   const prefs = useWeather((s) => s.prefs);
   const bundle = useWeather((s) => s.bundle);
-  const here = useWeather((s) => s.here);
   const loading = useWeather((s) => s.loading);
   const error = useWeather((s) => s.error);
   const estimated = useWeather((s) => s.estimated);
@@ -37,9 +36,12 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const loadActive = useWeather((s) => s.loadActive);
   const setHere = useWeather((s) => s.setHere);
   const [compassLocating, setCompassLocating] = useState(false);
+  const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
+  const [compassLocationFailed, setCompassLocationFailed] = useState(false);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
-  const compassPlace = here ?? place;
+  // Do not silently treat a GPS fix saved in a previous session as current.
+  const compassPlace = qiblaFix ?? place;
   const reading = useDeviceCompass(compassPlace.lat, compassPlace.lon);
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
@@ -62,9 +64,13 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const locateCompass = () => {
     if (compassLocating) return;
     setCompassLocating(true);
+    setCompassLocationFailed(false);
     void readBestPosition((pos) => {
-      setHere(placeFromCoords(pos.lat, pos.lon, `${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}`, "", ""));
-    }).finally(() => setCompassLocating(false));
+      setQiblaFix({ lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy });
+    }).then((fix) => {
+      if (!fix) setCompassLocationFailed(true);
+    }).catch(() => setCompassLocationFailed(true))
+      .finally(() => setCompassLocating(false));
   };
 
   const refresh = () => {
@@ -260,7 +266,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </section>
 
           <div className="mt-3">
-            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} deviceLocation={here != null} locating={compassLocating} onLocate={locateCompass} />
+            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} deviceLocation={qiblaFix != null} locationAccuracy={qiblaFix?.accuracy ?? null} locationFailed={compassLocationFailed} locating={compassLocating} onLocate={locateCompass} />
           </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
