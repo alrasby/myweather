@@ -1227,7 +1227,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <div className="wx-card pointer-events-auto flex flex-wrap items-center gap-1 px-2 py-1.5 text-xs">
             <button type="button" className={`rounded-full px-2.5 py-1.5 font-semibold ${readyTileMode ? "bg-accent text-accent-ink" : "bg-fg/10 text-fg"}`}
               onClick={() => setReadyTileMode((v) => !v)}>
-              {lang === "ar" ? "خرائط جاهزة مجانية" : "Free ready-made maps"}
+              {readyTileMode
+                ? (lang === "ar" ? "العودة لغيوم MyWeather" : "Return to MyWeather clouds")
+                : (lang === "ar" ? "خرائط WeatherAPI التجريبية" : "Experimental WeatherAPI tiles")}
             </button>
             {readyTileMode ? ([
               ["precip", lang === "ar" ? "مطر" : "Rain"],
