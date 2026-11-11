@@ -83,7 +83,17 @@ jobs:
           fi
       - name: Android Lint — platform security and correctness
         working-directory: project/android
-        run: ./gradlew --no-daemon :app:lintDebug
+        run: |
+          ./gradlew --no-daemon :app:lintDebug || {
+            echo "Android Lint failures:"
+            REPORT="app/build/reports/lint-results-debug.txt"
+            if [ -f "$REPORT" ]; then
+              grep -nE 'Error:|Warning:|errors?, [0-9]+ warnings?' "$REPORT" | head -100 || true
+            else
+              find app/build -type f -name 'lint-results-*.txt' -print | head -15
+            fi
+            exit 1
+          }
       - name: Build and verify signed release
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         working-directory: project/android
