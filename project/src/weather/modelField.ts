@@ -4,6 +4,7 @@ import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTim
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
+import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
@@ -44,6 +45,8 @@ export type WeatherModelDiagnostics = {
   error: string | null;
   cacheHits: number;
   nativeReads: number;
+  sharedRangeReads: number;
+  activeSharedRanges: number;
   layerTimings: SpatialLayerTiming[];
   loadingFrames: number[];
   cacheEligible: number;
@@ -195,6 +198,7 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
 const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
+const spatialRangeFlights = new SpatialRangeFlights<Response>();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
 let spatialCacheEligible = 0;
@@ -231,6 +235,20 @@ async function measuredNativeRequest(
 }
 
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const range = method === "GET" ? headers.get("range") : null;
+  const key = range && /^bytes=\d+-\d+$/i.test(range) ? `${url}|${range}` : null;
+  if (!key) return pluginSpatialUnshared(url, init, headers);
+  // Separate consumers of one file range share the native fetch while their
+  // abort signals remain independent. Return separate readable bodies.
+  const response = await spatialRangeFlights.run(
+    key, init?.signal ?? undefined,
+    (signal) => pluginSpatialUnshared(url, { ...init, signal }, headers),
+  );
+  return response.clone();
+}
+
+async function pluginSpatialUnshared(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key)) bag[key] = value;
@@ -508,6 +526,8 @@ export class ModelField {
       error: this.lastError,
       cacheHits: spatialCacheHits,
       nativeReads: spatialNativeReads,
+      sharedRangeReads: spatialRangeFlights.joined,
+      activeSharedRanges: spatialRangeFlights.active,
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
