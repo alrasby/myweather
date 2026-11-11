@@ -200,16 +200,10 @@ export function QiblaCard({
   onLocate: () => void;
 }) {
   const bearing = qiblaBearing(lat, lon);
-  const { heading, accuracy, trueNorth } = reading;
+  const { heading } = reading;
   const northOnScreen = heading == null ? 0 : -heading;
   const qiblaOnScreen = bearing == null ? null : heading == null ? bearing : relativeQiblaDirection(bearing, heading);
   const ar = lang === "ar";
-  // Sensor accuracy is not a measured angular error. Do not suggest that "high"
-  // accuracy or a GPS radius guarantees a physically correct north bearing.
-  const warning = heading == null ? (ar ? "البوصلة غير متاحة" : "Compass unavailable")
-    : !trueNorth ? (ar ? "الشمال المغناطيسي؛ حدّد موقعك لتصحيحه" : "Magnetic north; locate yourself to correct it")
-    : accuracy === "low" ? (ar ? "عاير مستشعر البوصلة" : "Calibrate the compass sensor")
-    : null;
   return (
     <article className="wx-card flex items-center gap-3 px-3 py-3.5">
       <svg className="size-[8.2rem] shrink-0 text-fg" viewBox="0 0 160 160" role="img"
@@ -258,7 +252,6 @@ export function QiblaCard({
           <span className="text-accent">{ar ? "القبلة" : "Qibla"}</span>
           <span className="ms-1" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</span>
         </p>
-        {warning ? <p className="mt-1 text-[0.7rem] leading-snug text-muted">{warning}</p> : null}
         <button type="button" className="mt-1.5 rounded-full border border-line px-2 py-1 text-[0.7rem] text-accent"
           onClick={onLocate} disabled={locating}>
           {locating ? (ar ? "تحديد الموقع…" : "Locating…") : deviceLocation
@@ -267,17 +260,9 @@ export function QiblaCard({
           {deviceLocation && locationAccuracy != null && Number.isFinite(locationAccuracy)
             ? <span className="ms-1" dir="ltr">· ±{Math.round(locationAccuracy)} m</span> : null}
         </button>
-        {!deviceLocation ? <p className="mt-1 text-[0.65rem] text-muted">
-          {ar ? "الاتجاه الحالي محسوب للمدينة المختارة" : "Calculated for selected city"}
-        </p> : null}
         {locationFailed ? <p className="mt-1 text-[0.65rem] text-muted" role="status">
           {ar ? "تعذر تحديد الموقع؛ تحقق من الإذن وGPS" : "Location unavailable; check GPS permission"}
         </p> : null}
-        {heading != null && (!trueNorth || accuracy === "low") ? (
-          <p className="mt-0.5 text-[0.65rem] text-muted">
-            {ar ? "أبعد الهاتف عن المعادن وحرّكه بشكل 8 لمعايرة المستشعر" : "Move away from metal; make a figure-eight motion"}
-          </p>
-        ) : null}
       </div>
     </article>
   );
