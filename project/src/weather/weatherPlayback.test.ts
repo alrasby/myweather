@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase } from "./weatherPlayback.ts";
+import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback } from "./weatherPlayback.ts";
 
 test("rain/snow playback does not outrun ECMWF; wind and temperature retain their cadence", () => {
   assert.equal(secondsPerForecastHour(2), 4);
@@ -26,4 +26,11 @@ test("loading indicator ignores short tile refreshes and explains long delays", 
   assert.equal(weatherLoadingPhase(1800), 1);
   assert.equal(weatherLoadingPhase(7999), 1);
   assert.equal(weatherLoadingPhase(8000), 2);
+});
+
+test("only covered rain/snow skips redundant fallback RAF paints", () => {
+  assert.equal(shouldPaintWeatherFallback(2, true), false);
+  assert.equal(shouldPaintWeatherFallback(2, false), true);
+  assert.equal(shouldPaintWeatherFallback(0, true), true);
+  assert.equal(shouldPaintWeatherFallback(1, true), true);
 });
