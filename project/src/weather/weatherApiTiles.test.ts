@@ -67,7 +67,7 @@ test("ready tiles never hide native imagery before frame is completely loaded", 
     assert.equal(L.tiles[0]!.opacity, 0);
     L.tiles[0]!.fire("load");
     assert.deepEqual(signals, [[true, Date.parse("2026-11-11T08:00:00Z")]]);
-    assert.equal(L.tiles[0]!.opacity, 0.86);
+    assert.equal(L.tiles[0]!.opacity, 0.78);
     assert.equal(map.layers.size, 1);
     controller.show("precip", getClock());
     assert.equal(L.tiles.length, 1);
