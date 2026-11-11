@@ -8,6 +8,7 @@ import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
+import { ECMWF_DECODED_STATE_LIMIT } from "@/weather/ecmwfDecodedStatePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
@@ -128,7 +129,11 @@ function modelSettings() {
     cloud_cover_mid: CLOUD,
     cloud_cover_high: CLOUD,
   };
-  return { ...defaultOmProtocolSettings, colorScales };
+  // Upstream defaults to only two decoded states. That cannot hold the three
+  // simultaneous ECMWF variables, let alone the next time step for blending.
+  // Keep exactly the current+adjacent hours (6 cropped spatial fields) and
+  // avoid retaining an unbounded forecast history in Android WebView memory.
+  return { ...defaultOmProtocolSettings, colorScales, maxStatesWithData: ECMWF_DECODED_STATE_LIMIT };
 }
 
 function spatialUrl(url: string): boolean {

@@ -1,3 +1,5 @@
+import { nextEcmwfFrameToPrepare } from "./ecmwfDecodedStatePolicy.ts";
+
 /** Maximum time a refreshed visible viewport can defer *starting* the
  * next forecast. Continuous panning must not starve animation forever. */
 export const SPATIAL_PREFETCH_GRACE_MS = 2500;
@@ -15,16 +17,16 @@ export function planSpatialRequests(
   visibleRefreshAgeMs = 0,
   playbackActive = false,
 ): { cancel: number[]; start: number | null } {
-  // Keep two upcoming hours prepared without decoding more than one
-  // incomplete frame at a time. The second lookahead becomes eligible only
-  // after both the requested and next forecast are fully available.
-  // Second-hour lookahead is worthwhile only during active animation:
-  // don't consume network and battery decoding unused hours on a still map.
-  const lookahead = playbackActive && ready.has(requested) && ready.has(requested + 1)
-    ? requested + 2 : -1;
-  const candidates = [requested, requested + 1, lookahead].filter(
-    (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
-  );
+  // The OM decoder retains only the current forecast hour and the
+  // adjacent hour (three fields each). Starting a second-hour lookahead
+  // would evict the still-visible decoded fields and redo expensive WASM work.
+  const next = nextEcmwfFrameToPrepare(requested, total, ready);
+  const candidates = next === null || blocked.has(next) ? [] : [next];
+  // If the requested hour is temporarily in retry cooldown, a *single*
+  // adjacent fallback candidate is still permitted as before.
+  if (candidates.length === 0 && blocked.has(requested) &&
+      requested + 1 < total && !ready.has(requested + 1) &&
+      !blocked.has(requested + 1)) candidates.push(requested + 1);
   // Existing in-flight prefetch is not cancelled just because Leaflet
   // briefly restarts a viewport tile queue. Doing that on every pan caused
   // expensive native HTTP churn. Defer only NEW prefetch during the grace
