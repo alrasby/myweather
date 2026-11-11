@@ -10,6 +10,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
+import android.os.SystemClock;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
@@ -21,6 +23,9 @@ public class WidgetSettingsActivity extends AppCompatActivity {
     private boolean configuring;
     private int alpha = 60;
     private String tint = "ocean";
+    private int tone = 50;
+    private int strength = 75;
+    private long previewAt;
     private boolean dark;
     private boolean clock;
     private String placeId = "";
@@ -40,6 +45,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         SharedPreferences sp = WeatherWidget.prefs(this);
         alpha = sp.getInt(WeatherWidget.KEY_ALPHA, 60);
         tint = sp.getString(WeatherWidget.KEY_TINT, "ocean");
+        tone = Math.max(0, Math.min(100, sp.getInt(WeatherWidget.KEY_TONE, 50)));
+        strength = Math.max(0, Math.min(100, sp.getInt(WeatherWidget.KEY_STRENGTH, 75)));
         dark = sp.getBoolean(WeatherWidget.KEY_DARK, false);
         clock = sp.getBoolean(WeatherWidget.KEY_CLOCK, false);
         placeId = sp.getString(WeatherWidget.KEY_PLACE, "");
@@ -50,6 +57,9 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         ((TextView) findViewById(R.id.labelTheme)).setText(getString(R.string.widget_theme));
         ((TextView) findViewById(R.id.labelTint)).setText(getString(R.string.widget_tint));
         ((TextView) findViewById(R.id.tintOcean)).setText(getString(R.string.widget_tint_ocean));
+        ((TextView) findViewById(R.id.tintBlue)).setText(getString(R.string.widget_tint_blue));
+        ((TextView) findViewById(R.id.labelTone)).setText(getString(R.string.widget_tone));
+        ((TextView) findViewById(R.id.labelStrength)).setText(getString(R.string.widget_strength));
         ((TextView) findViewById(R.id.tintTeal)).setText(getString(R.string.widget_tint_teal));
         ((TextView) findViewById(R.id.tintViolet)).setText(getString(R.string.widget_tint_violet));
         ((TextView) findViewById(R.id.tintRose)).setText(getString(R.string.widget_tint_rose));
@@ -87,9 +97,37 @@ public class WidgetSettingsActivity extends AppCompatActivity {
             save();
         });
         bindTint(R.id.tintOcean, "ocean");
+        bindTint(R.id.tintBlue, "blue");
         bindTint(R.id.tintTeal, "teal");
         bindTint(R.id.tintViolet, "violet");
         bindTint(R.id.tintRose, "rose");
+        SeekBar toneBar = findViewById(R.id.tone);
+        toneBar.setProgress(tone);
+        toneBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int value, boolean fromUser) {
+                tone = value;
+                showAlpha();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { save(); }
+        });
+        SeekBar intensityBar = findViewById(R.id.strength);
+        intensityBar.setProgress(strength);
+        intensityBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int value, boolean fromUser) {
+                strength = value;
+                showAlpha();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { save(); }
+        });
+        GradientDrawable previewBackdrop = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{ 0xFF102A43, 0xFF396A96, 0xFF122438 });
+        previewBackdrop.setCornerRadius(dp(24));
+        findViewById(R.id.previewBackdrop).setBackground(previewBackdrop);
+        ((TextView) findViewById(R.id.previewLabel)).setText(
+            getString(R.string.widget_preview_city) + "   " + getString(R.string.widget_preview_temp));
         findViewById(R.id.styleWeather).setOnClickListener(v -> {
             clock = false;
             save();
@@ -107,6 +145,22 @@ public class WidgetSettingsActivity extends AppCompatActivity {
 
     private void showAlpha() {
         ((TextView) findViewById(R.id.alphaValue)).setText(alpha + "%");
+        ((TextView) findViewById(R.id.toneValue)).setText(String.valueOf(tone));
+        ((TextView) findViewById(R.id.strengthValue)).setText(strength + "%");
+        updatePreview(false);
+    }
+
+    private void updatePreview(boolean force) {
+        long now = SystemClock.uptimeMillis();
+        if (!force && now - previewAt < 60) return;
+        previewAt = now;
+        ImageView image = findViewById(R.id.glassPreview);
+        if (image != null) {
+            // Small bitmap for the configuration preview: no large churn while dragging sliders.
+            image.setImageBitmap(WeatherWidget.glass(440, 148, alpha, dark, 1f, tint, tone, strength));
+        }
+        TextView sample = findViewById(R.id.previewLabel);
+        if (sample != null) sample.setTextColor(dark ? Color.WHITE : 0xFF182C44);
     }
 
     private void paintChips() {
@@ -115,6 +169,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         chip(R.id.styleWeather, !clock);
         chip(R.id.styleClock, clock);
         tintChip(R.id.tintOcean, "ocean");
+        tintChip(R.id.tintBlue, "blue");
+        updatePreview(true);
         tintChip(R.id.tintTeal, "teal");
         tintChip(R.id.tintViolet, "violet");
         tintChip(R.id.tintRose, "rose");
@@ -138,16 +194,20 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         boolean selected = name.equals(tint);
         GradientDrawable background = new GradientDrawable();
         background.setCornerRadius(dp(18));
-        background.setColor(WeatherWidget.glassTint(name, dark));
+        int color = WeatherWidget.glassTint(name, dark, tone, strength);
+        background.setColor(color);
         background.setStroke(dp(selected ? 3 : 1), selected ? 0xFFDEA73D : 0xFF98A7B6);
         view.setBackground(background);
-        view.setTextColor(dark ? Color.WHITE : Color.rgb(18, 35, 53));
+        double luma = 0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color);
+        view.setTextColor(luma < 139 ? Color.WHITE : Color.rgb(20, 36, 56));
     }
 
     private void save() {
         WeatherWidget.prefs(this).edit()
             .putInt(WeatherWidget.KEY_ALPHA, alpha)
             .putString(WeatherWidget.KEY_TINT, tint)
+            .putInt(WeatherWidget.KEY_TONE, tone)
+            .putInt(WeatherWidget.KEY_STRENGTH, strength)
             .putBoolean(WeatherWidget.KEY_DARK, dark)
             .putBoolean(WeatherWidget.KEY_CLOCK, clock)
             .putString(WeatherWidget.KEY_PLACE, placeId == null ? "" : placeId)
