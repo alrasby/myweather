@@ -42,7 +42,8 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const place = activePlace({ places, activeId, peek });
   // Do not silently treat a GPS fix saved in a previous session as current.
   const compassPlace = qiblaFix ?? place;
-  const reading = useDeviceCompass(compassPlace.lat, compassPlace.lon);
+  // Declination must use the phone's measured position, not an unrelated selected city.
+  const reading = useDeviceCompass(qiblaFix?.lat ?? Number.NaN, qiblaFix?.lon ?? Number.NaN);
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
   const [pulling, setPulling] = useState(0);
@@ -266,7 +267,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </section>
 
           <div className="mt-3">
-            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} deviceLocation={qiblaFix != null} locationAccuracy={qiblaFix?.accuracy ?? null} locationFailed={compassLocationFailed} locating={compassLocating} onLocate={locateCompass} />
+            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} deviceLocation={qiblaFix != null} locationAccuracy={qiblaFix?.accuracy ?? null} locationFailed={compassLocationFailed} locating={compassLocating} onLocate={locateCompass} />
           </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
