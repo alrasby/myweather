@@ -51,7 +51,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:max="70" />
+                android:max="80" />
 
             <TextView
                 android:id="@+id/alphaValue"
@@ -101,6 +101,63 @@
                 android:padding="12dp"
                 android:textColor="#1C1C1E"
                 android:textSize="14sp" />
+        </LinearLayout>
+
+
+        <TextView
+            android:id="@+id/labelTint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="14dp"
+            android:paddingBottom="6dp"
+            android:textColor="#1C1C1E"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <TextView
+                android:id="@+id/tintOcean"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:gravity="center"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tintTeal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:gravity="center"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tintViolet"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:gravity="center"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tintRose"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:gravity="center"
+                android:textSize="11sp" />
         </LinearLayout>
 
         <TextView
