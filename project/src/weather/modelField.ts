@@ -8,6 +8,7 @@ import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
+import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
@@ -613,7 +614,7 @@ export class ModelField {
       // cannot become a hot loop while tiles decode or the slider is held.
       // Poll once every 500ms so the 2.5s prefetch fairness deadline and
       // failed-provider cooldown are still observed.
-      if (hourChanged || now - this.lastScheduledAt >= 500) {
+      if (shouldReplanSpatialFrame(hourChanged, now, this.lastScheduledAt)) {
         this.lastScheduledAt = now;
         this.pump();
       }
@@ -911,7 +912,7 @@ export class ModelField {
       0,
     );
     const nextVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
-    if (nextVisible !== this.spatialVisible) {
+    if (spatialCoverageChanged(this.spatialVisible, nextVisible)) {
       this.spatialVisible = nextVisible;
       // Visibility changes require switching the fallback renderer. Repeated
       // identical callbacks were redundantly aborting fallback timers while
