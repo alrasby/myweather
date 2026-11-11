@@ -251,7 +251,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           <div className="mt-3">
             <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} />
           </div>
-          <DetailCards bundle={bundle} place={place} lang={lang} now={now} heading={heading} />
+          <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
       ) : loading ? (
         <div className="mt-6 space-y-3">
