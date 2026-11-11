@@ -19,8 +19,8 @@ export function nextPlaybackHour(
   return { hour: current, waiting: true };
 }
 
-/** Avoid flashing a spinner for sub-second cached tile refreshes. */
+/** Avoid repeatedly flashing a buffering message for short ECMWF boundary stalls.\n * Display only when the wait is meaningful; long delays stay visible. */
 export function weatherLoadingPhase(waitingMs: number): 0 | 1 | 2 {
-  if (waitingMs < 650) return 0;
+  if (waitingMs < 1800) return 0;
   return waitingMs >= 8000 ? 2 : 1;
 }
