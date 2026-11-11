@@ -146,6 +146,7 @@ public class MainActivity extends BridgeActivity {
             main.post(() -> {
                 if (!Double.isFinite(lat) || !Double.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
                     hasLocation = false;
+                    last = -999f; // Publish uncorrected status even if phone is stationary.
                     return;
                 }
                 declination = new GeomagneticField((float) lat, (float) lon, 0f, System.currentTimeMillis()).getDeclination();
