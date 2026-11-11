@@ -726,7 +726,7 @@ export class ModelField {
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.pinnedRun), rainOpts),
     ] as AnyLayer[];
     const frame = {
-      layers: made, token, opacity: -1, ready: false, previewReady: false,
+      layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0,
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
       tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
@@ -751,8 +751,12 @@ export class ModelField {
       // every time a cloud/rain/snow tile queue enters "loading".
       const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
       const preview = spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
-      const previewChanged = frame.previewReady !== preview;
+      const previewMask = frame.loaded.reduce((mask, complete, index) =>
+        complete && frame.tileCounts[index]! > 0 && !frame.errored.has(index)
+          ? mask | (1 << index) : mask, 0);
+      const previewChanged = frame.previewReady !== preview || frame.previewMask !== previewMask;
       frame.previewReady = preview;
+      frame.previewMask = previewMask;
       // A completed successful reload clears stale timeout errors, even when
       // the previous frame already remained visible during the refresh.
       if (frame.loaded.every(Boolean) && frame.errored.size === 0 && frame.tileCounts.every((n) => n > 0)) {
