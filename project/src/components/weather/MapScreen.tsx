@@ -512,7 +512,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       try {
         const quick = await fetchGrid({ ...box, cols: saver ? 18 : 36, rows: saver ? 10 : 18 });
         if (!dead) engine.setRainWorld(quick);
-        if (saver || dead) return;
+        // Keep the low-cost world fallback, but do not start the much larger
+        // 72x36 forecast point grid if the ECMWF model is already visible.
+        if (saver || dead || modelRef.current?.isSpatialVisible()) return;
         const fine = await fetchGrid({ ...box, cols: 72, rows: 36 });
         if (!dead) engine.setRainWorld(fine);
       } catch {
