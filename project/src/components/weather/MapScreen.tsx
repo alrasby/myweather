@@ -7,6 +7,7 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { WeatherApiTiles, type WeatherApiKind } from "@/weather/weatherApiTiles";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -93,6 +94,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
   const modelRef = useRef<ModelField | null>(null);
+  const weatherApiRef = useRef<WeatherApiTiles | null>(null);
+  const readyTileModeRef = useRef(false);
+  const readyTileKindRef = useRef<WeatherApiKind>("precip");
+  const lastTileTimeRef = useRef<number>(Date.now());
+  const [readyTileMode, setReadyTileMode] = useState(false);
+  const [readyTileKind, setReadyTileKind] = useState<WeatherApiKind>("precip");
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
@@ -151,6 +158,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engineRef.current = engine;
     let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
+      lastTileTimeRef.current = info.timeMs;
+      if (readyTileModeRef.current) weatherApiRef.current?.show(readyTileKindRef.current, info.timeMs);
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -257,13 +266,22 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         }).addTo(map);
         imageryRef.current = imagery;
         const labels = map.createPane("wx-labels");
-        labels.style.zIndex = "420";
+        labels.style.zIndex = "485";
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
           { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
+        const readyPane = map.createPane("wx-ready-tiles");
+        readyPane.style.zIndex = "470";
+        readyPane.style.pointerEvents = "none";
+        weatherApiRef.current = new WeatherApiTiles(L, map, (visible) => {
+          // Never obscure the original weather engine until a complete PNG frame exists.
+          map.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
+            canvas.style.opacity = visible && readyTileModeRef.current ? "0" : "1";
+          });
+        });
         if (modelRef.current) {
           // Show one coherent model at a time. The earlier permanent overlap
           // doubled precipitation colours and allowed coarse 72x36 fallback
@@ -303,6 +321,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       window.clearTimeout(clickTimer.current);
       popupAbort.current?.abort();
       document.removeEventListener("visibilitychange", onVis);
+      weatherApiRef.current?.destroy();
+      weatherApiRef.current = null;
       engine.destroy();
       map?.remove();
       engineRef.current = null;
@@ -337,9 +357,23 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   }, [weatherDiagnosticsOpen, weatherDiagnosticMode]);
 
   useEffect(() => {
+    readyTileModeRef.current = readyTileMode;
+    readyTileKindRef.current = readyTileKind;
+    if (readyTileMode) weatherApiRef.current?.show(readyTileKind, lastTileTimeRef.current);
+    else weatherApiRef.current?.hide();
+    // Spatial OM workers are disabled while the alternative map is selected.
+    modelRef.current?.setVisible(!readyTileMode && kind === 2);
+    if (!readyTileMode) {
+      mapRef.current?.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
+        canvas.style.opacity = "1";
+      });
+    }
+  }, [readyTileMode, readyTileKind, kind, ready]);
+
+  useEffect(() => {
     engineRef.current?.setKind(kind);
     imageryRef.current?.setOpacity(1);
-    modelRef.current?.setVisible(kind === 2);
+    modelRef.current?.setVisible(!readyTileMode && kind === 2);
     if (kind !== 2) engineRef.current?.setModelCover(false);
   }, [kind, ready]);
 
@@ -1171,6 +1205,22 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </button>
             </div>
           ) : null}
+          <div className="wx-card pointer-events-auto flex flex-wrap items-center gap-1 px-2 py-1.5 text-xs">
+            <button type="button" className={`rounded-full px-2.5 py-1.5 font-semibold ${readyTileMode ? "bg-accent text-accent-ink" : "bg-fg/10 text-fg"}`}
+              onClick={() => setReadyTileMode((v) => !v)}>
+              {lang === "ar" ? "خرائط جاهزة مجانية" : "Free ready-made maps"}
+            </button>
+            {readyTileMode ? ([
+              ["precip", lang === "ar" ? "مطر" : "Rain"],
+              ["tmp2m", lang === "ar" ? "حرارة" : "Temp"],
+              ["wind", lang === "ar" ? "رياح" : "Wind"],
+              ["pressure", lang === "ar" ? "ضغط" : "Pressure"],
+            ] as const).map(([key, label]) => (
+              <button type="button" key={key}
+                className={`rounded-full px-2 py-1 ${readyTileKind === key ? "bg-accent/20 text-accent" : "text-muted"}`}
+                aria-pressed={readyTileKind === key} onClick={() => setReadyTileKind(key)}>{label}</button>
+            )) : null}
+          </div>
           <div className="wx-card map-bar pointer-events-auto px-2 py-1.5">
             <div className="flex items-center gap-2" dir="ltr">
               <button
