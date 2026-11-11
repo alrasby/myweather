@@ -771,6 +771,10 @@ export class ModelField {
         if (previewChanged && step === this.base) this.applyOpacity();
         return;
       }
+      // Cloud preview may already have opacity=1. Force a single repaint
+      // when the final rain/snow layer completes, otherwise the interpolation
+      // early-exit would leave that newly finished layer at opacity=0.
+      if (ready && !frame.ready && frame.opacity > 0.98) frame.opacity = 0.975;
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
