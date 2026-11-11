@@ -28,18 +28,19 @@ export function selectSpatialFramePlan(
     goals.set(requested + 1, t);
     return { goals, anchor: t >= 0.5 ? requested + 1 : requested, holding: false };
   }
-  if (current || next) {
-    const anchor = current ? requested : requested + 1;
-    goals.set(anchor, 1);
-    return { goals, anchor, holding: false };
+  if (current) {
+    goals.set(requested, 1);
+    return { goals, anchor: requested, holding: false };
   }
+  // A preloaded FUTURE hour is not a substitute for an unavailable requested
+  // time. A manual seek used to display that future cloud field beneath the
+  // earlier timestamp, even though normal playback correctly held the clock.
+  // Keep the previous complete frame explicitly marked as held instead.
   // While the requested frame loads, hold the last complete frame, but
   // prevent the playback clock from advancing beyond that ready hour.
-  const held = lastDisplayed != null && ready.has(lastDisplayed)
+  const held = lastDisplayed != null && lastDisplayed <= requested && ready.has(lastDisplayed)
     ? lastDisplayed
-    : [...ready].sort((a, b) =>
-      Math.abs(a - requested) - Math.abs(b - requested) || a - b
-    )[0];
+    : [...ready].filter((step) => step <= requested).sort((a, b) => b - a)[0];
   if (held !== undefined) {
     goals.set(held, 1);
     return { goals, anchor: held, holding: true };

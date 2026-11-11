@@ -61,3 +61,17 @@ test("weather layers are not reordered for every animation opacity change", () =
   assert.equal(spatialStackKey(first), spatialStackKey(second));
   assert.notEqual(spatialStackKey(first), spatialStackKey(moved));
 });
+
+test("an already prefetched future hour is not shown as the requested hour during seek", () => {
+  const plan = selectSpatialFramePlan(12, 0.5, new Set([8, 13]), 8);
+  assert.equal(plan.anchor, 8);
+  assert.equal(plan.holding, true);
+  assert.equal(plan.goals.has(13), false);
+});
+test("future-only spatial data must not masquerade as the current forecast hour", () => {
+  const plan = selectSpatialFramePlan(12, 0.5, new Set([13]), null);
+  assert.equal(plan.holding, true);
+  assert.equal(plan.anchor, null);
+  assert.equal(plan.goals.size, 0);
+  // Future-only ECMWF cannot be misrepresented as the requested time.
+});
