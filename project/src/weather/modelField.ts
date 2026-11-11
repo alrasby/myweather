@@ -804,7 +804,10 @@ export class ModelField {
         console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
       }
       this.discardFrame(step);
-      if (!this.anyReady()) this.onMiss?.();
+      // Recompute spatialVisible after discarding even a partial cloud
+      // preview. A stale true value suppressed fallback recovery after
+      // a provider timeout while no complete forecast frame existed.
+      this.applyOpacity();
       this.pump();
     };
     // A spatial frame may require dozens of range reads. Continue while real
