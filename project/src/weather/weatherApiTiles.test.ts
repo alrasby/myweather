@@ -101,13 +101,19 @@ test("tile network failure keeps original map available and does not emit loaded
     assert.equal(L.tiles.length, 2);
   } finally { controller.destroy(); }
 });
-test("seeking far ahead drops stale old tile while the new hour is loading", () => {
-  const { L, signals, controller, getClock } = makeTiles();
+test("seeking far ahead retains old frame until incoming image is ready, without a blank map", () => {
+  const { L, map, signals, controller, getClock } = makeTiles();
+  const first = Date.parse("2026-11-11T08:00:00Z");
+  const nextHour = Date.parse("2026-11-11T14:00:00Z");
   try {
     controller.show("tmp2m", getClock());
     L.tiles[0]!.fire("load");
     controller.show("tmp2m", getClock() + 6 * 3600000);
     assert.equal(L.tiles.length, 2);
-    assert.deepEqual(signals.slice(-1), [[false, null]]);
+    assert.equal(map.hasLayer(L.tiles[0]!), true);
+    assert.equal(L.tiles[1]!.opacity, 0);
+    assert.deepEqual(signals.slice(-1), [[true, first]]);
+    L.tiles[1]!.fire("load");
+    assert.deepEqual(signals.slice(-1), [[true, nextHour]]);
   } finally { controller.destroy(); }
 });
