@@ -8,6 +8,7 @@ import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
+import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
@@ -16,6 +17,7 @@ import {
   addLeafletProtocolSupport,
   defaultOmProtocolSettings,
   omProtocol,
+  updateCurrentBounds,
 } from "@openmeteo/weather-map-layer";
 
 /**
@@ -433,6 +435,21 @@ export class ModelField {
       pane.style.zIndex = "260";
       pane.style.pointerEvents = "none";
     }
+    // This must be installed BEFORE any OM tile layer is created. Without
+    // updateCurrentBounds the OM reader defaults to the complete global
+    // ECMWF grid for every requested forecast hour and all three variables.
+    // The official Open-Meteo Leaflet example uses this exact hook.
+    const updateBounds = () => {
+      const bounds = map.getBounds();
+      updateCurrentBounds(spatialViewportBounds({
+        west: bounds.getWest(), south: bounds.getSouth(),
+        east: bounds.getEast(), north: bounds.getNorth(),
+      }));
+    };
+    updateBounds();
+    // Register before GridLayer moveend listeners: when pan/zoom finishes
+    // update the data window before the new weather tiles are requested.
+    map.on("moveend", updateBounds);
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
