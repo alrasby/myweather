@@ -1,6 +1,7 @@
 import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
 import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
+import { preserveCoastalMarine } from "@/weather/coastalMarine";
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
@@ -495,7 +496,9 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     hourly,
     daily,
     air: null,
-    marine: null,
+    // Marine conditions remain independent of the land weather provider;
+    // the MET.no fallback must not hide a coastal city's tide card.
+    marine: await fetchMarine(place, signal).catch(() => null),
   };
 }
 
@@ -555,6 +558,9 @@ export function loadWeather(
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
       try {
         const bundle = await fetchForecast(place, opts?.signal);
+        // A temporary marine API failure must not erase an already confirmed
+        // coastal flag when the weather provider switches to MET.no.
+        bundle.marine = preserveCoastalMarine(bundle.marine, cached?.bundle.marine ?? null);
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
       } catch (err) {
