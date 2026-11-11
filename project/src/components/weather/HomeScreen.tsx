@@ -1,6 +1,7 @@
 import { ChevronDown, MapPin, SunMedium, Sunrise, Sunset, Thermometer, Umbrella, Wind, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DetailCards } from "@/components/weather/SkyCards";
+import { DetailCards, QiblaCard } from "@/components/weather/SkyCards";
+import { useDeviceHeading } from "@/weather/deviceHeading";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
 import { readBestPosition } from "@/weather/geo";
@@ -36,6 +37,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const setHere = useWeather((s) => s.setHere);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
+  const heading = useDeviceHeading();
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
   const [pulling, setPulling] = useState(0);
@@ -95,9 +97,9 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
 
   const span = useMemo(() => {
     if (!bundle) return { min: 0, max: 1 };
-    const mins = bundle.daily.slice(0, 15).map((d) => d.tmin);
-    const maxs = bundle.daily.slice(0, 15).map((d) => d.tmax);
-    return { min: Math.min(...mins), max: Math.max(...maxs) };
+    const mins = bundle.daily.slice(0, 15).map((d) => d.tmin).filter(Number.isFinite);
+    const maxs = bundle.daily.slice(0, 15).map((d) => d.tmax).filter(Number.isFinite);
+    return mins.length && maxs.length ? { min: Math.min(...mins), max: Math.max(...maxs) } : { min: 0, max: 1 };
   }, [bundle]);
 
   return (
@@ -246,7 +248,10 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
             </div>
           </section>
 
-          <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
+          <div className="mt-3">
+            <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} />
+          </div>
+          <DetailCards bundle={bundle} place={place} lang={lang} now={now} heading={heading} />
         </>
       ) : loading ? (
         <div className="mt-6 space-y-3">
