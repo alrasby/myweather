@@ -101,6 +101,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const [readyTileMode, setReadyTileMode] = useState(false);
   const [readyTileKind, setReadyTileKind] = useState<WeatherApiKind>("precip");
   const [readyTileLoaded, setReadyTileLoaded] = useState(false);
+  const [readyTileFrameTime, setReadyTileFrameTime] = useState<number | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
@@ -278,8 +279,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const readyPane = map.createPane("wx-ready-tiles");
         readyPane.style.zIndex = "470";
         readyPane.style.pointerEvents = "none";
-        weatherApiRef.current = new WeatherApiTiles(L, map, (visible) => {
+        weatherApiRef.current = new WeatherApiTiles(L, map, (visible, displayedTimeMs) => {
           setReadyTileLoaded(visible);
+          setReadyTileFrameTime(displayedTimeMs);
           // Never obscure the original weather engine until a complete PNG frame exists.
           mapRef.current?.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
             canvas.style.opacity = visible && readyTileModeRef.current ? "0" : "1";
@@ -362,16 +364,20 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     readyTileModeRef.current = readyTileMode;
     readyTileKindRef.current = readyTileKind;
-    if (readyTileMode) weatherApiRef.current?.show(readyTileKind, lastTileTimeRef.current);
-    else weatherApiRef.current?.hide();
+    if (readyTileMode) {
+      engineRef.current?.setModelCover(false);
+      weatherApiRef.current?.show(readyTileKind, lastTileTimeRef.current);
+    } else weatherApiRef.current?.hide();
     // Spatial OM workers are disabled while the alternative map is selected.
     modelRef.current?.setVisible(!readyTileMode && kind === 2);
+    const defaultParticles = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
+    engineRef.current?.setParticleCount(readyTileMode ? 0 : defaultParticles);
     if (!readyTileMode) {
       mapRef.current?.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
         canvas.style.opacity = "1";
       });
     }
-  }, [readyTileMode, readyTileKind, kind, ready]);
+  }, [readyTileMode, readyTileKind, kind, ready, prefs.dataSaver, prefs.particles]);
 
   useEffect(() => {
     engineRef.current?.setKind(kind);
@@ -388,9 +394,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const engine = engineRef.current;
     if (!engine || !ready) return;
     const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
-    engine.setParticleCount(n);
+    engine.setParticleCount(readyTileMode ? 0 : n);
     engine.setSaver(prefs.dataSaver);
-  }, [prefs.dataSaver, prefs.particles, ready]);
+  }, [prefs.dataSaver, prefs.particles, ready, readyTileMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1289,8 +1295,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
             {readyTileMode ? (
               <p className="mt-1 text-[0.65rem] text-muted">
-                {readyTileLoaded
-                  ? (lang === "ar" ? "بلاطات WeatherAPI.com ساعية جاهزة" : "WeatherAPI.com hourly ready-map tiles")
+                {readyTileLoaded && readyTileFrameTime != null
+                  ? (lang === "ar" ? "WeatherAPI.com · صورة الساعة " : "WeatherAPI.com · displayed ") + formatClock(readyTileFrameTime, tzRef.current, lang)
                   : (lang === "ar" ? "جاري تحميل البلاطات؛ تظهر الخريطة الأصلية عند التعذر" : "Loading tiles; original map remains as fallback")}
               </p>
             ) : (
