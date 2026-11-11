@@ -940,6 +940,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
+          <p>{lang === "ar" ? "طلبات مشتركة دون تكرار" : "Shared in-flight reads"}: {weatherDiagnostics?.sharedRangeReads ?? 0}
+            {" · "}{lang === "ar" ? "طلبات نشطة" : "active ranges"}: {weatherDiagnostics?.activeSharedRanges ?? 0}
+          </p>
           <p>{lang === "ar" ? "طلبات مؤهلة للتخزين" : "Cache-eligible misses"}: {weatherDiagnostics?.cacheEligible ?? 0}
             {" · "}{lang === "ar" ? "حُفظت" : "stored"}: {weatherDiagnostics?.cacheStored ?? 0}
             {" · "}{lang === "ar" ? "غير قابلة للتخزين" : "rejected"}: {weatherDiagnostics?.cacheRejected ?? 0}
@@ -976,8 +979,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </p>
             ))}
             <p>{"native errors "}{weatherDiagnostics?.performance.nativeFailures ?? 0}
+              {" · canceled "}{weatherDiagnostics?.performance.nativeCancellations ?? 0}
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
-              {" · MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
+              {" · transfer MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
             </p>
             <p>{"SharedArrayBuffer: "}{weatherDiagnostics?.performance.runtime.crossOriginIsolated ? "available" : "unavailable"}
               {" · JS heap: "}{weatherDiagnostics?.performance.runtime.heapUsedMb == null
