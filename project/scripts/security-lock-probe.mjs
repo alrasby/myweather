@@ -30,7 +30,7 @@ withOverride.overrides ??= {};
 withOverride.overrides["@typescript-eslint/typescript-estree"] = {
   minimatch: "^11.0.1",
 };
-writeFileSync("package.json", JSON.stringify(withOverride, null, 2) + "\\n");
+writeFileSync("package.json", JSON.stringify(withOverride, null, 2) + String.fromCharCode(10));
 
 run(["pkg", "set", "dependencies.better-auth=^1.7.21", "dependencies.zod=^4.6.6"]);
 run(["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]);
