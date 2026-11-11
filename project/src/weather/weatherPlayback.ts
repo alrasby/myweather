@@ -30,3 +30,9 @@ export function weatherLoadingPhase(waitingMs: number): 0 | 1 | 2 {
 export function shouldPaintWeatherFallback(kind: number, modelCover: boolean): boolean {
   return kind !== 2 || !modelCover;
 }
+
+/** Keep ECMWF timeline sync around 20Hz, without sampling rain point fields
+ * 60 times per second while the main thread needs capacity for tile decode. */
+export function shouldEmitRainFrame(nowMs: number, lastMs: number): boolean {
+  return nowMs - lastMs >= 50 || lastMs === 0;
+}
