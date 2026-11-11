@@ -416,6 +416,10 @@ export class ModelField {
   private visible = false;
   private playbackActive = false;
   private lastSyncAt = 0;
+  // Do not re-evaluate the same ECMWF tile scheduler every 50 ms while only
+  // the forecast blend opacity changes. Tile load/error events and hour
+  // changes still trigger scheduling immediately.
+  private lastScheduledAt = 0;
   // Continuous pan refreshes must not reset the prefetch grace window every
   // time Leaflet emits another 'loading' for the same requested hour.
   private refreshBase: number | null = null;
@@ -587,6 +591,7 @@ export class ModelField {
       this.refreshBase = null;
       this.refreshSince = 0;
       this.playbackActive = false;
+      this.lastScheduledAt = 0;
       this.clear();
     }
   }
@@ -601,9 +606,17 @@ export class ModelField {
     void this.ready.then(() => {
       if (!this.visible || !this.adapter || !this.map || !this.times.length) return;
       const { i, f } = this.bracket(ms);
+      const hourChanged = i !== this.base;
       this.base = i;
       this.blend = f;
-      this.pump();
+      // The animation blend continues at 20Hz, but planning/canceling work
+      // cannot become a hot loop while tiles decode or the slider is held.
+      // Poll once every 500ms so the 2.5s prefetch fairness deadline and
+      // failed-provider cooldown are still observed.
+      if (hourChanged || now - this.lastScheduledAt >= 500) {
+        this.lastScheduledAt = now;
+        this.pump();
+      }
       this.applyOpacity();
     });
   }
@@ -897,9 +910,15 @@ export class ModelField {
       (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
       0,
     );
-    this.spatialVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
-    if (this.spatialVisible) this.onLive?.();
-    else this.onMiss?.();
+    const nextVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
+    if (nextVisible !== this.spatialVisible) {
+      this.spatialVisible = nextVisible;
+      // Visibility changes require switching the fallback renderer. Repeated
+      // identical callbacks were redundantly aborting fallback timers while
+      // a large OM field was being decoded.
+      if (nextVisible) this.onLive?.();
+      else this.onMiss?.();
+    }
   }
 
   private clear() {
