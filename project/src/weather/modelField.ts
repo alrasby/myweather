@@ -468,6 +468,13 @@ export class ModelField {
     return this.ready.then(() => this.times.length);
   }
 
+  /** Whether a complete ECMWF spatial image currently covers the rain map.
+   * The separate Open-Meteo regional fallback does not need to fetch while
+   * this is true; the already loaded fallback grid remains intact. */
+  isSpatialVisible(): boolean {
+    return this.visible && this.spatialVisible;
+  }
+
   /** Playback safety gate for the rain/snow map only. Frame decoding is
    * bounded; hold playback at a temporal boundary until ECMWF can show it.
    * Never freeze playback permanently when the upstream request is in cooldown. */
