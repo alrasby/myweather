@@ -533,7 +533,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // heavy ECMWF WASM workers was wasting bandwidth and CPU on imagery
         // hidden behind an already-complete model layer.
       } catch {
-        /* الطبقة تبقى على شبكة الحرارة المحمّلة، بلا فراغ */
+        // Do not enter an endless timer loop when the quick fallback fails.
+        // The existing generic weather field still remains available.
+        quickWorldReady = true;
       }
     };
 
@@ -656,8 +658,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }).catch(() => {
         // Keep the already loaded quick world fallback available.
       }).finally(() => {
-        if (fineWorldAc === controller) fineWorldAc = null;
-        fineWorldPending = false;
+        if (fineWorldAc === controller) {
+          fineWorldAc = null;
+          fineWorldPending = false;
+        }
       });
     };
     const enableDetailedFallback = () => {
@@ -681,6 +685,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }, 8000);
     };
     const suspendDetailedFallback = () => {
+      if (!detailAllowed && !fallbackTimer && !viewAc && !fineWorldAc) return;
       window.clearTimeout(fallbackTimer);
       fallbackTimer = 0;
       detailAllowed = false;
@@ -690,6 +695,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       pendingView = null;
       fineWorldAc?.abort();
       fineWorldAc = null;
+      fineWorldPending = false;
       // A completed fallback stays in memory for future ECMWF outages.
     };
     rainFallbackRefreshRef.current = scheduleDetailedFallback;
