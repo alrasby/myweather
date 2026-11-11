@@ -1,4 +1,4 @@
-import { nextEcmwfFrameToPrepare } from "./ecmwfDecodedStatePolicy";
+import { nextEcmwfFrameToPrepare } from "./ecmwfDecodedStatePolicy.ts";
 
 /** Maximum time a refreshed visible viewport can defer *starting* the
  * next forecast. Continuous panning must not starve animation forever. */
