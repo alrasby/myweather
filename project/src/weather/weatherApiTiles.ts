@@ -31,15 +31,21 @@ export class WeatherApiTiles {
   private retryAt = 0;
   private timeout: ReturnType<typeof setTimeout> | null = null;
   private dead = false;
-  private onAvailability: (visible: boolean) => void;
+  private readonly L: typeof Leaflet;
+  private readonly map: LeafletMap;
+  private onAvailability: (visible: boolean, frameTimeMs: number | null) => void;
+  private currentTimeMs: number | null = null;
+  private cooldownKind: WeatherApiKind | null = null;
   private now: () => number;
 
   constructor(
-    private L: typeof Leaflet,
-    private map: LeafletMap,
-    onAvailability: (visible: boolean) => void,
+    L: typeof Leaflet,
+    map: LeafletMap,
+    onAvailability: (visible: boolean, frameTimeMs: number | null) => void,
     now: () => number = () => Date.now(),
   ) {
+    this.L = L;
+    this.map = map;
     this.onAvailability = onAvailability;
     this.now = now;
   }
@@ -47,10 +53,16 @@ export class WeatherApiTiles {
     if (this.dead) return;
     const valid = weatherApiForecastTime(timeMs, this.now());
     if (valid == null) {
-      this.hide();
+      if (this.current || this.incoming) this.hide();
       return;
     }
     const key = `${kind}:${weatherApiStamp(valid)}`;
+    if (kind !== this.cooldownKind) {
+      this.retryAt = 0;
+      this.cooldownKind = kind;
+    }
+    // A large timeline seek must not show a misleading, distant old forecast.
+    if (this.currentTimeMs != null && Math.abs(valid - this.currentTimeMs) > 3 * HOUR) this.hide();
     // Never show a previously selected physical variable while loading another.
     if (this.key && !this.key.startsWith(`${kind}:`)) this.hide();
     if (key === this.key || key === this.requestKey) return;
@@ -83,13 +95,14 @@ export class WeatherApiTiles {
       this.incoming = null;
       this.current = tile;
       this.key = key;
+      this.currentTimeMs = valid;
       this.requestKey = "";
       if (this.timeout) clearTimeout(this.timeout);
       this.timeout = null;
       const container = tile.getContainer();
       if (container) container.style.transition = "opacity 240ms ease-out";
       tile.setOpacity(0.86);
-      this.onAvailability(true);
+      this.onAvailability(true, valid);
       if (old) {
         // Remove after the CSS fade while retaining a complete old image.
         setTimeout(() => {
@@ -111,8 +124,9 @@ export class WeatherApiTiles {
     if (this.current) this.map.removeLayer(this.current);
     this.current = null;
     this.key = "";
+    this.currentTimeMs = null;
     this.requestKey = "";
-    this.onAvailability(false);
+    this.onAvailability(false, null);
   }
   destroy() {
     this.dead = true;
