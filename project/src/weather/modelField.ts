@@ -726,7 +726,7 @@ export class ModelField {
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.pinnedRun), rainOpts),
     ] as AnyLayer[];
     const frame = {
-      layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0,
+      layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0, previewOpacityKey: "",
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
       tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
@@ -892,11 +892,17 @@ export class ModelField {
     for (const [step, frame] of this.frames) {
       if (frame.ready || frame.opacity <= 0 || (preview === frame && step === this.base)) continue;
       frame.opacity = 0;
+      frame.previewOpacityKey = "";
       for (const layer of frame.layers) layer.setOpacity?.(0);
     }
     if (preview) {
       preview.opacity = 1;
-      preview.layers.forEach((layer, idx) => {
+      // Leaflet.setOpacity() traverses tile elements. Do it only when a
+      // particular source finishes or diagnostic mode changes, NOT at 20Hz.
+      const opacityKey = `${this.diagnosticMode}:${preview.previewMask}:${preview.previewReady}`;
+      if (preview.previewOpacityKey !== opacityKey) {
+        preview.previewOpacityKey = opacityKey;
+        preview.layers.forEach((layer, idx) => {
         // Leaflet keeps its prior cloud images in the DOM while refreshing a
         // moved viewport. Do not hide that proven image on a new loading event.
         const complete = preview.tileCounts[idx]! > 0 && !preview.errored.has(idx) &&
@@ -905,7 +911,8 @@ export class ModelField {
         const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
           (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
         layer.setOpacity?.(complete && allowed ? 1 : 0);
-      });
+        });
+      }
     }
     // Layer stacking depends on which forecast frames participate, not on
     // the interpolation weight. Including the weight in this key caused
