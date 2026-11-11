@@ -179,22 +179,9 @@ function buildBundle(
       if (!Number.isFinite(bundle.current.precip)) bundle.current.precip = nearest.precip;
     }
   }
-  for (const day of bundle.daily) {
-    const key = dayKey(day.t, timezone);
-    let sum = 0;
-    let count = 0;
-    let pop = NaN;
-    for (const row of bundle.hourly) {
-      if (dayKey(row.t, timezone) !== key) continue;
-      if (Number.isFinite(row.precip)) {
-        sum += row.precip;
-        count += 1;
-      }
-      if (Number.isFinite(row.pop)) pop = Number.isFinite(pop) ? Math.max(pop, row.pop) : row.pop;
-    }
-    if (count >= 18) day.precip = Math.round(sum * 10) / 10;
-    if (!Number.isFinite(day.pop) && Number.isFinite(pop)) day.pop = pop;
-  }
+  // Preserve Open-Meteo daily precipitation_sum and probability_max.
+  // Replacing daily totals using >=18 hourly samples can silently turn a
+  // partial-day sum into a false full-day forecast.
   if (!Number.isFinite(bundle.current.feels)) bundle.current.feels = bundle.current.temp;
   if (!Number.isFinite(bundle.current.precip)) bundle.current.precip = 0;
   bundle.current.isDay = daylightNow(Date.now(), place.lat, place.lon, bundle.daily, bundle.hourly);
