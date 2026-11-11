@@ -10,6 +10,9 @@
     <string name="widget_opacity">Background opacity</string>
     <string name="widget_tint">Glass color</string>
     <string name="widget_tint_ocean">Ocean</string>
+    <string name="widget_tint_adaptive">Adaptive</string>
+    <string name="widget_tint_white">White</string>
+    <string name="widget_tint_black">Black</string>
     <string name="widget_tint_blue">Blue</string>
     <string name="widget_tone">Color tone — light to deep</string>
     <string name="widget_strength">Color intensity</string>
