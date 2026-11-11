@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
@@ -52,6 +53,20 @@ public class WeatherWidget extends AppWidgetProvider {
         render(context, manager, id);
     }
 
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        super.onReceive(context, intent);
+        // Refresh Material You color when One UI/Android changes wallpaper or
+        // system appearance, without sampling private wallpaper pixels.
+        String action = intent == null ? null : intent.getAction();
+        if (Intent.ACTION_WALLPAPER_CHANGED.equals(action) ||
+            Intent.ACTION_CONFIGURATION_CHANGED.equals(action)) {
+            if ("adaptive".equals(prefs(context).getString(KEY_TINT, "ocean"))) {
+                updateAll(context);
+            }
+        }
+    }
+
     static void updateAll(Context context) {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, WeatherWidget.class));
@@ -70,9 +85,9 @@ public class WeatherWidget extends AppWidgetProvider {
         boolean tall = h >= 90;
         SharedPreferences sp = prefs(context);
         boolean clock = sp.getBoolean(KEY_CLOCK, false);
-        boolean dark = sp.getBoolean(KEY_DARK, false);
-        int alpha = sp.getInt(KEY_ALPHA, 60);
         String tint = sp.getString(KEY_TINT, "ocean");
+        boolean dark = isDarkGlass(context, tint, sp.getBoolean(KEY_DARK, false));
+        int alpha = sp.getInt(KEY_ALPHA, 60);
         int tone = sp.getInt(KEY_TONE, 50);
         int strength = sp.getInt(KEY_STRENGTH, 75);
         int layout;
@@ -126,7 +141,7 @@ public class WeatherWidget extends AppWidgetProvider {
         if (forecast) bindDays(views, data, fg, dark, density);
         int wPx = Math.max(1, Math.round(Math.max(w, 110) * density));
         int hPx = Math.max(1, Math.round(Math.max(h, 40) * density));
-        views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint, tone, strength));
+        views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint, tone, strength, context));
         Intent open = new Intent(context, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(
@@ -214,6 +229,38 @@ public class WeatherWidget extends AppWidgetProvider {
         return R.drawable.ic_w_cloud;
     }
 
+    static boolean isDarkGlass(Context context, String choice, boolean requestedDark) {
+        if ("black".equals(choice)) return true;
+        if ("white".equals(choice)) return false;
+        if ("adaptive".equals(choice)) {
+            return (context.getResources().getConfiguration().uiMode &
+                Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        }
+        return requestedDark;
+    }
+
+    /** Material You wallpaper-derived system palette on Android 12+.
+     * No wallpaper image access, sensitive permissions or background sampler.
+     * OEMs without a dynamic palette use our established ocean glass fallback.
+     */
+    static int glassTint(Context context, String choice, boolean dark, int tone, int strength) {
+        if (!"adaptive".equals(choice)) return glassTint(choice, dark, tone, strength);
+        int accent = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                int id = context.getResources().getIdentifier("system_accent1_500", "color", "android");
+                if (id != 0) accent = context.getColor(id);
+            } catch (RuntimeException ignored) { /* Samsung/OEM may omit dynamic palette */ }
+        }
+        if (accent == 0) accent = Color.parseColor(dark ? "#244C65" : "#91C6E7");
+        float shade = Math.max(0f, Math.min(100f, tone)) / 100f;
+        int toned = shade < 0.5f
+            ? mixRgb(accent, dark ? 0xFF9FC4D4 : 0xFFE6F3FA, (0.5f - shade) * 0.80f)
+            : mixRgb(accent, dark ? 0xFF0C1B31 : 0xFF294767, (shade - 0.5f) * 0.75f);
+        return mixRgb(dark ? 0xFF65778B : 0xFFD7E2EB, toned,
+            Math.max(0f, Math.min(1f, strength / 100f)));
+    }
+
     /** Colors are separate from opacity: reducing opacity never forces a dark or white wash. */
     static int glassTint(String choice, boolean dark) {
         return glassTint(choice, dark, 50, 75);
@@ -221,6 +268,8 @@ public class WeatherWidget extends AppWidgetProvider {
 
     /** Tone and color strength are separate from opacity. */
     static int glassTint(String choice, boolean dark, int tone, int strength) {
+        if ("white".equals(choice)) return 0xFFF3F7FB;
+        if ("black".equals(choice)) return 0xFF111926;
         int base;
         switch (choice == null ? "" : choice) {
             case "blue":   base = Color.parseColor(dark ? "#1D60C3" : "#75B8FA"); break;
@@ -258,9 +307,9 @@ public class WeatherWidget extends AppWidgetProvider {
      * opaque black or white layer. No timers, bitmap animation or battery cost.
      */
     static Bitmap glass(int w, int h, int alphaPct, boolean dark,
-                        float density, String tintName, int tone, int strength) {
+                        float density, String tintName, int tone, int strength, Context context) {
         int a = Math.round(255f * Math.max(10, Math.min(92, alphaPct)) / 100f);
-        int tint = glassTint(tintName, dark, tone, strength);
+        int tint = glassTint(context, tintName, dark, tone, strength);
         int topRgb = mixRgb(tint, Color.WHITE, dark ? 0.16f : 0.27f);
         int bottomRgb = mixRgb(tint, dark ? Color.BLACK : Color.WHITE, dark ? 0.17f : 0.07f);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
