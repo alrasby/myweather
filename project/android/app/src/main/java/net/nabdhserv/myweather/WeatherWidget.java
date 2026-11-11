@@ -31,6 +31,8 @@ public class WeatherWidget extends AppWidgetProvider {
     static final String KEY_JSON = "payload";
     static final String KEY_ALPHA = "alpha";
     static final String KEY_TINT = "tint";
+    static final String KEY_TONE = "tone";
+    static final String KEY_STRENGTH = "strength";
     static final String KEY_DARK = "dark";
     static final String KEY_CLOCK = "clock";
     static final String KEY_PLACE = "place";
@@ -71,6 +73,8 @@ public class WeatherWidget extends AppWidgetProvider {
         boolean dark = sp.getBoolean(KEY_DARK, false);
         int alpha = sp.getInt(KEY_ALPHA, 60);
         String tint = sp.getString(KEY_TINT, "ocean");
+        int tone = sp.getInt(KEY_TONE, 50);
+        int strength = sp.getInt(KEY_STRENGTH, 75);
         int layout;
         boolean forecast = false;
         boolean details = false;
@@ -122,7 +126,7 @@ public class WeatherWidget extends AppWidgetProvider {
         if (forecast) bindDays(views, data, fg, dark, density);
         int wPx = Math.max(1, Math.round(Math.max(w, 110) * density));
         int hPx = Math.max(1, Math.round(Math.max(h, 40) * density));
-        views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint));
+        views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint, tone, strength));
         Intent open = new Intent(context, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(
@@ -212,12 +216,28 @@ public class WeatherWidget extends AppWidgetProvider {
 
     /** Colors are separate from opacity: reducing opacity never forces a dark or white wash. */
     static int glassTint(String choice, boolean dark) {
+        return glassTint(choice, dark, 50, 75);
+    }
+
+    /** Tone and color strength are separate from opacity. */
+    static int glassTint(String choice, boolean dark, int tone, int strength) {
+        int base;
         switch (choice == null ? "" : choice) {
-            case "teal":   return Color.parseColor(dark ? "#17474B" : "#D0F0E9");
-            case "violet": return Color.parseColor(dark ? "#37345C" : "#E8DFF7");
-            case "rose":   return Color.parseColor(dark ? "#542F4D" : "#F4DFEC");
-            default:       return Color.parseColor(dark ? "#173449" : "#D7E8F5");
+            case "blue":   base = Color.parseColor(dark ? "#1D60C3" : "#75B8FA"); break;
+            case "teal":   base = Color.parseColor(dark ? "#17474B" : "#80DDD1"); break;
+            case "violet": base = Color.parseColor(dark ? "#433C85" : "#B8A9F8"); break;
+            case "rose":   base = Color.parseColor(dark ? "#773E69" : "#F1A6DA"); break;
+            default:       base = Color.parseColor(dark ? "#244C65" : "#91C6E7"); break;
         }
+        float shade = Math.max(0f, Math.min(100f, tone)) / 100f;
+        float saturation = Math.max(0f, Math.min(100f, strength)) / 100f;
+        int pale = Color.parseColor(dark ? "#749CB9" : "#E7F5FC");
+        int deep = Color.parseColor(dark ? "#081629" : "#193D75");
+        int toned = shade < 0.5f
+            ? mixRgb(base, pale, (0.5f - shade) * 0.85f)
+            : mixRgb(base, deep, (shade - 0.5f) * 0.65f);
+        int neutral = Color.parseColor(dark ? "#6F7C92" : "#DCE4EC");
+        return mixRgb(neutral, toned, saturation);
     }
 
     private static int mixRgb(int a, int b, float weight) {
@@ -229,34 +249,53 @@ public class WeatherWidget extends AppWidgetProvider {
         );
     }
 
-    static Bitmap glass(int w, int h, int alphaPct, boolean dark, float density, String tintName) {
-        // Alpha is *actual* alpha, including dark mode (no minimum 188 override).
-        int a = Math.round(255f * Math.max(15, Math.min(95, alphaPct)) / 100f);
-        int tint = glassTint(tintName, dark);
-        int topRgb = mixRgb(tint, Color.WHITE, dark ? 0.13f : 0.10f);
-        int bottomRgb = mixRgb(tint, dark ? Color.BLACK : Color.WHITE, dark ? 0.25f : 0.07f);
+    /**
+     * Siri-inspired luminous glass: translucent color field, soft radial light,
+     * a thin upper-edge glint and a delicate inner border.
+     *
+     * Home-screen widgets cannot blur the wallpaper behind RemoteViews on
+     * every launcher. Draw genuine alpha rather than simulating blur with an
+     * opaque black or white layer. No timers, bitmap animation or battery cost.
+     */
+    static Bitmap glass(int w, int h, int alphaPct, boolean dark,
+                        float density, String tintName, int tone, int strength) {
+        int a = Math.round(255f * Math.max(10, Math.min(92, alphaPct)) / 100f);
+        int tint = glassTint(tintName, dark, tone, strength);
+        int topRgb = mixRgb(tint, Color.WHITE, dark ? 0.16f : 0.27f);
+        int bottomRgb = mixRgb(tint, dark ? Color.BLACK : Color.WHITE, dark ? 0.17f : 0.07f);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bmp);
-        float r = 22f * Math.max(1f, density);
-        RectF box = new RectF(1.5f, 1.5f, w - 1.5f, h - 1.5f);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setShader(new LinearGradient(0, 0, w * 0.18f, h,
+        float r = 25f * Math.max(1f, density);
+        float inset = Math.max(1.25f, density);
+        RectF box = new RectF(inset, inset, w - inset, h - inset);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        paint.setShader(new LinearGradient(0, 0, w * 0.22f, h,
             Color.argb(a, Color.red(topRgb), Color.green(topRgb), Color.blue(topRgb)),
             Color.argb(a, Color.red(bottomRgb), Color.green(bottomRgb), Color.blue(bottomRgb)),
             Shader.TileMode.CLAMP));
         canvas.drawRoundRect(box, r, r, paint);
-        // A subtle highlight follows selected opacity, instead of turning a
-        // transparent widget opaque with a second independent white gradient.
-        int sheen = Math.round(a * (dark ? 0.12f : 0.24f));
-        paint.setShader(new LinearGradient(0, 0, w * 0.4f, h * 0.64f,
-            Color.argb(sheen, 255, 255, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP));
+        // Interior frosted sheen follows requested opacity; does not wash out
+        // the entire rectangle or block the live wallpaper.
+        int glow = Math.min(100, Math.round(a * (dark ? 0.36f : 0.22f)));
+        paint.setShader(new android.graphics.RadialGradient(
+            w * 0.14f, h * 0.03f, Math.max(w * 0.72f, h),
+            new int[]{ Color.argb(glow, 242, 253, 255),
+                Color.argb(Math.round(glow * 0.25f), 188, 229, 255),
+                Color.TRANSPARENT },
+            new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
         canvas.drawRoundRect(box, r, r, paint);
+        // Subtle bright rim and lower shadow give depth without a fixed
+        // background resource underneath the alpha image.
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(Math.max(1f, density));
-        paint.setColor(Color.argb(Math.min(180, Math.round(a * (dark ? 0.45f : 0.64f))),
-            233, 246, 255));
+        paint.setStrokeWidth(Math.max(1.1f, 0.95f * density));
+        paint.setColor(Color.argb(Math.min(190, 36 + Math.round(a * 0.58f)),
+            226, 244, 255));
         canvas.drawRoundRect(box, r, r, paint);
+        paint.setStrokeWidth(Math.max(1f, 0.55f * density));
+        paint.setColor(Color.argb(Math.round(a * 0.23f), 20, 49, 85));
+        canvas.drawRoundRect(new RectF(inset + density, inset + density,
+            w - inset - density, h - inset - density), r - density, r - density, paint);
         return bmp;
     }
 
