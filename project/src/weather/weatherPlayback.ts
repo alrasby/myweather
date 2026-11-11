@@ -24,3 +24,9 @@ export function weatherLoadingPhase(waitingMs: number): 0 | 1 | 2 {
   if (waitingMs < 1800) return 0;
   return waitingMs >= 8000 ? 2 : 1;
 }
+
+/** A complete ECMWF spatial layer has already replaced the hidden rain-grid
+ * canvas. Keep it cleared and avoid a redundant full-screen paint every RAF. */
+export function shouldPaintWeatherFallback(kind: number, modelCover: boolean): boolean {
+  return kind !== 2 || !modelCover;
+}
