@@ -20,6 +20,7 @@ import {
 import { t, weatherKey, type CopyKey } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
 import { lookupPlace } from "@/weather/placeLookup";
+import { pinWeatherAlerts } from "@/weather/pinnedAlerts";
 import { activePlace, useWeather } from "@/weather/store";
 import type { DayPoint, HourPoint, Lang, QuietHours, WeatherBundle } from "@/weather/types";
 
@@ -106,7 +107,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     if (!prefs.alerts || !alerts.length) return;
     setPinnedAlerts((previous) => {
       const present = previous[alertScope] ?? [];
-      const merged = Array.from(new Set([...present, ...alerts])).slice(-10);
+      const merged = pinWeatherAlerts(present, alerts);
       return merged.length === present.length ? previous : { ...previous, [alertScope]: merged };
     });
     // alerts are intentionally represented by their stable joined signature.
