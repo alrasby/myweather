@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame } from "./weatherPlayback.ts";
+import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay } from "./weatherPlayback.ts";
 
 test("rain/snow playback does not outrun ECMWF; wind and temperature retain their cadence", () => {
   assert.equal(secondsPerForecastHour(2), 4);
@@ -41,4 +41,16 @@ test("rain frame sampling uses 20Hz while keeping initial frame and other layers
   assert.equal(shouldEmitRainFrame(150, 100), true);
   assert.equal(shouldEmitRainFrame(180, 150), false);
   assert.equal(shouldEmitRainFrame(200, 150), true);
+});
+
+test("no cyclone markers means the rain particle canvas never needs a continuous repaint", () => {
+  assert.equal(needsRainOverlay(false, 4), false);
+  assert.equal(needsRainOverlay(true, 0), false);
+  assert.equal(needsRainOverlay(true, 2), true);
+});
+test("enabled cyclone markers are throttled without delaying first paint", () => {
+  assert.equal(shouldUpdateRainOverlay(10, 0), true);
+  assert.equal(shouldUpdateRainOverlay(109, 100), false);
+  assert.equal(shouldUpdateRainOverlay(179, 100), false);
+  assert.equal(shouldUpdateRainOverlay(180, 100), true);
 });
