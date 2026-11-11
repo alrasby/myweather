@@ -10,12 +10,15 @@ Repeated Android tests after PR #63 show substantial first-load delays and stall
 
 | Provider | Weather layers | Animation / horizon | Integration | Practical blocker |
 | --- | --- | --- | --- | --- |
+| **The Weather Company Image TileServer** | **Separate explicit forecast PNG products:** `cloudsFcst`, `precip1hrCumulativeFcst`, `snow1hrCumulativeFcst`; inventory of exact run/valid times | Dedicated pre-rendered 256×256 PNG XYZ raster tiles, time series | **Direct fit for existing Leaflet**; no WebView .om decoding, no need to replace wind/temperature map | Vendor API key, license and commercial pricing; standard plan lists **$500/month**; no key in project |
 | **MapTiler Weather** | Cloud cover, precipitation including rain/snow, radar; wind/temp products can remain unused | Vendor advertises interpolated animation up to 60fps; 4–5 day horizon (documentation varies) | Weather JS module is built for MapTiler SDK / MapLibre, **not a drop-in Leaflet PNG URL** | API key, plan/license, and careful coexistence/migration of map engine (without changing existing wind/temp) |
 | **Tomorrow.io weather map tiles** | PNG endpoint with documented fields and requested UTC valid time; confirm cloud/snow field entitlements before adoption | Up to 14 days forecast described for map tiles, varies by field and plan | Standard z/x/y PNG tiles compatible with Leaflet; easiest incremental renderer | Paid entitlements / API key, per-tile request pricing and verification of all three required variables |
 | **OpenWeather Weather Maps 3.0 Basic** | Cloud cover, rain, snow and snow depth, hourly | Rolling ±5 days | Ready-to-display map tiles, possible Leaflet integration | Listed 250 USD / month for Basic at review; unsuitable default cost for free project without approval |
 | **RainViewer free** | Historical radar precipitation only | No long-range forecast/cloud/snow imagery | Standard tiles | Not sufficient for all three forecast layers; 2026 API reductions and personal-use terms |
 
 Vendor references:
+- https://developer.weather.com/docs/openapi/weather-imagery-image-tileserver-3-0
+- https://www.weathercompany.com/weather-data-apis/weather-data-apis-packages-pricing/
 - https://www.maptiler.com/weather/
 - https://docs.maptiler.com/sdk-js/modules/weather/
 - https://docs.tomorrow.io/reference/get-map-tile
@@ -24,7 +27,7 @@ Vendor references:
 
 ## Recommendation and safe rollout
 
-**MapTiler Weather first for an isolated prototype** if a valid MapTiler Cloud plan/key is available and its map engine can coexist with existing MyWeather's untouched wind/temperature. Its advertised smooth interpolation and cloud/precipitation coverage match the visual goal best. Validate independent snow visualization (rain/snow classification) before claiming equivalence.
+**Strongest technical fit for a drop-in Leaflet migration:** The Weather Company's pre-rendered Image TileServer. Its explicit `cloudsFcst`, `precip1hrCumulativeFcst`, and `snow1hrCumulativeFcst` PNG XYZ series match all three required layers without changing the existing map renderer. However, its published standard rate is $500/month and access needs an API key; do not adopt for a free public application without explicit cost approval. Keep credentials off-device behind an authorized, rate-limited tile proxy. **MapTiler Weather is the best lower-cost visual prototype** if a suitable subscription is available, but needs a MapTiler/MapLibre rendering integration and proof of distinct snow imagery.
 
 **Tomorrow.io PNG as the low-risk Leaflet integration alternative**, but only after confirming forecast cloud and snowfall imagery available to the actual API subscription. Do not construct undocumented endpoints, use fake keys or expose private server credentials.
 
