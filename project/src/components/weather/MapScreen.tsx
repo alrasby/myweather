@@ -161,7 +161,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
       lastTileTimeRef.current = info.timeMs;
-      if (readyTileModeRef.current) weatherApiRef.current?.show(readyTileKindRef.current, info.timeMs);
+      if (readyTileModeRef.current && mapRef.current) weatherApiRef.current?.show(readyTileKindRef.current, info.timeMs);
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -253,12 +253,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
         L.tileLayer(imageryUrl, {
-          maxNativeZoom: 4,
-          maxZoom: 9,
+          // Always keep a low-resolution satellite underlay in place when
+          // high-resolution tiles are momentarily missing during a pan or zoom.
+          maxNativeZoom: 5,
+          maxZoom: 16,
           zIndex: 0,
           updateWhenIdle: false,
           updateInterval: 200,
-          keepBuffer: 1,
+          keepBuffer: 2,
         }).addTo(map);
         const imagery = L.tileLayer(imageryUrl, {
           maxZoom: 16,
@@ -279,6 +281,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const readyPane = map.createPane("wx-ready-tiles");
         readyPane.style.zIndex = "470";
         readyPane.style.pointerEvents = "none";
+        // WeatherAPI's precip raster contains near-white pixels, not a
+        // transparent cloud/precip-only mask. Multiply keeps the satellite
+        // backdrop visible instead of painting the world solid white.
+        readyPane.style.mixBlendMode = "multiply";
         weatherApiRef.current = new WeatherApiTiles(L, map, (visible, displayedTimeMs) => {
           setReadyTileLoaded(visible);
           setReadyTileFrameTime(displayedTimeMs);
@@ -1221,7 +1227,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <div className="wx-card pointer-events-auto flex flex-wrap items-center gap-1 px-2 py-1.5 text-xs">
             <button type="button" className={`rounded-full px-2.5 py-1.5 font-semibold ${readyTileMode ? "bg-accent text-accent-ink" : "bg-fg/10 text-fg"}`}
               onClick={() => setReadyTileMode((v) => !v)}>
-              {lang === "ar" ? "خرائط جاهزة مجانية" : "Free ready-made maps"}
+              {readyTileMode
+                ? (lang === "ar" ? "العودة لغيوم MyWeather" : "Return to MyWeather clouds")
+                : (lang === "ar" ? "خرائط WeatherAPI التجريبية" : "Experimental WeatherAPI tiles")}
             </button>
             {readyTileMode ? ([
               ["precip", lang === "ar" ? "مطر" : "Rain"],
@@ -1298,10 +1306,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             </div>
             <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
             {readyTileMode ? (
-              <p className="mt-1 text-[0.65rem] text-muted">
+              <p className="mt-1 text-[0.65rem] leading-snug text-muted">
                 {readyTileLoaded && readyTileFrameTime != null
-                  ? (lang === "ar" ? "WeatherAPI.com · صورة الساعة " : "WeatherAPI.com · displayed ") + formatClock(readyTileFrameTime, tzRef.current, lang)
-                  : (lang === "ar" ? "جاري تحميل البلاطات؛ تظهر الخريطة الأصلية عند التعذر" : "Loading tiles; original map remains as fallback")}
+                  ? (lang === "ar" ? "WeatherAPI · صورة الساعة " : "WeatherAPI · frame ") + formatClock(readyTileFrameTime, tzRef.current, lang)
+                  : (lang === "ar" ? "تحميل الصور؛ الخريطة الأصلية احتياطية" : "Loading images; original map remains available")}
+                {readyTileKind === "precip"
+                  ? (lang === "ar" ? " · هطول وليس غيوماً" : " · precipitation, not clouds")
+                  : null}
               </p>
             ) : (
               <>
