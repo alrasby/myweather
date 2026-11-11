@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay } from "./weatherPlayback.ts";
+import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback } from "./weatherPlayback.ts";
 
 test("rain/snow playback does not outrun ECMWF; wind and temperature retain their cadence", () => {
   assert.equal(secondsPerForecastHour(2), 4);
@@ -53,4 +53,10 @@ test("enabled cyclone markers are throttled without delaying first paint", () =>
   assert.equal(shouldUpdateRainOverlay(109, 100), false);
   assert.equal(shouldUpdateRainOverlay(179, 100), false);
   assert.equal(shouldUpdateRainOverlay(180, 100), true);
+});
+
+test("low-resolution fallback limits GPU redraws while ECMWF decodes", () => {
+  assert.equal(shouldUpdateRainFallback(20, 0), true);
+  assert.equal(shouldUpdateRainFallback(199, 100), false);
+  assert.equal(shouldUpdateRainFallback(200, 100), true);
 });

@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { spatialFrameReadyDuringRefresh, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
+import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
@@ -407,7 +407,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[] }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[] }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -726,7 +726,7 @@ export class ModelField {
       adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.pinnedRun), rainOpts),
     ] as AnyLayer[];
     const frame = {
-      layers: made, token, opacity: -1, ready: false,
+      layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0, previewOpacityKey: "",
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
       tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
@@ -750,6 +750,13 @@ export class ModelField {
       // the visible viewport; do not expose the low-resolution global fallback
       // every time a cloud/rain/snow tile queue enters "loading".
       const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
+      const preview = spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
+      const previewMask = frame.loaded.reduce((mask, complete, index) =>
+        complete && frame.tileCounts[index]! > 0 && !frame.errored.has(index)
+          ? mask | (1 << index) : mask, 0);
+      const previewChanged = frame.previewReady !== preview || frame.previewMask !== previewMask;
+      frame.previewReady = preview;
+      frame.previewMask = previewMask;
       // A completed successful reload clears stale timeout errors, even when
       // the previous frame already remained visible during the refresh.
       if (frame.loaded.every(Boolean) && frame.errored.size === 0 && frame.tileCounts.every((n) => n > 0)) {
@@ -759,8 +766,15 @@ export class ModelField {
         // On a successful viewport refresh the existing frame stays visible;
         // resume prefetch once all queues finish, without hiding its imagery.
         if (ready && frame.loaded.every(Boolean)) this.pump();
+        // First real cloud tiles can paint immediately while rain/snow finish.
+        // Avoid repainting on every individual tileload event.
+        if (previewChanged && step === this.base) this.applyOpacity();
         return;
       }
+      // Cloud preview may already have opacity=1. Force a single repaint
+      // when the final rain/snow layer completes, otherwise the interpolation
+      // early-exit would leave that newly finished layer at opacity=0.
+      if (ready && !frame.ready && frame.opacity > 0.98) frame.opacity = 0.975;
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
@@ -774,8 +788,7 @@ export class ModelField {
         // frame finishes, rather than waiting for another gesture.
         this.pump();
       }
-      if (!ready) {
-        // Partial frames are never exposed: keep the global rain/snow canvas visible.
+      if (!ready && !preview) {
         frame.opacity = 0;
         for (const layer of made) layer.setOpacity?.(0);
       }
@@ -791,7 +804,10 @@ export class ModelField {
         console.warn("MyWeather: incomplete ECMWF spatial frame; retrying", { frame: step, errors: frame.errored.size });
       }
       this.discardFrame(step);
-      if (!this.anyReady()) this.onMiss?.();
+      // Recompute spatialVisible after discarding even a partial cloud
+      // preview. A stale true value suppressed fallback recovery after
+      // a provider timeout while no complete forecast frame existed.
+      this.applyOpacity();
       this.pump();
     };
     // A spatial frame may require dozens of range reads. Continue while real
@@ -873,7 +889,38 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) readySteps.add(step);
     const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
     const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
-    this.holdingPreviousFrame = plan.holding && plan.anchor !== null;
+    // A first completed cloud viewport should not be held hostage by slow
+    // precipitation/snowfall .om decoding. Only source-backed, fully loaded
+    // individual layers are shown; partially loaded image tiles remain hidden.
+    const requested = this.frames.get(this.base);
+    const preview = !cooldown && plan.goals.size === 0 && requested &&
+      !requested.ready && requested.previewReady ? requested : null;
+    this.holdingPreviousFrame = plan.holding && plan.anchor !== null && !preview;
+    for (const [step, frame] of this.frames) {
+      if (frame.ready || frame.opacity <= 0 || (preview === frame && step === this.base)) continue;
+      frame.opacity = 0;
+      frame.previewOpacityKey = "";
+      for (const layer of frame.layers) layer.setOpacity?.(0);
+    }
+    if (preview) {
+      preview.opacity = 1;
+      // Leaflet.setOpacity() traverses tile elements. Do it only when a
+      // particular source finishes or diagnostic mode changes, NOT at 20Hz.
+      const opacityKey = `${this.diagnosticMode}:${preview.previewMask}:${preview.previewReady}`;
+      if (preview.previewOpacityKey !== opacityKey) {
+        preview.previewOpacityKey = opacityKey;
+        preview.layers.forEach((layer, idx) => {
+        // Leaflet keeps its prior cloud images in the DOM while refreshing a
+        // moved viewport. Do not hide that proven image on a new loading event.
+        const complete = preview.tileCounts[idx]! > 0 && !preview.errored.has(idx) &&
+          (preview.loaded[idx] || (idx === 0 && preview.previewReady));
+        const mode = this.diagnosticMode;
+        const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
+          (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
+        layer.setOpacity?.(complete && allowed ? 1 : 0);
+        });
+      }
+    }
     // Layer stacking depends on which forecast frames participate, not on
     // the interpolation weight. Including the weight in this key caused
     // Leaflet bringToFront() (DOM reordering of 3–6 image layers) on every
@@ -911,7 +958,7 @@ export class ModelField {
     const visibleOpacity = Array.from(this.frames.values()).reduce(
       (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
       0,
-    );
+    ) + (preview ? 1 : 0);
     const nextVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
     if (spatialCoverageChanged(this.spatialVisible, nextVisible)) {
       this.spatialVisible = nextVisible;

@@ -43,3 +43,17 @@ export function spatialFrameReadyDuringRefresh(
   if (wasReady && loaded.some((isLoaded) => !isLoaded)) return true;
   return modelTileFrameReady(loaded, errored, deliveredTiles);
 }
+
+/** Show a real ECMWF cloud layer as soon as its complete viewport arrives,
+ * without waiting for separate precipitation/snowfall decoders. Rain and snow
+ * remain hidden until their own queues complete; no invented forecast data. */
+export function spatialCloudPreviewReady(
+  wasVisible: boolean,
+  loaded: readonly boolean[],
+  errored: ReadonlySet<number>,
+  deliveredTiles: readonly number[],
+): boolean {
+  if (loaded.length !== SPATIAL_LAYER_COUNT || deliveredTiles.length !== SPATIAL_LAYER_COUNT ||
+      errored.has(0) || deliveredTiles[0]! <= 0) return false;
+  return loaded[0] === true || (wasVisible && !loaded[0]);
+}

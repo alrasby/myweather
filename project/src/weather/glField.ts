@@ -4,7 +4,7 @@ import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid"
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
-import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay } from "@/weather/weatherPlayback";
+import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -319,6 +319,7 @@ export class FieldEngine {
   private modelCover = false;
   private lastRainEmitAt = 0;
   private lastRainOverlayAt = 0;
+  private lastRainFallbackPaintAt = 0;
   private whirl = 0;
 
   constructor(private host: HTMLElement) {
@@ -394,6 +395,7 @@ export class FieldEngine {
     this.weatherWaitSince = null;
     this.lastRainEmitAt = 0;
     this.lastRainOverlayAt = 0;
+    this.lastRainFallbackPaintAt = 0;
     this.particles = [];
     this.clearParticles();
     this.drawField();
@@ -752,20 +754,22 @@ export class FieldEngine {
       if (step.waiting) this.weatherWaitSince ??= now;
       else this.weatherWaitSince = null;
     }
-    const rainCovered = this.kind === 2 && this.modelCover;
     const hasRainOverlay = needsRainOverlay(this.showCyclones, this.cyclones.length);
     // The hidden fallback frameBox is irrelevant while ECMWF covers the map
     // and no cyclone marker is enabled. Avoid Leaflet coordinate conversion,
     // canvas style checks and re-sizing on every 60fps frame.
-    if (!rainCovered || hasRainOverlay) this.pinView();
-    // ECMWF already renders a complete cloud/rain/snow image in Leaflet.
-    // Clearing the hidden fallback WebGL/Canvas surface at 60 FPS competes
-    // with OM worker tile decoding on Android. setModelCover(true) clears it
-    // once; on the return to fallback, setModelCover(false) redraws it.
-    if (shouldPaintWeatherFallback(this.kind, this.modelCover)) this.drawField();
-    // In rain mode the particle canvas is needed only for cyclone markers;
-    // unlike the wind mode, there are no flowing particles to animate.
-    if (this.kind !== 2 || (hasRainOverlay && shouldUpdateRainOverlay(now, this.lastRainOverlayAt))) {
+    const cycloneDue = hasRainOverlay && shouldUpdateRainOverlay(now, this.lastRainOverlayAt);
+    // Weather-mode fallback draws at 10Hz rather than burning CPU/GPU at 60Hz
+    // while workers decode three ECMWF .om raster layers. Wind/temperature
+    // retain their original per-frame paint behaviour.
+    const fallbackDue = shouldPaintWeatherFallback(this.kind, this.modelCover) &&
+      (this.kind !== 2 || shouldUpdateRainFallback(now, this.lastRainFallbackPaintAt));
+    if (this.kind !== 2 || cycloneDue) this.pinView();
+    if (fallbackDue) {
+      if (this.kind === 2) this.lastRainFallbackPaintAt = now;
+      this.drawField();
+    }
+    if (this.kind !== 2 || cycloneDue) {
       if (this.kind === 2) this.lastRainOverlayAt = now;
       this.drawParticles(dt);
     }

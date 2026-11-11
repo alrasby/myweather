@@ -517,6 +517,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     let fineWorldPending = false;
     let fineWorldLoaded = false;
     let quickWorldReady = false;
+    let quickWorldPending = false;
     let detailAllowed = false;
     let fallbackTimer = 0;
     const hours = prefs.mapHours === 72 ? 48 : prefs.mapHours;
@@ -677,6 +678,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const enableDetailedFallback = () => {
       if (dead || saver || modelRef.current?.isSpatialVisible()) return;
       if (!quickWorldReady) {
+        // The generic global grid is already available. Do not start the
+        // second worldwide rain-grid request concurrently with ECMWF cloud
+        // decoding; only fetch it after a sustained spatial-model outage.
+        if (!quickWorldPending) {
+          quickWorldPending = true;
+          void loadWorld().finally(() => { quickWorldPending = false; });
+        }
         fallbackTimer = window.setTimeout(enableDetailedFallback, 1000);
         return;
       }
@@ -711,7 +719,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     rainFallbackRefreshRef.current = scheduleDetailedFallback;
     rainFallbackSuspendRef.current = suspendDetailedFallback;
 
-    void loadWorld();
+    // Initially prioritize three actual ECMWF spatial layers. The
+    // existing generic grid covers the fallback until a sustained outage.
     scheduleDetailedFallback();
     const consider = () => {
       if (dead) return;
