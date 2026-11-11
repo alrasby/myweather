@@ -9,7 +9,11 @@ export class SpatialRangeCache {
   private readonly maxBytes: number;
   private readonly itemMaxBytes: number;
   private readonly ttlMs: number;
-  constructor(maxBytes = 8 * 1024 * 1024, itemMaxBytes = 256 * 1024, ttlMs = 90_000) {
+  // Keep a modest, bounded cache across multi-hour playback. Previously the
+  // 90s TTL expired during a single forecast tour and 256 KiB chunks were
+  // rejected, forcing repeat native range reads of the same OM data.
+  // Five minutes is short compared with ECMWF model-run updates.
+  constructor(maxBytes = 12 * 1024 * 1024, itemMaxBytes = 512 * 1024, ttlMs = 300_000) {
     this.maxBytes = maxBytes;
     this.itemMaxBytes = itemMaxBytes;
     this.ttlMs = ttlMs;
