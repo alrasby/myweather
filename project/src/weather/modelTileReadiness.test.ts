@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { modelTileFrameReady, modelVariablesReady, spatialFrameReadyDuringRefresh, SPATIAL_LAYER_COUNT } from "./modelTileReadiness.ts";
+import { modelTileFrameReady, modelVariablesReady, spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, SPATIAL_LAYER_COUNT } from "./modelTileReadiness.ts";
 
 test("cloud, rain and snowfall must all load successfully", () => {
   assert.equal(SPATIAL_LAYER_COUNT, 3);
@@ -55,4 +55,13 @@ test("completed errored refresh is rejected and dry tiles remain valid", () => {
   const counts = [4, 4, 4];
   assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], new Set([0]), counts), false);
   assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], new Set(), counts), true);
+});
+
+test("ECMWF cloud preview starts after real cloud tiles arrive even while precipitation and snow are decoding", () => {
+  assert.equal(spatialCloudPreviewReady(false, [false, false, false], new Set(), [0, 0, 0]), false);
+  assert.equal(spatialCloudPreviewReady(false, [true, false, false], new Set(), [0, 0, 0]), false);
+  assert.equal(spatialCloudPreviewReady(false, [true, false, false], new Set(), [3, 0, 0]), true);
+  assert.equal(spatialCloudPreviewReady(true, [false, false, false], new Set(), [3, 0, 0]), true);
+  assert.equal(spatialCloudPreviewReady(true, [false, false, false], new Set([0]), [3, 0, 0]), false);
+  assert.equal(spatialCloudPreviewReady(false, [false, true, true], new Set(), [0, 2, 3]), false);
 });
