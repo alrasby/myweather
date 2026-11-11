@@ -732,7 +732,11 @@ export class FieldEngine {
       else this.weatherWaitSince = null;
     }
     this.pinView();
-    this.drawField();
+    // ECMWF already renders a complete cloud/rain/snow image in Leaflet.
+    // Clearing the hidden fallback WebGL/Canvas surface at 60 FPS competes
+    // with OM worker tile decoding on Android. setModelCover(true) clears it
+    // once; on the return to fallback, setModelCover(false) redraws it.
+    if (!(this.kind === 2 && this.modelCover)) this.drawField();
     this.drawParticles(dt);
     this.emit();
     this.raf = requestAnimationFrame(this.frame);
