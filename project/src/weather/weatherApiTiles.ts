@@ -80,7 +80,7 @@ export class WeatherApiTiles {
       maxZoom: 16,
       keepBuffer: 1,
       updateWhenIdle: true,
-      crossOrigin: true,
+      // Display-only image tiles: do not require cross-origin pixel-read permission.
       className: "wx-ready-weather-tile",
     });
     tile.on("tileerror", () => { failed = true; });
