@@ -4,7 +4,7 @@ import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid"
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
-import { nextPlaybackHour, secondsPerForecastHour } from "@/weather/weatherPlayback";
+import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -736,7 +736,7 @@ export class FieldEngine {
     // Clearing the hidden fallback WebGL/Canvas surface at 60 FPS competes
     // with OM worker tile decoding on Android. setModelCover(true) clears it
     // once; on the return to fallback, setModelCover(false) redraws it.
-    if (!(this.kind === 2 && this.modelCover)) this.drawField();
+    if (shouldPaintWeatherFallback(this.kind, this.modelCover)) this.drawField();
     this.drawParticles(dt);
     this.emit();
     this.raf = requestAnimationFrame(this.frame);
