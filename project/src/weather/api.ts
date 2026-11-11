@@ -219,7 +219,7 @@ async function fetchAir(place: Place, signal?: AbortSignal): Promise<WeatherBund
   };
 }
 
-async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNullable<WeatherBundle["marine"]>> {
+async function fetchMarine(place: Place, signal?: AbortSignal): Promise<WeatherBundle["marine"]> {
   const url = new URL("https://marine-api.open-meteo.com/v1/marine");
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
@@ -229,16 +229,18 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNulla
   // Do not accidentally select inland cells for coastal towns.
   url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
-  if (!res.ok) return { coastal: false, wave: null };
+  // Network/API failures are not evidence that a formerly coastal town is inland.
+  if (!res.ok) return null;
   const json = (await res.json()) as { latitude?: number; longitude?: number; current?: { wave_height?: number } };
   const wave = json.current?.wave_height;
   // A successful sea-grid response can identify the coast even when wave height
   // is missing. Bound the distance to avoid marking far-inland towns as coastal.
   const gridLat = json.latitude;
   const gridLon = json.longitude;
+  if (!(typeof gridLat === "number" && Number.isFinite(gridLat) &&
+        typeof gridLon === "number" && Number.isFinite(gridLon))) return null;
   let nearSea = false;
-  if (typeof gridLat === "number" && Number.isFinite(gridLat) &&
-      typeof gridLon === "number" && Number.isFinite(gridLon)) {
+  {
     const dLat = (gridLat - place.lat) * Math.PI / 180;
     const dLon = (gridLon - place.lon) * Math.PI / 180;
     const lat1 = place.lat * Math.PI / 180;
@@ -287,7 +289,7 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
   }
   const [air, marine] = await Promise.all([
     fetchAir(place, signal).catch(() => null),
-    fetchMarine(place, signal).catch(() => ({ coastal: false, wave: null })),
+    fetchMarine(place, signal).catch(() => null),
   ]);
   return buildBundle(place, json, air, marine);
 }
@@ -558,6 +560,11 @@ export function loadWeather(
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
       try {
         const bundle = await fetchForecast(place, opts?.signal);
+        // Preserve known coastal eligibility if the secondary forecast provider
+        // does not include marine data or the separate marine API is offline.
+        if (bundle.marine == null && cached?.bundle.marine?.coastal) {
+          bundle.marine = { coastal: true, wave: null };
+        }
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
       } catch (err) {
