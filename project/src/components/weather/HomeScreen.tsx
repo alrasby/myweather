@@ -29,15 +29,18 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const peek = useWeather((s) => s.peek);
   const prefs = useWeather((s) => s.prefs);
   const bundle = useWeather((s) => s.bundle);
+  const here = useWeather((s) => s.here);
   const loading = useWeather((s) => s.loading);
   const error = useWeather((s) => s.error);
   const estimated = useWeather((s) => s.estimated);
   const stale = useWeather((s) => s.stale);
   const loadActive = useWeather((s) => s.loadActive);
   const setHere = useWeather((s) => s.setHere);
+  const [compassLocating, setCompassLocating] = useState(false);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
-  const reading = useDeviceCompass(place.lat, place.lon);
+  const compassPlace = here ?? place;
+  const reading = useDeviceCompass(compassPlace.lat, compassPlace.lon);
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
   const [pulling, setPulling] = useState(0);
@@ -55,6 +58,14 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     }
   });
   const now = Date.now();
+
+  const locateCompass = () => {
+    if (compassLocating) return;
+    setCompassLocating(true);
+    void readBestPosition((pos) => {
+      setHere(placeFromCoords(pos.lat, pos.lon, `${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}`, "", ""));
+    }).finally(() => setCompassLocating(false));
+  };
 
   const refresh = () => {
     void loadActive(true);
@@ -249,7 +260,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </section>
 
           <div className="mt-3">
-            <QiblaCard lat={place.lat} lon={place.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} />
+            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} deviceLocation={here != null} locating={compassLocating} onLocate={locateCompass} />
           </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
