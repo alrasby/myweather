@@ -2,6 +2,7 @@ import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
 import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
 import { preserveCoastalMarine } from "@/weather/coastalMarine";
+import { parseMarineResponse } from "@/weather/marineTides";
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
@@ -238,13 +239,20 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNulla
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
   url.searchParams.set("current", "wave_height");
-  url.searchParams.set("forecast_days", "1");
-  url.searchParams.set("timezone", "auto");
+  url.searchParams.set("hourly", "sea_level_height_msl");
+  url.searchParams.set("forecast_days", "2");
+  url.searchParams.set("past_days", "1");
+  url.searchParams.set("timeformat", "unixtime");
+  url.searchParams.set("timezone", "UTC");
+  url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
   if (!res.ok) return { coastal: false, wave: null };
-  const json = (await res.json()) as { current?: { wave_height?: number } };
-  const wave = json.current?.wave_height;
-  return typeof wave === "number" && Number.isFinite(wave) ? { coastal: true, wave } : { coastal: false, wave: null };
+  const json = (await res.json()) as {
+    latitude?: number; longitude?: number;
+    current?: { wave_height?: number | null };
+    hourly?: { time?: number[]; sea_level_height_msl?: (number | null)[] };
+  };
+  return parseMarineResponse(json, place);
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
