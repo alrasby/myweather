@@ -239,11 +239,27 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNulla
   url.searchParams.set("current", "wave_height");
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("timezone", "auto");
+  // Do not accidentally select inland cells for coastal towns.
+  url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
   if (!res.ok) return { coastal: false, wave: null };
-  const json = (await res.json()) as { current?: { wave_height?: number } };
+  const json = (await res.json()) as { latitude?: number; longitude?: number; current?: { wave_height?: number } };
   const wave = json.current?.wave_height;
-  return typeof wave === "number" && Number.isFinite(wave) ? { coastal: true, wave } : { coastal: false, wave: null };
+  // A successful sea-grid response can identify the coast even when wave height
+  // is missing. Bound the distance to avoid marking far-inland towns as coastal.
+  const gridLat = json.latitude;
+  const gridLon = json.longitude;
+  let nearSea = false;
+  if (typeof gridLat === "number" && Number.isFinite(gridLat) &&
+      typeof gridLon === "number" && Number.isFinite(gridLon)) {
+    const dLat = (gridLat - place.lat) * Math.PI / 180;
+    const dLon = (gridLon - place.lon) * Math.PI / 180;
+    const lat1 = place.lat * Math.PI / 180;
+    const lat2 = gridLat * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    nearSea = 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(a))) <= 30;
+  }
+  return { coastal: nearSea, wave: nearSea && typeof wave === "number" && Number.isFinite(wave) ? wave : null };
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
