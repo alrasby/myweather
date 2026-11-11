@@ -897,8 +897,10 @@ export class ModelField {
     if (preview) {
       preview.opacity = 1;
       preview.layers.forEach((layer, idx) => {
-        const complete = preview.loaded[idx] && preview.tileCounts[idx]! > 0 &&
-          !preview.errored.has(idx);
+        // Leaflet keeps its prior cloud images in the DOM while refreshing a
+        // moved viewport. Do not hide that proven image on a new loading event.
+        const complete = preview.tileCounts[idx]! > 0 && !preview.errored.has(idx) &&
+          (preview.loaded[idx] || (idx === 0 && preview.previewReady));
         const mode = this.diagnosticMode;
         const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
           (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
