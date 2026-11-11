@@ -60,8 +60,6 @@ export function DetailCards({
         />
       </article>
 
-      <CompassCard lang={lang} heading={heading} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} />
-
       <article className="wx-card px-3 py-2" dir="ltr">
         <SunArc progress={sunProgress(now, rise, set)} />
         <div className="grid grid-cols-2 px-5 text-center text-fg">
@@ -183,95 +181,63 @@ function pressureHoursAgo(bundle: WeatherBundle, now: number, hours: number): nu
   return best;
 }
 
-function CompassCard({
-  lang,
-  wind,
-  windFrom,
-  windUnit,
-  heading,
+/** One sensor-backed compass: red points north, turquoise points to the Kaaba. */
+export function QiblaCard({
+  lat, lon, heading, lang, wind, windFrom, windUnit,
 }: {
-  lang: Lang;
+  lat: number;
+  lon: number;
   heading: number | null;
+  lang: Lang;
   wind: number;
   windFrom: number;
   windUnit: WindUnit;
 }) {
-  return (
-    <article className="wx-card flex items-center gap-3 px-4 py-3.5">
-      <Compass heading={heading} />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-fg">{t(lang, "compass")}</p>
-        <p className="fig mt-0.5 text-fg">
-          {heading == null ? "—" : `${compassFrom(heading, lang)} ${formatNumber(heading, lang, 0)}°`}
-        </p>
-        <p className="mt-0.5 text-sm text-fg">
-          {t(lang, "wind")} {formatWind(wind, windUnit, lang)}
-          <span className="font-bold text-accent"> · {compassFrom(windFrom, lang)}</span>
-        </p>
-      </div>
-    </article>
-  );
-}
-
-export function QiblaCard({ lat, lon, heading, lang }: { lat: number; lon: number; heading: number | null; lang: Lang }) {
   const bearing = qiblaBearing(lat, lon);
-  const relative = bearing == null || heading == null ? null : relativeQiblaDirection(bearing, heading);
+  const northOnScreen = heading == null ? 0 : -heading;
+  const qiblaOnScreen = bearing == null ? null : (heading == null ? bearing : relativeQiblaDirection(bearing, heading));
   const ar = lang === "ar";
   return (
     <article className="wx-card flex items-center gap-3 px-4 py-3.5">
-      <svg className="size-16 shrink-0 text-fg" viewBox="0 0 96 96" role="img" aria-label={ar ? "اتجاه القبلة" : "Qibla direction"}>
-        <circle cx="48" cy="48" r="43" fill="none" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.5" />
-        <text x="48" y="16" fontSize="9" fill="currentColor" textAnchor="middle">N</text>
-        {bearing != null ? (
-          <g transform={`rotate(${relative ?? bearing} 48 48)`}>
-            <path d="M48 20 L58 54 L48 48 L38 54 Z" fill="var(--color-accent)" />
-            <path d="M48 77 L53 50 L48 55 L43 50 Z" fill="currentColor" opacity="0.3" />
+      <svg className="size-[5.5rem] shrink-0 text-fg" viewBox="0 0 112 112" role="img" aria-label={ar ? "بوصلة الشمال والقبلة" : "North and Qibla compass"}>
+        <circle cx="56" cy="56" r="50" fill="none" stroke="currentColor" strokeOpacity="0.30" strokeWidth="1.5" />
+        {Array.from({ length: 24 }, (_, i) => (
+          <line key={i} x1="56" y1="7" x2="56" y2={i % 3 === 0 ? 16 : 12}
+            stroke="currentColor" strokeOpacity={i % 3 === 0 ? 0.65 : 0.3}
+            transform={`rotate(${i * 15} 56 56)`} />
+        ))}
+        <g transform={`rotate(${northOnScreen} 56 56)`}>
+          <path d="M56 13 L62 49 L56 43 L50 49 Z" fill="var(--color-danger)" />
+          <text x="56" y="30" textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--color-danger)">N</text>
+        </g>
+        {qiblaOnScreen != null ? (
+          <g transform={`rotate(${qiblaOnScreen} 56 56)`}>
+            <path d="M56 6 L67 54 L56 47 L45 54 Z" fill="var(--color-accent)" />
+            <text x="56" y="69" fontSize="9" fontWeight="700" textAnchor="middle" fill="var(--color-accent)">Q</text>
           </g>
         ) : null}
-        <circle cx="48" cy="48" r="3" fill="currentColor" />
+        <circle cx="56" cy="56" r="3.4" fill="currentColor" />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-fg">{ar ? "اتجاه القبلة" : "Qibla direction"}</p>
-        <p className="fig mt-0.5 text-fg" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</p>
-        <p className="mt-0.5 text-xs text-muted">
-          {relative == null
-            ? (ar ? "زاوية من الشمال الحقيقي؛ البوصلة الحية غير متاحة" : "Bearing from true north; live compass unavailable")
-            : (ar ? "اتجاه تقريبي حسب مستشعر الهاتف؛ عاير البوصلة" : "Approximate phone heading; calibrate compass")}
+        <p className="text-sm font-semibold text-fg">{ar ? "بوصلة الشمال والقبلة" : "North & Qibla compass"}</p>
+        <p className="fig mt-1 text-fg">
+          <span className="text-[var(--color-danger)]">{ar ? "الشمال" : "North"}</span>
+          <span className="ms-1" dir="ltr">{heading == null ? "—" : `${formatNumber(heading, lang, 0)}°`}</span>
+          <span className="mx-1.5 text-muted">·</span>
+          <span className="text-accent">{ar ? "القبلة" : "Qibla"}</span>
+          <span className="ms-1" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</span>
+        </p>
+        <p className="mt-1 text-sm text-fg">
+          {t(lang, "wind")} {formatWind(wind, windUnit, lang)}
+          <span className="font-bold text-accent"> · {compassFrom(windFrom, lang)}</span>
+        </p>
+        <p className="mt-1 text-xs text-muted">
+          {heading == null
+            ? (ar ? "الأسهم حسب الشمال الجغرافي؛ مستشعر الاتجاه غير متاح" : "Geographic orientation; heading sensor unavailable")
+            : (ar ? "عاير بوصلة الهاتف؛ قد يؤثر الانحراف المغناطيسي" : "Calibrate phone; magnetic declination may affect direction")}
         </p>
       </div>
     </article>
-  );
-}
-
-function Compass({ heading }: { heading: number | null }) {
-  const rose = heading == null ? 0 : -heading;
-  const ticks = Array.from({ length: 72 }, (_, i) => i * 5);
-  return (
-    <svg viewBox="0 0 96 96" className="size-16 shrink-0 text-fg" aria-hidden="true">
-      <circle cx="48" cy="48" r="44" fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.4" />
-      <g transform={`rotate(${rose} 48 48)`}>
-        {ticks.map((a) => (
-          <line
-            key={a}
-            x1="48"
-            y1={a % 90 === 0 ? 8 : a % 30 === 0 ? 9 : 11}
-            x2="48"
-            y2={a % 30 === 0 ? 15 : 13}
-            stroke="currentColor"
-            strokeOpacity={a % 90 === 0 ? 0.9 : 0.45}
-            strokeWidth={a % 90 === 0 ? 1.6 : 1}
-            transform={`rotate(${a} 48 48)`}
-          />
-        ))}
-        <text x="48" y="22" textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--color-danger)">N</text>
-        <text x="78" y="51" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">E</text>
-        <text x="48" y="84" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">S</text>
-        <text x="18" y="51" textAnchor="middle" fontSize="9" fontWeight="600" fill="currentColor">W</text>
-      </g>
-      <polygon points="48,13 53,46 48,42 43,46" fill="var(--color-danger)" />
-      <polygon points="48,78 44,50 48,54 52,50" fill="currentColor" opacity="0.28" />
-      <circle cx="48" cy="48" r="3.2" fill="#e6a322" stroke="#fff" strokeWidth="0.6" />
-    </svg>
   );
 }
 
