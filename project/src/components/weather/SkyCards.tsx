@@ -2,6 +2,7 @@ import { Droplets, Eye, Gauge, Leaf, SunMedium, Sunrise, Sunset } from "lucide-r
 import type { ReactNode } from "react";
 import { MoonDisc } from "@/components/weather/SkyBackdrop";
 import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress, tideForecast } from "@/weather/astro";
+import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import {
   formatHour,
   formatHour24,
@@ -40,7 +41,8 @@ export function DetailCards({
   const lunar = moonRiseSet(place.lat, place.lon, now);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
-  const coastal = bundle.marine?.coastal === true && bundle.marine.wave != null;
+  const coastal = bundle.marine?.coastal === true;
+  const heading = useDeviceHeading();
   const windUnit = useWeather((s) => s.prefs.wind);
   const pressureUnit = useWeather((s) => s.prefs.pressure);
 
@@ -58,7 +60,8 @@ export function DetailCards({
         />
       </article>
 
-      <CompassCard lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} />
+      <CompassCard lang={lang} heading={heading} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} />
+      <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} />
 
       <article className="wx-card px-3 py-2" dir="ltr">
         <SunArc progress={sunProgress(now, rise, set)} />
@@ -186,13 +189,14 @@ function CompassCard({
   wind,
   windFrom,
   windUnit,
+  heading,
 }: {
   lang: Lang;
+  heading: number | null;
   wind: number;
   windFrom: number;
   windUnit: WindUnit;
 }) {
-  const heading = useDeviceHeading();
   return (
     <article className="wx-card flex items-center gap-3 px-4 py-3.5">
       <Compass heading={heading} />
@@ -204,6 +208,36 @@ function CompassCard({
         <p className="mt-0.5 text-sm text-fg">
           {t(lang, "wind")} {formatWind(wind, windUnit, lang)}
           <span className="font-bold text-accent"> · {compassFrom(windFrom, lang)}</span>
+        </p>
+      </div>
+    </article>
+  );
+}
+
+function QiblaCard({ lat, lon, heading, lang }: { lat: number; lon: number; heading: number | null; lang: Lang }) {
+  const bearing = qiblaBearing(lat, lon);
+  const relative = bearing == null || heading == null ? null : relativeQiblaDirection(bearing, heading);
+  const ar = lang === "ar";
+  return (
+    <article className="wx-card flex items-center gap-3 px-4 py-3.5">
+      <svg className="size-16 shrink-0 text-fg" viewBox="0 0 96 96" role="img" aria-label={ar ? "اتجاه القبلة" : "Qibla direction"}>
+        <circle cx="48" cy="48" r="43" fill="none" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.5" />
+        <text x="48" y="16" fontSize="9" fill="currentColor" textAnchor="middle">N</text>
+        {bearing != null ? (
+          <g transform={`rotate(${relative ?? bearing} 48 48)`}>
+            <path d="M48 20 L58 54 L48 48 L38 54 Z" fill="var(--color-accent)" />
+            <path d="M48 77 L53 50 L48 55 L43 50 Z" fill="currentColor" opacity="0.3" />
+          </g>
+        ) : null}
+        <circle cx="48" cy="48" r="3" fill="currentColor" />
+      </svg>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-fg">{ar ? "اتجاه القبلة" : "Qibla direction"}</p>
+        <p className="fig mt-0.5 text-fg" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</p>
+        <p className="mt-0.5 text-xs text-muted">
+          {relative == null
+            ? (ar ? "زاوية من الشمال الحقيقي؛ البوصلة الحية غير متاحة" : "Bearing from true north; live compass unavailable")
+            : (ar ? "اتجاه تقريبي حسب مستشعر الهاتف؛ عاير البوصلة" : "Approximate phone heading; calibrate compass")}
         </p>
       </div>
     </article>
@@ -322,7 +356,7 @@ function TideCard({
   now: number;
 }) {
   const tide = tideForecast(place.lat, place.lon, now);
-  const wave = bundle.marine?.wave ?? 0;
+  const wave = bundle.marine?.wave;
   const pts = tide.points;
   const levels = pts.map((p) => p.level);
   const min = Math.min(...levels, 0);
@@ -346,7 +380,7 @@ function TideCard({
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
         <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? formatSignedMeters(tide.nextLow.level, lang) : "—"} />
-        <TideStat label={t(lang, "wave")} time={formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
+        <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
       </div>
       <div dir="ltr">
         <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={t(lang, "tide")}>
