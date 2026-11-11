@@ -13,11 +13,15 @@ export function planSpatialRequests(
   blocked: ReadonlySet<number>,
   currentViewportRefreshing = false,
   visibleRefreshAgeMs = 0,
+  playbackActive = false,
 ): { cancel: number[]; start: number | null } {
   // Keep two upcoming hours prepared without decoding more than one
   // incomplete frame at a time. The second lookahead becomes eligible only
   // after both the requested and next forecast are fully available.
-  const lookahead = ready.has(requested) && ready.has(requested + 1) ? requested + 2 : -1;
+  // Second-hour lookahead is worthwhile only during active animation:
+  // don't consume network and battery decoding unused hours on a still map.
+  const lookahead = playbackActive && ready.has(requested) && ready.has(requested + 1)
+    ? requested + 2 : -1;
   const candidates = [requested, requested + 1, lookahead].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
@@ -27,7 +31,9 @@ export function planSpatialRequests(
   // interval; after the deadline allow it even if map movement never stops.
   // A missing requested frame is always more important than prefetch.
   const prefetch = requested + 1;
-  const deferred = currentViewportRefreshing && ready.has(requested) &&
+  // During playback the next time step matters more than a background
+  // pan refresh; do not stall prefetch for an extra 2.5 seconds.
+  const deferred = !playbackActive && currentViewportRefreshing && ready.has(requested) &&
     visibleRefreshAgeMs < SPATIAL_PREFETCH_GRACE_MS &&
     loading.size === 0;
   const desired = deferred ? null : candidates[0] ?? null;
