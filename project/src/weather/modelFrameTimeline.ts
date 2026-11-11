@@ -38,11 +38,9 @@ export function selectSpatialFramePlan(
   // Keep the previous complete frame explicitly marked as held instead.
   // While the requested frame loads, hold the last complete frame, but
   // prevent the playback clock from advancing beyond that ready hour.
-  const held = lastDisplayed != null && ready.has(lastDisplayed)
+  const held = lastDisplayed != null && lastDisplayed <= requested && ready.has(lastDisplayed)
     ? lastDisplayed
-    : [...ready].sort((a, b) =>
-      Math.abs(a - requested) - Math.abs(b - requested) || a - b
-    )[0];
+    : [...ready].filter((step) => step <= requested).sort((a, b) => b - a)[0];
   if (held !== undefined) {
     goals.set(held, 1);
     return { goals, anchor: held, holding: true };
