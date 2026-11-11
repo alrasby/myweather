@@ -575,7 +575,10 @@ export function loadWeather(
           rememberBundle(place.id, bundle);
           return { bundle, stale: false, estimated: false };
         } catch (err) {
-          if (aborted(err, opts?.signal)) throw err;
+          if (aborted(err, opts?.signal)) {
+            marineBackfillAttempted.delete(place.id);
+            throw err;
+          }
         }
       }
       return { bundle: cached.bundle, stale: false, estimated: false };
