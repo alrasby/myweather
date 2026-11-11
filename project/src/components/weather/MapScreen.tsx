@@ -522,6 +522,16 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
 
     const pullView = () => {
       if (saver || dead) return;
+      // A complete ECMWF model already supplies high-resolution on-screen
+      // rain/snow/cloud imagery. Avoid competing Open-Meteo regional requests
+      // whenever the user pans the map while that imagery is visible.
+      if (modelRef.current?.isSpatialVisible()) {
+        viewGen += 1;
+        viewAc?.abort();
+        viewAc = null;
+        pendingView = null;
+        return;
+      }
       const size = map.getSize();
       const nw = map.containerPointToLatLng([0, 0]);
       const se = map.containerPointToLatLng([size.x, size.y]);
