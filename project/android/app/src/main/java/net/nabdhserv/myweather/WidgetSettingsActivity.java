@@ -15,6 +15,7 @@ import android.os.SystemClock;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.activity.OnBackPressedCallback;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -149,6 +150,19 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         showAlpha();
         paintChips();
         buildCities();
+        // Android gesture navigation bypasses the deprecated onBackPressed().
+        // Keep launcher-widget configuration result semantics identical.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (configuring) {
+                    Intent data = new Intent();
+                    data.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+                    setResult(RESULT_CANCELED, data);
+                }
+                finish();
+            }
+        });
     }
 
     private void showAlpha() {
@@ -310,13 +324,4 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         finish();
     }
 
-    @Override
-    public void onBackPressed() {
-        if (configuring) {
-            Intent data = new Intent();
-            data.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
-            setResult(RESULT_CANCELED, data);
-        }
-        super.onBackPressed();
-    }
 }
