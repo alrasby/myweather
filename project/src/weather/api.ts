@@ -18,6 +18,9 @@ export type CacheFile = {
 };
 
 const inflight = new Map<string, Promise<{ bundle: WeatherBundle; stale: boolean; estimated: boolean }>>();
+// Existing installs can retain a MET.no bundle with marine:null until the
+// forecast TTL expires. Backfill those records once per city per session.
+const marineBackfillAttempted = new Set<string>();
 
 function emptyCache(): CacheFile {
   return { places: [], activeId: "", entries: {} };
@@ -560,7 +563,23 @@ export function loadWeather(
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
     const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS;
-    if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
+    if (cached && fresh && !opts?.force) {
+      const marine = cached.bundle.marine;
+      if ((!marine?.coastal || !marine.tides?.length) &&
+          !marineBackfillAttempted.has(place.id)) {
+        marineBackfillAttempted.add(place.id);
+        try {
+          const updated = await fetchMarine(place, opts?.signal);
+          const restored = preserveCoastalMarine(updated, marine);
+          const bundle = { ...cached.bundle, marine: restored };
+          rememberBundle(place.id, bundle);
+          return { bundle, stale: false, estimated: false };
+        } catch (err) {
+          if (aborted(err, opts?.signal)) throw err;
+        }
+      }
+      return { bundle: cached.bundle, stale: false, estimated: false };
+    }
     let last: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
