@@ -32,7 +32,7 @@ Npm's resolver reported **0 findings in both the complete and production-only au
 
 ## Better Auth 1.7 client API migration
 
-The official 1.7 upgrade removed `genericOAuthClient()` and `authClient.signIn.oauth2({ providerId })`. Updated `src/lib/auth/client.ts` to use `authClient.signIn.social({ provider: providerId })` and the standard client without the removed plugin. New local generic provider callback path is `/api/auth/callback/:providerId` (formerly `/api/auth/oauth2/callback/:providerId`). If auth is enabled against the external broker, **the broker's registered redirect URLs must be verified/updated** before rollout; this requires access to its OAuth registration. The Android weather application ships with auth disabled by default. Unit/type/API smoke tests cannot perform a real OAuth redirect.
+The official 1.7 upgrade removed `genericOAuthClient()` and `authClient.signIn.oauth2({ providerId })`. Updated `src/lib/auth/client.ts` to use `authClient.signIn.social({ provider: providerId })` and the standard client without the removed plugin, and `src/lib/auth/popup.server.ts` to use `auth.api.signInSocial({ body: { provider: providerId } })`. New local generic provider callback path is `/api/auth/callback/:providerId` (formerly `/api/auth/oauth2/callback/:providerId`). If auth is enabled against the external broker, **the broker's registered redirect URLs must be verified/updated** before rollout; this requires access to its OAuth registration. The Android weather application ships with auth disabled by default. Unit/type/API smoke tests cannot perform a real OAuth redirect.
 
 ## Auth migration caveat
 
