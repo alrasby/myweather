@@ -6,12 +6,11 @@ import { betterAuth } from "better-auth";
 import { bearer, genericOAuth } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { createAuthClient } from "better-auth/react";
-import { genericOAuthClient } from "better-auth/client/plugins";
 import parser from "@typescript-eslint/parser";
 
 for (const [name, exported] of Object.entries({
   betterAuth, bearer, genericOAuth, tanstackStartCookies,
-  createAuthClient, genericOAuthClient,
+  createAuthClient,
 })) {
   assert.equal(typeof exported, "function", name + " export changed across security upgrade");
 }
@@ -30,4 +29,6 @@ const installedMinimatch = estreeRequire("minimatch");
 assert.equal(typeof installedMinimatch.minimatch, "function");
 assert.equal(installedMinimatch.minimatch("src/weather/api.ts", "src/**/*.ts"), true);
 assert.equal(installedMinimatch.minimatch("src/weather/api.ts", "src/**/*.jsx"), false);
-console.log("SECURITY_COMPAT_OK Better Auth exports, TS ESLint parser, scoped minimatch matcher");
+const authClient = createAuthClient({ baseURL: "http://127.0.0.1:3000" });
+assert.equal(typeof authClient.signIn.social, "function", "Better Auth 1.7 generic social client route");
+console.log("SECURITY_COMPAT_OK Better Auth 1.7 social OAuth, TS parser, scoped minimatch matcher");
