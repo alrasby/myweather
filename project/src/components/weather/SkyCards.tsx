@@ -182,7 +182,7 @@ function pressureHoursAgo(bundle: WeatherBundle, now: number, hours: number): nu
 /** One sensor-backed compass: red points north, turquoise points to the Kaaba. */
 /** Single compass rose with two independently positioned, sensor-synchronised bearings. */
 export function QiblaCard({
-  lat, lon, reading, lang, wind, windFrom, windUnit,
+  lat, lon, reading, lang, wind, windFrom, windUnit, deviceLocation, locating, onLocate,
 }: {
   lat: number;
   lon: number;
@@ -191,6 +191,9 @@ export function QiblaCard({
   wind: number;
   windFrom: number;
   windUnit: WindUnit;
+  deviceLocation: boolean;
+  locating: boolean;
+  onLocate: () => void;
 }) {
   const bearing = qiblaBearing(lat, lon);
   const { heading, accuracy, trueNorth } = reading;
@@ -247,6 +250,15 @@ export function QiblaCard({
           <span className="ms-1" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</span>
         </p>
         <p className="mt-1 text-[0.7rem] leading-snug text-muted">{confidence}</p>
+        <button type="button" className="mt-1.5 rounded-full border border-line px-2 py-1 text-[0.7rem] text-accent"
+          onClick={onLocate} disabled={locating}>
+          {locating ? (ar ? "تحديد الموقع…" : "Locating…") : deviceLocation
+            ? (ar ? "تحديث موقعي للقبلة" : "Refresh Qibla location")
+            : (ar ? "تحديد موقعي للقبلة" : "Use my location")}
+        </button>
+        {!deviceLocation ? <p className="mt-1 text-[0.65rem] text-muted">
+          {ar ? "الاتجاه الحالي محسوب للمدينة المختارة" : "Calculated for selected city"}
+        </p> : null}
         {heading != null && (!trueNorth || accuracy === "low") ? (
           <p className="mt-0.5 text-[0.65rem] text-muted">
             {ar ? "أبعد الهاتف عن المعادن وحرّكه بشكل 8 لمعايرة المستشعر" : "Move away from metal; make a figure-eight motion"}
