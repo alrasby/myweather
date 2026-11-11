@@ -22,8 +22,8 @@ test("playback wraps only when a new ready frame permits it", () => {
 
 test("loading indicator ignores short tile refreshes and explains long delays", () => {
   assert.equal(weatherLoadingPhase(200), 0);
-  assert.equal(weatherLoadingPhase(649), 0);
-  assert.equal(weatherLoadingPhase(650), 1);
+  assert.equal(weatherLoadingPhase(1799), 0);
+  assert.equal(weatherLoadingPhase(1800), 1);
   assert.equal(weatherLoadingPhase(7999), 1);
   assert.equal(weatherLoadingPhase(8000), 2);
 });
