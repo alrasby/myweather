@@ -1,7 +1,7 @@
 import { Droplets, Eye, Gauge, Leaf, SunMedium, Sunrise, Sunset } from "lucide-react";
 import type { ReactNode } from "react";
 import { MoonDisc } from "@/components/weather/SkyBackdrop";
-import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress, tideForecast } from "@/weather/astro";
+import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress } from "@/weather/astro";
 import {
   formatHour,
   formatHour24,
@@ -14,6 +14,9 @@ import {
 } from "@/weather/format";
 import { useDeviceHeading } from "@/weather/deviceHeading";
 import { compassFrom } from "@/weather/heading";
+import { qiblaBearing, relativeQiblaAngle } from "@/weather/qibla";
+import { shouldDisplayTideCard } from "@/weather/coastalMarine";
+import { marineTideForecast } from "@/weather/marineTides";
 import { aqiKey, moonKey, t } from "@/weather/i18n";
 import { useWeather } from "@/weather/store";
 import type { Lang, Place, PressureUnit, WeatherBundle, WindUnit } from "@/weather/types";
@@ -40,7 +43,10 @@ export function DetailCards({
   const lunar = moonRiseSet(place.lat, place.lon, now);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
-  const coastal = bundle.marine?.coastal === true && bundle.marine.wave != null;
+  const coastal = shouldDisplayTideCard(bundle.marine);
+  const heading = useDeviceHeading();
+  const lastKnownLocation = useWeather((s) => s.here);
+  const qiblaLocation = lastKnownLocation ?? place;
   const windUnit = useWeather((s) => s.prefs.wind);
   const pressureUnit = useWeather((s) => s.prefs.pressure);
 
@@ -58,7 +64,8 @@ export function DetailCards({
         />
       </article>
 
-      <CompassCard lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} />
+      <CompassCard lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} heading={heading} />
+      <QiblaCard lang={lang} place={qiblaLocation} heading={heading} isLastKnownLocation={lastKnownLocation !== null} />
 
       <article className="wx-card px-3 py-2" dir="ltr">
         <SunArc progress={sunProgress(now, rise, set)} />
@@ -186,13 +193,14 @@ function CompassCard({
   wind,
   windFrom,
   windUnit,
+  heading,
 }: {
   lang: Lang;
   wind: number;
   windFrom: number;
   windUnit: WindUnit;
+  heading: number | null;
 }) {
-  const heading = useDeviceHeading();
   return (
     <article className="wx-card flex items-center gap-3 px-4 py-3.5">
       <Compass heading={heading} />
@@ -204,6 +212,61 @@ function CompassCard({
         <p className="mt-0.5 text-sm text-fg">
           {t(lang, "wind")} {formatWind(wind, windUnit, lang)}
           <span className="font-bold text-accent"> · {compassFrom(windFrom, lang)}</span>
+        </p>
+      </div>
+    </article>
+  );
+}
+
+/** True-north great-circle bearing. Physical sensor readings can be
+ * magnetic/un-calibrated: never promise 100% device compass precision. */
+function QiblaCard({ lang, place, heading, isLastKnownLocation }: {
+  lang: Lang;
+  place: Place;
+  heading: number | null;
+  isLastKnownLocation: boolean;
+}) {
+  const bearing = qiblaBearing(place.lat, place.lon);
+  const relative = bearing === null || heading === null ? null : relativeQiblaAngle(bearing, heading);
+  const arabic = lang === "ar";
+  return (
+    <article className="wx-card flex items-center gap-3 px-4 py-3.5" aria-label={arabic ? "اتجاه القبلة" : "Qibla direction"}>
+      <svg viewBox="0 0 96 96" className="size-20 shrink-0 text-fg" role="img"
+        aria-label={arabic ? "بوصلة القبلة" : "Qibla compass"}>
+        <circle cx="48" cy="48" r="43" stroke="currentColor" strokeOpacity=".3" strokeWidth="1.6" fill="none" />
+        <circle cx="48" cy="48" r="34" stroke="currentColor" strokeOpacity=".15" strokeWidth="1" fill="none" />
+        <g transform={`rotate(${heading === null ? 0 : -heading} 48 48)`}>
+          <text x="48" y="17" textAnchor="middle" fontSize="9" fill="currentColor">N</text>
+          <text x="78" y="51" textAnchor="middle" fontSize="9" fill="currentColor">E</text>
+          <text x="48" y="84" textAnchor="middle" fontSize="9" fill="currentColor">S</text>
+          <text x="18" y="51" textAnchor="middle" fontSize="9" fill="currentColor">W</text>
+        </g>
+        {relative !== null ? (
+          <g transform={`rotate(${relative} 48 48)`}>
+            <path d="M48 20 L57 56 L48 49 L39 56 Z" fill="#e6a322" stroke="currentColor" strokeWidth=".6" />
+            <path d="M48 49 L42 68 L48 62 L54 68 Z" fill="currentColor" opacity=".24" />
+          </g>
+        ) : (
+          <text x="48" y="54" textAnchor="middle" fontSize="18" fill="#e6a322">✦</text>
+        )}
+        <circle cx="48" cy="48" r="3.5" fill="currentColor" />
+      </svg>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-fg">{arabic ? "اتجاه القبلة" : "Qibla direction"}</p>
+        <p className="text-[11px] text-muted">{isLastKnownLocation
+          ? (arabic ? "بحسب آخر موقع محفوظ للجهاز" : "Based on last saved device location")
+          : placeTitle(place, lang)}</p>
+        <p className="fig mt-1 text-fg">
+          {bearing === null ? "—" : `${formatNumber(bearing, lang, 1)}°`}
+          <span className="ms-1 text-xs text-muted">{arabic ? "من الشمال الحقيقي" : "from true north"}</span>
+        </p>
+        <p className="mt-1 text-xs text-muted">
+          {relative === null
+            ? (arabic ? "لا تتوفر قراءة البوصلة؛ الزاوية الجغرافية ظاهرة أعلاه." : "Device heading unavailable; geographic bearing is shown.")
+            : (arabic ? "وجّه أعلى الهاتف مع السهم، وعاير البوصلة بعيدًا عن المعادن." : "Align the top of your phone with the arrow; calibrate away from metal.")}
+        </p>
+        <p className="mt-1 text-[11px] text-muted">
+          {arabic ? "دقة السهم تعتمد على المستشعر ومعايرته وتصحيح الشمال المغناطيسي." : "Pointer accuracy depends on sensor calibration and magnetic declination."}
         </p>
       </div>
     </article>
@@ -321,8 +384,8 @@ function TideCard({
   lang: Lang;
   now: number;
 }) {
-  const tide = tideForecast(place.lat, place.lon, now);
-  const wave = bundle.marine?.wave ?? 0;
+  const tide = marineTideForecast(bundle.marine?.tides ?? [], now);
+  const wave = bundle.marine?.wave;
   const pts = tide.points;
   const levels = pts.map((p) => p.level);
   const min = Math.min(...levels, 0);
@@ -335,7 +398,7 @@ function TideCard({
     return { x, y, ...p };
   });
   const d = coords.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const nowX = coords.reduce((best, p) => (Math.abs(p.t - now) < Math.abs(best.t - now) ? p : best), coords[0]!);
+  const nowX = coords.length ? coords.reduce((best, p) => (Math.abs(p.t - now) < Math.abs(best.t - now) ? p : best), coords[0]!) : null;
 
   return (
     <article className="wx-card px-4 py-4">
@@ -346,9 +409,12 @@ function TideCard({
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
         <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? formatSignedMeters(tide.nextLow.level, lang) : "—"} />
-        <TideStat label={t(lang, "wave")} time={formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
+        <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
       </div>
-      <div dir="ltr">
+      <p className="mt-2 text-[11px] text-muted">{lang === "ar"
+        ? "توقعات مد وجزر من نموذج بحري تقريبي، وليست مرجعًا للملاحة."
+        : "Approximate marine model tide forecast; not for navigation."}</p>
+      {pts.length ? <div dir="ltr">
         <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={t(lang, "tide")}>
           <path d={d} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
           {nowX ? <line x1={nowX.x} x2={nowX.x} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
@@ -365,7 +431,9 @@ function TideCard({
               <circle key={p.t} cx={p.x} cy={p.y} r="3.2" fill="currentColor" />
             ))}
         </svg>
-      </div>
+      </div> : <p className="mt-3 text-center text-xs text-muted">{lang === "ar"
+        ? "بيانات المد والجزر غير متاحة حاليًا"
+        : "Tide model data is currently unavailable"}</p>}
       <ul className="mt-2 space-y-1">
         {tide.events.map((ev) => (
           <li key={`${ev.kind}-${ev.t}`} className="flex items-center justify-between text-sm">

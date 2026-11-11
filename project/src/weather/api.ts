@@ -1,6 +1,8 @@
 import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
 import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
+import { preserveCoastalMarine } from "@/weather/coastalMarine";
+import { parseMarineResponse } from "@/weather/marineTides";
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
@@ -16,6 +18,9 @@ export type CacheFile = {
 };
 
 const inflight = new Map<string, Promise<{ bundle: WeatherBundle; stale: boolean; estimated: boolean }>>();
+// Existing installs can retain a MET.no bundle with marine:null until the
+// forecast TTL expires. Backfill those records once per city per session.
+const marineBackfillAttempted = new Set<string>();
 
 function emptyCache(): CacheFile {
   return { places: [], activeId: "", entries: {} };
@@ -237,13 +242,20 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNulla
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
   url.searchParams.set("current", "wave_height");
-  url.searchParams.set("forecast_days", "1");
-  url.searchParams.set("timezone", "auto");
+  url.searchParams.set("hourly", "sea_level_height_msl");
+  url.searchParams.set("forecast_days", "2");
+  url.searchParams.set("past_days", "1");
+  url.searchParams.set("timeformat", "unixtime");
+  url.searchParams.set("timezone", "UTC");
+  url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
   if (!res.ok) return { coastal: false, wave: null };
-  const json = (await res.json()) as { current?: { wave_height?: number } };
-  const wave = json.current?.wave_height;
-  return typeof wave === "number" && Number.isFinite(wave) ? { coastal: true, wave } : { coastal: false, wave: null };
+  const json = (await res.json()) as {
+    latitude?: number; longitude?: number;
+    current?: { wave_height?: number | null };
+    hourly?: { time?: number[]; sea_level_height_msl?: (number | null)[] };
+  };
+  return parseMarineResponse(json, place);
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
@@ -495,7 +507,9 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     hourly,
     daily,
     air: null,
-    marine: null,
+    // Marine conditions remain independent of the land weather provider;
+    // the MET.no fallback must not hide a coastal city's tide card.
+    marine: await fetchMarine(place, signal).catch(() => null),
   };
 }
 
@@ -549,12 +563,34 @@ export function loadWeather(
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
     const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS;
-    if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
+    if (cached && fresh && !opts?.force) {
+      const marine = cached.bundle.marine;
+      if ((!marine?.coastal || !marine.tides?.length) &&
+          !marineBackfillAttempted.has(place.id)) {
+        marineBackfillAttempted.add(place.id);
+        try {
+          const updated = await fetchMarine(place, opts?.signal);
+          const restored = preserveCoastalMarine(updated, marine);
+          const bundle = { ...cached.bundle, marine: restored };
+          rememberBundle(place.id, bundle);
+          return { bundle, stale: false, estimated: false };
+        } catch (err) {
+          if (aborted(err, opts?.signal)) {
+            marineBackfillAttempted.delete(place.id);
+            throw err;
+          }
+        }
+      }
+      return { bundle: cached.bundle, stale: false, estimated: false };
+    }
     let last: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
       try {
         const bundle = await fetchForecast(place, opts?.signal);
+        // A temporary marine API failure must not erase an already confirmed
+        // coastal flag when the weather provider switches to MET.no.
+        bundle.marine = preserveCoastalMarine(bundle.marine, cached?.bundle.marine ?? null);
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
       } catch (err) {
