@@ -100,6 +100,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const lastTileTimeRef = useRef<number>(Date.now());
   const [readyTileMode, setReadyTileMode] = useState(false);
   const [readyTileKind, setReadyTileKind] = useState<WeatherApiKind>("precip");
+  const [readyTileLoaded, setReadyTileLoaded] = useState(false);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
@@ -208,6 +209,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             : "—";
         }
       }
+      if (readyTileModeRef.current && valueRef.current) valueRef.current.textContent = "WeatherAPI";
       const grid = engine.activeGrid();
       if (sliderRef.current) {
         if (grid) sliderRef.current.max = String(Math.max(1, grid.hours - 1));
@@ -277,6 +279,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         readyPane.style.zIndex = "470";
         readyPane.style.pointerEvents = "none";
         weatherApiRef.current = new WeatherApiTiles(L, map, (visible) => {
+          setReadyTileLoaded(visible);
           // Never obscure the original weather engine until a complete PNG frame exists.
           map.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
             canvas.style.opacity = visible && readyTileModeRef.current ? "0" : "1";
@@ -1278,16 +1281,26 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </div>
             ) : null}
             <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
-              <span className="font-semibold text-fg">{t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
+              <span className="font-semibold text-fg">{readyTileMode
+                ? ({ precip: lang === "ar" ? "المطر" : "Precipitation", tmp2m: lang === "ar" ? "الحرارة" : "Temperature", wind: lang === "ar" ? "الرياح" : "Wind", pressure: lang === "ar" ? "الضغط" : "Pressure" } as const)[readyTileKind]
+                : t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
               <span ref={valueRef} className="font-semibold text-accent">—</span>
             </div>
             <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
-            <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
-            <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
-              {ticks.map((tick) => (
-                <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>
-              ))}
-            </div>
+            {readyTileMode ? (
+              <p className="mt-1 text-[0.65rem] text-muted">
+                {readyTileLoaded
+                  ? (lang === "ar" ? "بلاطات WeatherAPI.com ساعية جاهزة" : "WeatherAPI.com hourly ready-map tiles")
+                  : (lang === "ar" ? "جاري تحميل البلاطات؛ تظهر الخريطة الأصلية عند التعذر" : "Loading tiles; original map remains as fallback")}
+              </p>
+            ) : (
+              <>
+                <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
+                <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
+                  {ticks.map((tick) => <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>)}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
