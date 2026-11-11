@@ -5,6 +5,7 @@ import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrame
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
+import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
@@ -221,15 +222,14 @@ async function measuredNativeRequest(
       spatialNativeReads++;
       return CapacitorHttp.request(options);
     });
-    const headerValue = Object.entries(result.headers ?? {}).find(([key]) => key.toLowerCase() === "content-length")?.[1];
-    const bytes = Number(headerValue);
+    const bytes = spatialTransferBytes(options.method ?? "GET", result.status, result.headers ?? {}, result.data);
     spatialPerformance.networkRequest(
       started - queued, performance.now() - started,
-      Number.isFinite(bytes) && bytes >= 0 ? bytes : 0, result.status >= 200 && result.status < 400,
+      bytes, result.status >= 200 && result.status < 400,
     );
     return result;
   } catch (error) {
-    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false);
+    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
     throw error;
   }
 }
