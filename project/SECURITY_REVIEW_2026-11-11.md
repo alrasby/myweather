@@ -34,6 +34,15 @@ Npm's resolver reported **0 findings in both the complete and production-only au
 
 The official 1.7 upgrade removed `genericOAuthClient()` and `authClient.signIn.oauth2({ providerId })`. Updated `src/lib/auth/client.ts` to use `authClient.signIn.social({ provider: providerId })` and the standard client without the removed plugin, and `src/lib/auth/popup.server.ts` to use `auth.api.signInSocial({ body: { provider: providerId } })`. New local generic provider callback path is `/api/auth/callback/:providerId` (formerly `/api/auth/oauth2/callback/:providerId`). If auth is enabled against the external broker, **the broker's registered redirect URLs must be verified/updated** before rollout; this requires access to its OAuth registration. The Android weather application ships with auth disabled by default. Unit/type/API smoke tests cannot perform a real OAuth redirect.
 
+## Android Lint findings and disposition
+
+An additional Android Lint gate found five existing blocking issues in the native layer:
+
+- Widget configuration used the deprecated `onBackPressed()` path, which fails to run for modern Android back gestures. Replaced it with `OnBackPressedDispatcher`, preserving `RESULT_CANCELED` when backing out of widget configuration.
+- Four identifier/brand resources (`app_name`, `title_activity_main`, `package_name`, `custom_url_scheme`) were incorrectly treated as translatable strings; marked these proper names/technical identifiers `translatable="false"`.
+
+Lint also reported 62 non-fatal warnings (e.g., widget preview/resource styling, icon shape variants, low-impact layout optimizations, and synchronous preferences writes that preserve immediate widget updates). These were not mass-suppressed or changed without targeted device verification; the CI lint gate remains enabled, and warnings can be reviewed for future maintenance. The severity report of npm packages is independent from Android Lint's count.
+
 ## Auth migration caveat
 
 `better-auth` is actually imported in `src/lib/auth/server.ts` and `client.ts`. Do not remove or mock it out. The 1.7 upgrade includes potential database schema / OAuth changes for feature-specific deployments: <https://better-auth.com/docs/1.6/guides/1-7-upgrade-guide>. Before enabling auth on a production server that has real user accounts, generate/review the corresponding schema migration and test OAuth sign-in, session recovery and sign-out **against that environment**. CI cannot access external identity-provider credentials or production databases; source, exports and unit tests cannot substitute for those checks.
