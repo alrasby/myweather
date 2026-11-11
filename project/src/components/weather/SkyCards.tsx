@@ -232,10 +232,12 @@ function QiblaCard({ lang, place, heading }: {
         aria-label={arabic ? "بوصلة القبلة" : "Qibla compass"}>
         <circle cx="48" cy="48" r="43" stroke="currentColor" strokeOpacity=".3" strokeWidth="1.6" fill="none" />
         <circle cx="48" cy="48" r="34" stroke="currentColor" strokeOpacity=".15" strokeWidth="1" fill="none" />
-        <text x="48" y="17" textAnchor="middle" fontSize="9" fill="currentColor">N</text>
-        <text x="78" y="51" textAnchor="middle" fontSize="9" fill="currentColor">E</text>
-        <text x="48" y="84" textAnchor="middle" fontSize="9" fill="currentColor">S</text>
-        <text x="18" y="51" textAnchor="middle" fontSize="9" fill="currentColor">W</text>
+        <g transform={`rotate(${heading === null ? 0 : -heading} 48 48)`}>
+          <text x="48" y="17" textAnchor="middle" fontSize="9" fill="currentColor">N</text>
+          <text x="78" y="51" textAnchor="middle" fontSize="9" fill="currentColor">E</text>
+          <text x="48" y="84" textAnchor="middle" fontSize="9" fill="currentColor">S</text>
+          <text x="18" y="51" textAnchor="middle" fontSize="9" fill="currentColor">W</text>
+        </g>
         {relative !== null ? (
           <g transform={`rotate(${relative} 48 48)`}>
             <path d="M48 20 L57 56 L48 49 L39 56 Z" fill="#e6a322" stroke="currentColor" strokeWidth=".6" />
