@@ -179,22 +179,9 @@ function buildBundle(
       if (!Number.isFinite(bundle.current.precip)) bundle.current.precip = nearest.precip;
     }
   }
-  for (const day of bundle.daily) {
-    const key = dayKey(day.t, timezone);
-    let sum = 0;
-    let count = 0;
-    let pop = NaN;
-    for (const row of bundle.hourly) {
-      if (dayKey(row.t, timezone) !== key) continue;
-      if (Number.isFinite(row.precip)) {
-        sum += row.precip;
-        count += 1;
-      }
-      if (Number.isFinite(row.pop)) pop = Number.isFinite(pop) ? Math.max(pop, row.pop) : row.pop;
-    }
-    if (count >= 18) day.precip = Math.round(sum * 10) / 10;
-    if (!Number.isFinite(day.pop) && Number.isFinite(pop)) day.pop = pop;
-  }
+  // Preserve Open-Meteo daily precipitation_sum and probability_max.
+  // Replacing daily totals using >=18 hourly samples can silently turn a
+  // partial-day sum into a false full-day forecast.
   if (!Number.isFinite(bundle.current.feels)) bundle.current.feels = bundle.current.temp;
   if (!Number.isFinite(bundle.current.precip)) bundle.current.precip = 0;
   bundle.current.isDay = daylightNow(Date.now(), place.lat, place.lon, bundle.daily, bundle.hourly);
@@ -232,18 +219,36 @@ async function fetchAir(place: Place, signal?: AbortSignal): Promise<WeatherBund
   };
 }
 
-async function fetchMarine(place: Place, signal?: AbortSignal): Promise<NonNullable<WeatherBundle["marine"]>> {
+async function fetchMarine(place: Place, signal?: AbortSignal): Promise<WeatherBundle["marine"]> {
   const url = new URL("https://marine-api.open-meteo.com/v1/marine");
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
   url.searchParams.set("current", "wave_height");
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("timezone", "auto");
+  // Do not accidentally select inland cells for coastal towns.
+  url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
-  if (!res.ok) return { coastal: false, wave: null };
-  const json = (await res.json()) as { current?: { wave_height?: number } };
+  // Network/API failures are not evidence that a formerly coastal town is inland.
+  if (!res.ok) return null;
+  const json = (await res.json()) as { latitude?: number; longitude?: number; current?: { wave_height?: number } };
   const wave = json.current?.wave_height;
-  return typeof wave === "number" && Number.isFinite(wave) ? { coastal: true, wave } : { coastal: false, wave: null };
+  // A successful sea-grid response can identify the coast even when wave height
+  // is missing. Bound the distance to avoid marking far-inland towns as coastal.
+  const gridLat = json.latitude;
+  const gridLon = json.longitude;
+  if (!(typeof gridLat === "number" && Number.isFinite(gridLat) &&
+        typeof gridLon === "number" && Number.isFinite(gridLon))) return null;
+  let nearSea = false;
+  {
+    const dLat = (gridLat - place.lat) * Math.PI / 180;
+    const dLon = (gridLon - place.lon) * Math.PI / 180;
+    const lat1 = place.lat * Math.PI / 180;
+    const lat2 = gridLat * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    nearSea = 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(a))) <= 30;
+  }
+  return { coastal: nearSea, wave: nearSea && typeof wave === "number" && Number.isFinite(wave) ? wave : null };
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
@@ -284,7 +289,7 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
   }
   const [air, marine] = await Promise.all([
     fetchAir(place, signal).catch(() => null),
-    fetchMarine(place, signal).catch(() => ({ coastal: false, wave: null })),
+    fetchMarine(place, signal).catch(() => null),
   ]);
   return buildBundle(place, json, air, marine);
 }
@@ -555,6 +560,11 @@ export function loadWeather(
       if (opts?.signal?.aborted) throw new DOMException("aborted", "AbortError");
       try {
         const bundle = await fetchForecast(place, opts?.signal);
+        // Preserve known coastal eligibility if the secondary forecast provider
+        // does not include marine data or the separate marine API is offline.
+        if (bundle.marine == null && cached?.bundle.marine?.coastal) {
+          bundle.marine = { coastal: true, wave: null };
+        }
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
       } catch (err) {

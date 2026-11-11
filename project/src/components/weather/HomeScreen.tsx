@@ -1,6 +1,7 @@
 import { ChevronDown, MapPin, SunMedium, Sunrise, Sunset, Thermometer, Umbrella, Wind, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DetailCards } from "@/components/weather/SkyCards";
+import { DetailCards, QiblaCard } from "@/components/weather/SkyCards";
+import { useDeviceCompass } from "@/weather/deviceHeading";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
 import { readBestPosition } from "@/weather/geo";
@@ -34,8 +35,14 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const stale = useWeather((s) => s.stale);
   const loadActive = useWeather((s) => s.loadActive);
   const setHere = useWeather((s) => s.setHere);
+  const [compassLocating, setCompassLocating] = useState(false);
+  const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
+  const [compassLocationFailed, setCompassLocationFailed] = useState(false);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
+  // Do not silently treat a GPS fix saved in a previous session as current.
+  const compassPlace = qiblaFix ?? place;
+  const reading = useDeviceCompass(compassPlace.lat, compassPlace.lon);
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
   const [pulling, setPulling] = useState(0);
@@ -53,6 +60,18 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     }
   });
   const now = Date.now();
+
+  const locateCompass = () => {
+    if (compassLocating) return;
+    setCompassLocating(true);
+    setCompassLocationFailed(false);
+    void readBestPosition((pos) => {
+      setQiblaFix({ lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy });
+    }).then((fix) => {
+      if (!fix) setCompassLocationFailed(true);
+    }).catch(() => setCompassLocationFailed(true))
+      .finally(() => setCompassLocating(false));
+  };
 
   const refresh = () => {
     void loadActive(true);
@@ -95,9 +114,9 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
 
   const span = useMemo(() => {
     if (!bundle) return { min: 0, max: 1 };
-    const mins = bundle.daily.slice(0, 15).map((d) => d.tmin);
-    const maxs = bundle.daily.slice(0, 15).map((d) => d.tmax);
-    return { min: Math.min(...mins), max: Math.max(...maxs) };
+    const mins = bundle.daily.slice(0, 15).map((d) => d.tmin).filter(Number.isFinite);
+    const maxs = bundle.daily.slice(0, 15).map((d) => d.tmax).filter(Number.isFinite);
+    return mins.length && maxs.length ? { min: Math.min(...mins), max: Math.max(...maxs) } : { min: 0, max: 1 };
   }, [bundle]);
 
   return (
@@ -246,6 +265,9 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
             </div>
           </section>
 
+          <div className="mt-3">
+            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} deviceLocation={qiblaFix != null} locationAccuracy={qiblaFix?.accuracy ?? null} locationFailed={compassLocationFailed} locating={compassLocating} onLocate={locateCompass} />
+          </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
       ) : loading ? (
@@ -262,6 +284,8 @@ function DayPanel({ bundle, day, lang }: { bundle: WeatherBundle; day: DayPoint;
   const temp = useWeather((s) => s.prefs.temp);
   const wind = useWeather((s) => s.prefs.wind);
   const hours = hoursForDay(bundle, day);
+  const actualHourlyCount = bundle.hourly.filter((h) => dayKey(h.t, bundle.timezone) === dayKey(day.t, bundle.timezone)).length;
+  const hourlyEstimated = actualHourlyCount < 18;
   const warm = hours.reduce<HourPoint | null>((best, h) => (!best || h.temp > best.temp ? h : best), null);
   const gust = hours.reduce((max, h) => Math.max(max, h.gust || h.wind), day.wind);
   const feels = warm?.feels ?? day.tmax;
@@ -286,6 +310,13 @@ function DayPanel({ bundle, day, lang }: { bundle: WeatherBundle; day: DayPoint;
           </div>
         ))}
       </div>
+      {hourlyEstimated ? (
+        <p className="px-1 text-[0.69rem] leading-snug text-muted" role="note">
+          {lang === "ar"
+            ? "التوزيع الساعي تقديري من بيانات اليوم؛ التفاصيل الساعية ليست توقعات مستقلة من المصدر."
+            : "Hourly distribution is estimated from daily values, not independently supplied hourly forecasts."}
+        </p>
+      ) : null}
       <p className="px-1 py-2 text-sm font-semibold text-fg">{t(lang, line)}</p>
       <div className="grid grid-cols-3 gap-y-4 px-1 text-center">
         <Mini icon={<Wind className="size-5" />} label={t(lang, "wind")} value={formatWind(day.wind, wind, lang)} />

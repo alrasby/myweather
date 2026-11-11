@@ -7,6 +7,7 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { WeatherApiTiles, type WeatherApiKind } from "@/weather/weatherApiTiles";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -93,6 +94,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
   const modelRef = useRef<ModelField | null>(null);
+  const weatherApiRef = useRef<WeatherApiTiles | null>(null);
+  const readyTileModeRef = useRef(false);
+  const readyTileKindRef = useRef<WeatherApiKind>("precip");
+  const lastTileTimeRef = useRef<number>(Date.now());
+  const [readyTileMode, setReadyTileMode] = useState(false);
+  const [readyTileKind, setReadyTileKind] = useState<WeatherApiKind>("precip");
+  const [readyTileLoaded, setReadyTileLoaded] = useState(false);
+  const [readyTileFrameTime, setReadyTileFrameTime] = useState<number | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
@@ -151,6 +160,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engineRef.current = engine;
     let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
+      lastTileTimeRef.current = info.timeMs;
+      if (readyTileModeRef.current) weatherApiRef.current?.show(readyTileKindRef.current, info.timeMs);
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -199,6 +210,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             : "—";
         }
       }
+      if (readyTileModeRef.current && valueRef.current) valueRef.current.textContent = "WeatherAPI";
       const grid = engine.activeGrid();
       if (sliderRef.current) {
         if (grid) sliderRef.current.max = String(Math.max(1, grid.hours - 1));
@@ -264,6 +276,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
+        const readyPane = map.createPane("wx-ready-tiles");
+        readyPane.style.zIndex = "470";
+        readyPane.style.pointerEvents = "none";
+        weatherApiRef.current = new WeatherApiTiles(L, map, (visible, displayedTimeMs) => {
+          setReadyTileLoaded(visible);
+          setReadyTileFrameTime(displayedTimeMs);
+          // Never obscure the original weather engine until a complete PNG frame exists.
+          mapRef.current?.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
+            canvas.style.opacity = visible && readyTileModeRef.current ? "0" : "1";
+          });
+        });
         if (modelRef.current) {
           // Show one coherent model at a time. The earlier permanent overlap
           // doubled precipitation colours and allowed coarse 72x36 fallback
@@ -271,10 +294,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // The global model is restored immediately when the spatial frame
           // is incomplete, unavailable, or fails to load.
           modelRef.current.onLive = () => {
+            if (readyTileModeRef.current) return;
             engine.setModelCover(true);
             rainFallbackSuspendRef.current?.();
           };
           modelRef.current.onMiss = () => {
+            if (readyTileModeRef.current) return;
             engine.setModelCover(false);
             rainFallbackRefreshRef.current?.();
           };
@@ -303,6 +328,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       window.clearTimeout(clickTimer.current);
       popupAbort.current?.abort();
       document.removeEventListener("visibilitychange", onVis);
+      weatherApiRef.current?.destroy();
+      weatherApiRef.current = null;
       engine.destroy();
       map?.remove();
       engineRef.current = null;
@@ -337,9 +364,29 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   }, [weatherDiagnosticsOpen, weatherDiagnosticMode]);
 
   useEffect(() => {
+    readyTileModeRef.current = readyTileMode;
+    readyTileKindRef.current = readyTileKind;
+    const labelsPane = mapRef.current?.getPane("wx-labels");
+    if (labelsPane) labelsPane.style.zIndex = readyTileMode ? "485" : "420";
+    if (readyTileMode) {
+      engineRef.current?.setModelCover(false);
+      weatherApiRef.current?.show(readyTileKind, lastTileTimeRef.current);
+    } else weatherApiRef.current?.hide();
+    // Spatial OM workers are disabled while the alternative map is selected.
+    modelRef.current?.setVisible(!readyTileMode && kind === 2);
+    const defaultParticles = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
+    engineRef.current?.setParticleCount(readyTileMode ? 0 : defaultParticles);
+    if (!readyTileMode) {
+      mapRef.current?.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
+        canvas.style.opacity = "1";
+      });
+    }
+  }, [readyTileMode, readyTileKind, kind, ready, prefs.dataSaver, prefs.particles]);
+
+  useEffect(() => {
     engineRef.current?.setKind(kind);
     imageryRef.current?.setOpacity(1);
-    modelRef.current?.setVisible(kind === 2);
+    modelRef.current?.setVisible(!readyTileMode && kind === 2);
     if (kind !== 2) engineRef.current?.setModelCover(false);
   }, [kind, ready]);
 
@@ -351,9 +398,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const engine = engineRef.current;
     if (!engine || !ready) return;
     const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
-    engine.setParticleCount(n);
+    engine.setParticleCount(readyTileMode ? 0 : n);
     engine.setSaver(prefs.dataSaver);
-  }, [prefs.dataSaver, prefs.particles, ready]);
+  }, [prefs.dataSaver, prefs.particles, ready, readyTileMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1171,6 +1218,22 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </button>
             </div>
           ) : null}
+          <div className="wx-card pointer-events-auto flex flex-wrap items-center gap-1 px-2 py-1.5 text-xs">
+            <button type="button" className={`rounded-full px-2.5 py-1.5 font-semibold ${readyTileMode ? "bg-accent text-accent-ink" : "bg-fg/10 text-fg"}`}
+              onClick={() => setReadyTileMode((v) => !v)}>
+              {lang === "ar" ? "خرائط جاهزة مجانية" : "Free ready-made maps"}
+            </button>
+            {readyTileMode ? ([
+              ["precip", lang === "ar" ? "مطر" : "Rain"],
+              ["tmp2m", lang === "ar" ? "حرارة" : "Temp"],
+              ["wind", lang === "ar" ? "رياح" : "Wind"],
+              ["pressure", lang === "ar" ? "ضغط" : "Pressure"],
+            ] as const).map(([key, label]) => (
+              <button type="button" key={key}
+                className={`rounded-full px-2 py-1 ${readyTileKind === key ? "bg-accent/20 text-accent" : "text-muted"}`}
+                aria-pressed={readyTileKind === key} onClick={() => setReadyTileKind(key)}>{label}</button>
+            )) : null}
+          </div>
           <div className="wx-card map-bar pointer-events-auto px-2 py-1.5">
             <div className="flex items-center gap-2" dir="ltr">
               <button
@@ -1228,16 +1291,26 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </div>
             ) : null}
             <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
-              <span className="font-semibold text-fg">{t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
+              <span className="font-semibold text-fg">{readyTileMode
+                ? ({ precip: lang === "ar" ? "المطر" : "Precipitation", tmp2m: lang === "ar" ? "الحرارة" : "Temperature", wind: lang === "ar" ? "الرياح" : "Wind", pressure: lang === "ar" ? "الضغط" : "Pressure" } as const)[readyTileKind]
+                : t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
               <span ref={valueRef} className="font-semibold text-accent">—</span>
             </div>
             <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
-            <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
-            <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
-              {ticks.map((tick) => (
-                <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>
-              ))}
-            </div>
+            {readyTileMode ? (
+              <p className="mt-1 text-[0.65rem] text-muted">
+                {readyTileLoaded && readyTileFrameTime != null
+                  ? (lang === "ar" ? "WeatherAPI.com · صورة الساعة " : "WeatherAPI.com · displayed ") + formatClock(readyTileFrameTime, tzRef.current, lang)
+                  : (lang === "ar" ? "جاري تحميل البلاطات؛ تظهر الخريطة الأصلية عند التعذر" : "Loading tiles; original map remains as fallback")}
+              </p>
+            ) : (
+              <>
+                <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
+                <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
+                  {ticks.map((tick) => <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>)}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

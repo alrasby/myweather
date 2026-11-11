@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
+import android.hardware.GeomagneticField;
 import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -60,6 +61,7 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         ensureCompass();
+        if (compass != null) compass.onHostResume();
         ensureWidget();
         pushStatusInset();
         if (returnHome) {
@@ -79,7 +81,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onPause() {
-        if (compass != null) compass.stop();
+        if (compass != null) compass.onHostPause();
         super.onPause();
     }
 
@@ -124,7 +126,12 @@ public class MainActivity extends BridgeActivity {
         private WebView web;
         private SensorManager sensors;
         private boolean listening;
+        private boolean requested;
+        private boolean foreground;
         private float last = -999f;
+        private float declination = 0f;
+        private boolean hasLocation;
+        private int accuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
 
         CompassBridge(MainActivity activity) {
             this.activity = activity;
@@ -135,17 +142,46 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void setLocation(double lat, double lon) {
+            main.post(() -> {
+                if (!Double.isFinite(lat) || !Double.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+                    hasLocation = false;
+                    return;
+                }
+                declination = new GeomagneticField((float) lat, (float) lon, 0f, System.currentTimeMillis()).getDeclination();
+                hasLocation = true;
+                last = -999f;
+            });
+        }
+
+        @JavascriptInterface
         public void start() {
-            main.post(this::listen);
+            main.post(() -> {
+                requested = true;
+                listen();
+            });
         }
 
         @JavascriptInterface
         public void stop() {
-            main.post(this::halt);
+            main.post(() -> {
+                requested = false;
+                halt();
+            });
+        }
+
+        void onHostPause() {
+            foreground = false;
+            halt();
+        }
+
+        void onHostResume() {
+            foreground = true;
+            if (requested) listen();
         }
 
         private void listen() {
-            if (listening || web == null) return;
+            if (!foreground || !requested || listening || web == null) return;
             sensors = (SensorManager) activity.getSystemService(SENSOR_SERVICE);
             if (sensors == null) return;
             Sensor sensor = sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
@@ -188,17 +224,27 @@ public class MainActivity extends BridgeActivity {
             if (!SensorManager.remapCoordinateSystem(rotation, x, y, remapped)) return;
             SensorManager.getOrientation(remapped, orientation);
             float deg = (float) Math.toDegrees(orientation[0]);
-            if (deg < 0) deg += 360f;
+            // Android azimuth is magnetic-north referenced. Convert to true north
+            // with the geomagnetic model for the currently selected location.
+            if (hasLocation) deg += declination;
+            deg = ((deg % 360f) + 360f) % 360f;
             float delta = deg - last;
             if (delta > 180) delta -= 360;
             if (delta < -180) delta += 360;
             if (Math.abs(delta) < 0.6f) return;
             last = deg;
-            String js = "window.__wxHeading&&window.__wxHeading(" + String.format(Locale.US, "%.1f", deg) + ")";
+            String js = "window.__wxHeadingMeta&&window.__wxHeadingMeta(" +
+                String.format(Locale.US, "%.2f", deg) + "," + accuracy + "," + hasLocation + ")";
             web.evaluateJavascript(js, null);
         }
 
         @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+            if (this.accuracy != accuracy) {
+                this.accuracy = accuracy;
+                // Publish calibration change even when the device is stationary.
+                last = -999f;
+            }
+        }
     }
 }
