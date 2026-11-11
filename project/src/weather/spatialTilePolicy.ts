@@ -1,10 +1,11 @@
 /** Leaflet raster policy for the ECMWF forecast layers only.
  *
  * The global imagery baseline refreshes while panning, but previously the
- * weather layers waited for moveend, leaving visible blank rectangular tile
- * regions during drags. Update spatial coverage at a bounded interval while
- * panning instead. Smooth zooms still update only after settling, so heavy
- * OM-file decoding is not restarted at every fractional zoom level.
+ * Weather layers must not begin new tile reads while the viewport is
+ * changing: updateCurrentBounds() is refreshed on moveend, BEFORE Leaflet
+ * requests new tiles. Existing tiles stay onscreen throughout the gesture
+ * and new viewport reads are spatially cropped, avoiding full-grid WASM
+ * copies and stale-window rectangular holes.
  *
  * The Open-Meteo map-layer documentation describes useful native detail to
  * zoom 12. Beyond that we re-use native tiles rather than asking for false
@@ -14,7 +15,7 @@ export function spatialTileOptions(pane: "wx-clouds" | "wx-model") {
   return {
     pane,
     opacity: 0,
-    updateWhenIdle: false,
+    updateWhenIdle: true,
     updateWhenZooming: false,
     updateInterval: 400,
     // A single surrounding ring covers normal short drags without
