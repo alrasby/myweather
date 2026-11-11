@@ -93,6 +93,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
   const modelRef = useRef<ModelField | null>(null);
+  const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
+  const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
   const engineRef = useRef<FieldEngine | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -260,8 +262,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // cells to remain visible as rectangles over real ECMWF spatial tiles.
           // The global model is restored immediately when the spatial frame
           // is incomplete, unavailable, or fails to load.
-          modelRef.current.onLive = () => engine.setModelCover(true);
-          modelRef.current.onMiss = () => engine.setModelCover(false);
+          modelRef.current.onLive = () => {
+            engine.setModelCover(true);
+            rainFallbackSuspendRef.current?.();
+          };
+          modelRef.current.onMiss = () => {
+            engine.setModelCover(false);
+            rainFallbackRefreshRef.current?.();
+          };
         }
         map.on("click", (event) => {
           window.clearTimeout(clickTimer.current);
