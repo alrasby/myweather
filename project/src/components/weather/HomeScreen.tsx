@@ -249,7 +249,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </section>
 
           <div className="mt-3">
-            <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} />
+            <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} />
           </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} heading={heading} />
         </>
