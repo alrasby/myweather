@@ -5,7 +5,7 @@ import { spatialTileOptions } from "./spatialTilePolicy.ts";
 test("all ECMWF forecast layers fetch new viewport tiles during map movement", () => {
   for (const pane of ["wx-clouds", "wx-model"] as const) {
     const opts = spatialTileOptions(pane);
-    assert.equal(opts.updateWhenIdle, false);
+    assert.equal(opts.updateWhenIdle, true);
     assert.equal(opts.updateWhenZooming, false);
     assert.ok(opts.updateInterval >= 200);
     assert.equal(opts.keepBuffer, 1);
