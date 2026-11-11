@@ -71,7 +71,7 @@ test("an already prefetched future hour is not shown as the requested hour durin
 test("future-only spatial data must not masquerade as the current forecast hour", () => {
   const plan = selectSpatialFramePlan(12, 0.5, new Set([13]), null);
   assert.equal(plan.holding, true);
-  assert.equal(plan.anchor, 13);
-  // A held fallback would otherwise be marked as a current image. Do not
-  // represent the future hour as directly matched to the requested time.
+  assert.equal(plan.anchor, null);
+  assert.equal(plan.goals.size, 0);
+  // Future-only ECMWF cannot be misrepresented as the requested time.
 });
