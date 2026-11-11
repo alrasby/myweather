@@ -7,6 +7,7 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -224,7 +225,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           touchZoom: "center",
           bounceAtZoomLimits: false,
           zoomAnimation: true,
-          fadeAnimation: true,
+          // Android Chrome/WebView can expose horizontal tile compositing seams
+          // while independently faded raster images are GPU-transformed.
+          fadeAnimation: false,
           // Wrap longitudes continuously while constraining only the polar direction.
           worldCopyJump: true,
           inertia: true,
@@ -240,16 +243,27 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
-        L.tileLayer(imageryUrl, {
-          // Always keep a low-resolution satellite underlay in place when
-          // high-resolution tiles are momentarily missing during a pan or zoom.
+        // At world zoom (<=5) the underlay and detailed imagery requested the
+        // *same* Esri raster tiles and composited two full-size tile grids.
+        // Avoid that duplicate GPU surface and its possible horizontal seams.
+        // At closer zoom, the low-resolution underlay is useful while high-res
+        // images arrive after a pan. Mount it only in that case.
+        const underlay = L.tileLayer(imageryUrl, {
           maxNativeZoom: 5,
           maxZoom: 16,
           zIndex: 0,
           updateWhenIdle: false,
           updateInterval: 200,
           keepBuffer: 2,
-        }).addTo(map);
+        });
+        const syncUnderlay = () => {
+          if (!map) return;
+          const need = needsSatelliteUnderlay(map.getZoom());
+          if (need && !map.hasLayer(underlay)) underlay.addTo(map);
+          else if (!need && map.hasLayer(underlay)) underlay.remove();
+        };
+        map.on("zoomend", syncUnderlay);
+        syncUnderlay();
         const imagery = L.tileLayer(imageryUrl, {
           maxZoom: 16,
           zIndex: 1,
