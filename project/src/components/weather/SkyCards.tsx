@@ -45,6 +45,8 @@ export function DetailCards({
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
   const coastal = shouldDisplayTideCard(bundle.marine);
   const heading = useDeviceHeading();
+  const lastKnownLocation = useWeather((s) => s.here);
+  const qiblaLocation = lastKnownLocation ?? place;
   const windUnit = useWeather((s) => s.prefs.wind);
   const pressureUnit = useWeather((s) => s.prefs.pressure);
 
@@ -63,7 +65,7 @@ export function DetailCards({
       </article>
 
       <CompassCard lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} heading={heading} />
-      <QiblaCard lang={lang} place={place} heading={heading} />
+      <QiblaCard lang={lang} place={qiblaLocation} heading={heading} isLastKnownLocation={lastKnownLocation !== null} />
 
       <article className="wx-card px-3 py-2" dir="ltr">
         <SunArc progress={sunProgress(now, rise, set)} />
@@ -218,10 +220,11 @@ function CompassCard({
 
 /** True-north great-circle bearing. Physical sensor readings can be
  * magnetic/un-calibrated: never promise 100% device compass precision. */
-function QiblaCard({ lang, place, heading }: {
+function QiblaCard({ lang, place, heading, isLastKnownLocation }: {
   lang: Lang;
   place: Place;
   heading: number | null;
+  isLastKnownLocation: boolean;
 }) {
   const bearing = qiblaBearing(place.lat, place.lon);
   const relative = bearing === null || heading === null ? null : relativeQiblaAngle(bearing, heading);
@@ -250,6 +253,9 @@ function QiblaCard({ lang, place, heading }: {
       </svg>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-fg">{arabic ? "اتجاه القبلة" : "Qibla direction"}</p>
+        <p className="text-[11px] text-muted">{isLastKnownLocation
+          ? (arabic ? "بحسب آخر موقع محفوظ للجهاز" : "Based on last saved device location")
+          : placeTitle(place, lang)}</p>
         <p className="fig mt-1 text-fg">
           {bearing === null ? "—" : `${formatNumber(bearing, lang, 1)}°`}
           <span className="ms-1 text-xs text-muted">{arabic ? "من الشمال الحقيقي" : "from true north"}</span>
