@@ -36,3 +36,15 @@ export function shouldPaintWeatherFallback(kind: number, modelCover: boolean): b
 export function shouldEmitRainFrame(nowMs: number, lastMs: number): boolean {
   return nowMs - lastMs >= 50 || lastMs === 0;
 }
+
+/** Raster rain/snow is painted by ECMWF, not particle sprites. The separate
+ * cyclone overlay is the only rain-mode user of the particle canvas. */
+export function needsRainOverlay(showCyclones: boolean, cycloneCount: number): boolean {
+  return showCyclones && cycloneCount > 0;
+}
+
+/** Avoid repeatedly rasterizing static/slowly animated cyclone markers while
+ * the ECMWF workers are decoding their own large tile canvases. */
+export function shouldUpdateRainOverlay(nowMs: number, lastMs: number): boolean {
+  return lastMs === 0 || nowMs - lastMs >= 80;
+}
