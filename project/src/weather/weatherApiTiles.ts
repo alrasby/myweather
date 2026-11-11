@@ -61,8 +61,9 @@ export class WeatherApiTiles {
       this.retryAt = 0;
       this.cooldownKind = kind;
     }
-    // A large timeline seek must not show a misleading, distant old forecast.
-    if (this.currentTimeMs != null && Math.abs(valid - this.currentTimeMs) > 3 * HOUR) this.hide();
+    // A time seek must never blank the map while the next frame is decoding.
+    // Retain the last *labeled* valid forecast until replacement is ready.
+    // The UI separately shows the actual displayed frame UTC/local time.
     // Never show a previously selected physical variable while loading another.
     if (this.key && !this.key.startsWith(`${kind}:`)) this.hide();
     if (key === this.key || key === this.requestKey) return;
@@ -78,7 +79,7 @@ export class WeatherApiTiles {
       opacity: 0,
       maxNativeZoom: 7,
       maxZoom: 16,
-      keepBuffer: 1,
+      keepBuffer: 3,
       updateWhenIdle: true,
       // Display-only image tiles: do not require cross-origin pixel-read permission.
       className: "wx-ready-weather-tile",
@@ -101,7 +102,7 @@ export class WeatherApiTiles {
       this.timeout = null;
       const container = tile.getContainer();
       if (container) container.style.transition = "opacity 240ms ease-out";
-      tile.setOpacity(0.86);
+      tile.setOpacity(0.78);
       this.onAvailability(true, valid);
       if (old) {
         // Remove after the CSS fade while retaining a complete old image.
