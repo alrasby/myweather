@@ -268,7 +268,7 @@ async function pluginSpatial(url: string, init: RequestInit | undefined, headers
   if (cacheKey && result.status === 206 && bytes.byteLength > 0) {
     const savedHeaders: Record<string, string> = {};
     out.forEach((value, key) => { savedHeaders[key] = value; });
-    if (bytes.byteLength <= 256 * 1024) {
+    if (bytes.byteLength <= 512 * 1024) {
       spatialRangeCache.put(cacheKey, { bytes, status: 206, headers: savedHeaders });
       spatialCacheStored++;
     } else {
@@ -387,6 +387,7 @@ export class ModelField {
   private seq = 0;
   private orderKey = "";
   private visible = false;
+  private playbackActive = false;
   private lastSyncAt = 0;
   // Continuous pan refreshes must not reset the prefetch grace window every
   // time Leaflet emits another 'loading' for the same requested hour.
@@ -505,6 +506,13 @@ export class ModelField {
     };
   }
 
+  /** Priority changes only; never remount completed frames on play/pause. */
+  setPlaybackActive(on: boolean) {
+    if (this.playbackActive === on) return;
+    this.playbackActive = on;
+    if (on && this.visible && this.times.length) this.pump();
+  }
+
   setVisible(on: boolean) {
     this.visible = on;
     if (!on) {
@@ -517,6 +525,7 @@ export class ModelField {
       this.holdingPreviousFrame = false;
       this.refreshBase = null;
       this.refreshSince = 0;
+      this.playbackActive = false;
       this.clear();
     }
   }
@@ -574,7 +583,7 @@ export class ModelField {
     }
     const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
     const plan = planSpatialRequests(
-      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge,
+      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive,
     );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
