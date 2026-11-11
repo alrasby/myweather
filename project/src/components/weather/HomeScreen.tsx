@@ -284,6 +284,8 @@ function DayPanel({ bundle, day, lang }: { bundle: WeatherBundle; day: DayPoint;
   const temp = useWeather((s) => s.prefs.temp);
   const wind = useWeather((s) => s.prefs.wind);
   const hours = hoursForDay(bundle, day);
+  const actualHourlyCount = bundle.hourly.filter((h) => dayKey(h.t, bundle.timezone) === dayKey(day.t, bundle.timezone)).length;
+  const hourlyEstimated = actualHourlyCount < 18;
   const warm = hours.reduce<HourPoint | null>((best, h) => (!best || h.temp > best.temp ? h : best), null);
   const gust = hours.reduce((max, h) => Math.max(max, h.gust || h.wind), day.wind);
   const feels = warm?.feels ?? day.tmax;
@@ -308,6 +310,13 @@ function DayPanel({ bundle, day, lang }: { bundle: WeatherBundle; day: DayPoint;
           </div>
         ))}
       </div>
+      {hourlyEstimated ? (
+        <p className="px-1 text-[0.69rem] leading-snug text-muted" role="note">
+          {lang === "ar"
+            ? "التوزيع الساعي تقديري من بيانات اليوم؛ التفاصيل الساعية ليست توقعات مستقلة من المصدر."
+            : "Hourly distribution is estimated from daily values, not independently supplied hourly forecasts."}
+        </p>
+      ) : null}
       <p className="px-1 py-2 text-sm font-semibold text-fg">{t(lang, line)}</p>
       <div className="grid grid-cols-3 gap-y-4 px-1 text-center">
         <Mini icon={<Wind className="size-5" />} label={t(lang, "wind")} value={formatWind(day.wind, wind, lang)} />
