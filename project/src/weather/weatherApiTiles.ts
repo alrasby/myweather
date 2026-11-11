@@ -51,6 +51,8 @@ export class WeatherApiTiles {
       return;
     }
     const key = `${kind}:${weatherApiStamp(valid)}`;
+    // Never show a previously selected physical variable while loading another.
+    if (this.key && !this.key.startsWith(`${kind}:`)) this.hide();
     if (key === this.key || key === this.requestKey) return;
     if (this.now() < this.retryAt) return;
     this.clearIncoming();
