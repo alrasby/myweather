@@ -2,7 +2,7 @@
 /** CI-only read-back of npm's own lockfile solver, without repository write
  * permissions. The patch lines are consumed and reviewed before any GitHub
  * contents update. This script MUST NOT be part of release build tasks. */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -21,6 +21,17 @@ const run = (args, requireSuccess = true) => {
   return cp;
 };
 
+// The only remaining seven advisories after ordinary npm audit fix are
+// development-only, all cascading from typescript-estree's minimatch 10.x.
+// Force only this nested parser dependency onto the patched minimatch 11.x;
+// never override unrelated minimatch v3 consumers.
+const withOverride = read("package.json");
+withOverride.overrides ??= {};
+withOverride.overrides["@typescript-eslint/typescript-estree"] = {
+  minimatch: "^11.0.1",
+};
+writeFileSync("package.json", JSON.stringify(withOverride, null, 2) + "\\n");
+
 run(["pkg", "set", "dependencies.better-auth=^1.7.21", "dependencies.zod=^4.6.6"]);
 run(["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]);
 run(["audit", "fix", "--package-lock-only", "--ignore-scripts", "--no-fund"], false);
@@ -28,7 +39,7 @@ run(["audit", "fix", "--package-lock-only", "--ignore-scripts", "--no-fund"], fa
 const after = read("package-lock.json");
 const newManifest = read("package.json");
 if (after.lockfileVersion !== 3) throw new Error("Unexpected npm lockfile format");
-if (newManifest.dependencies["better-auth"] !== "^1.7.21" || newManifest.dependencies.zod !== "^4.6.6") {
+if (newManifest.dependencies["better-auth"] !== "^1.7.21" || newManifest.dependencies.zod !== "^4.6.6" || newManifest.overrides?.["@typescript-eslint/typescript-estree"]?.minimatch !== "^11.0.1") {
   throw new Error("Core patched version constraints were not applied");
 }
 console.log("SECURITY_PATCH_MANIFEST " + JSON.stringify(newManifest));
