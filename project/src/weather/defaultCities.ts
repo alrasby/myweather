@@ -1,5 +1,5 @@
 import type { Place } from "./types";
-import { MUSCAT } from "./types";
+import { MUSCAT } from "./types.ts";
 
 export const LONDON: Place = {
   id: "51.51,-0.13", name: "لندن", nameEn: "London",
