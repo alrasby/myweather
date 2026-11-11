@@ -269,7 +269,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         }).addTo(map);
         imageryRef.current = imagery;
         const labels = map.createPane("wx-labels");
-        labels.style.zIndex = "485";
+        labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
@@ -294,10 +294,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // The global model is restored immediately when the spatial frame
           // is incomplete, unavailable, or fails to load.
           modelRef.current.onLive = () => {
+            if (readyTileModeRef.current) return;
             engine.setModelCover(true);
             rainFallbackSuspendRef.current?.();
           };
           modelRef.current.onMiss = () => {
+            if (readyTileModeRef.current) return;
             engine.setModelCover(false);
             rainFallbackRefreshRef.current?.();
           };
@@ -364,6 +366,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     readyTileModeRef.current = readyTileMode;
     readyTileKindRef.current = readyTileKind;
+    const labelsPane = mapRef.current?.getPane("wx-labels");
+    if (labelsPane) labelsPane.style.zIndex = readyTileMode ? "485" : "420";
     if (readyTileMode) {
       engineRef.current?.setModelCover(false);
       weatherApiRef.current?.show(readyTileKind, lastTileTimeRef.current);
