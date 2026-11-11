@@ -281,7 +281,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         weatherApiRef.current = new WeatherApiTiles(L, map, (visible) => {
           setReadyTileLoaded(visible);
           // Never obscure the original weather engine until a complete PNG frame exists.
-          map.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
+          mapRef.current?.getContainer().querySelectorAll<HTMLCanvasElement>(".wx-field,.wx-parts").forEach((canvas) => {
             canvas.style.opacity = visible && readyTileModeRef.current ? "0" : "1";
           });
         });
