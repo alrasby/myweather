@@ -4,7 +4,7 @@ import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid"
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
-import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame } from "@/weather/weatherPlayback";
+import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -318,6 +318,7 @@ export class FieldEngine {
   private frameBox: { north: number; south: number; west: number; east: number } | null = null;
   private modelCover = false;
   private lastRainEmitAt = 0;
+  private lastRainOverlayAt = 0;
   private whirl = 0;
 
   constructor(private host: HTMLElement) {
@@ -392,6 +393,7 @@ export class FieldEngine {
     this.kind = kind;
     this.weatherWaitSince = null;
     this.lastRainEmitAt = 0;
+    this.lastRainOverlayAt = 0;
     this.particles = [];
     this.clearParticles();
     this.drawField();
@@ -442,10 +444,27 @@ export class FieldEngine {
 
   setCyclones(list: LiveCyclone[]) {
     this.cyclones = list;
+    if (this.kind === 2) {
+      // Clear dismissed systems and repaint changed marker positions once.
+      this.clearParticles();
+      this.lastRainOverlayAt = 0;
+      if (needsRainOverlay(this.showCyclones, list.length)) {
+        this.syncViewport();
+        this.drawParticles(0);
+      } else this.systems = [];
+    }
   }
 
   setShowCyclones(on: boolean) {
     this.showCyclones = on;
+    if (this.kind === 2) {
+      this.clearParticles();
+      this.lastRainOverlayAt = 0;
+      if (needsRainOverlay(on, this.cyclones.length)) {
+        this.syncViewport();
+        this.drawParticles(0);
+      } else this.systems = [];
+    }
   }
 
   activeGrid(): GridField | null {
@@ -733,13 +752,23 @@ export class FieldEngine {
       if (step.waiting) this.weatherWaitSince ??= now;
       else this.weatherWaitSince = null;
     }
-    this.pinView();
+    const rainCovered = this.kind === 2 && this.modelCover;
+    const hasRainOverlay = needsRainOverlay(this.showCyclones, this.cyclones.length);
+    // The hidden fallback frameBox is irrelevant while ECMWF covers the map
+    // and no cyclone marker is enabled. Avoid Leaflet coordinate conversion,
+    // canvas style checks and re-sizing on every 60fps frame.
+    if (!rainCovered || hasRainOverlay) this.pinView();
     // ECMWF already renders a complete cloud/rain/snow image in Leaflet.
     // Clearing the hidden fallback WebGL/Canvas surface at 60 FPS competes
     // with OM worker tile decoding on Android. setModelCover(true) clears it
     // once; on the return to fallback, setModelCover(false) redraws it.
     if (shouldPaintWeatherFallback(this.kind, this.modelCover)) this.drawField();
-    this.drawParticles(dt);
+    // In rain mode the particle canvas is needed only for cyclone markers;
+    // unlike the wind mode, there are no flowing particles to animate.
+    if (this.kind !== 2 || (hasRainOverlay && shouldUpdateRainOverlay(now, this.lastRainOverlayAt))) {
+      if (this.kind === 2) this.lastRainOverlayAt = now;
+      this.drawParticles(dt);
+    }
     this.emit();
     this.raf = requestAnimationFrame(this.frame);
   };
