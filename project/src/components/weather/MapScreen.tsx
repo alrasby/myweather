@@ -149,7 +149,24 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     // wind and temperature playback paths remain unchanged.
     engine.canAdvanceRainTime = (timeMs) => modelRef.current?.canAdvanceTo(timeMs) ?? true;
     engineRef.current = engine;
+    let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
+      // Keep ECMWF prefetch, temporal blending and requested valid time
+      // independent of the much slower text/DOM presentation workload.
+      if (kindRef.current === 2) {
+        modelRef.current?.setPlaybackActive(engine.playing);
+        modelRef.current?.sync(info.timeMs);
+      }
+      const now = performance.now();
+      if (diagnosticsOpenRef.current && now - diagnosticsTickRef.current > 1000) {
+        diagnosticsTickRef.current = now;
+        setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
+      }
+      // Avoid formatting the clock, searching nearby forecast points and
+      // rewriting slider labels 60 times/second while large ECMWF raster
+      // tiles are decoding on mobile. The model itself still updates above.
+      if (kindRef.current === 2 && now - lastRainLabelAt < 180) return;
+      lastRainLabelAt = now;
       // State changes only when the message phase changes, never at 60fps.
       // Skip brief cached-tile refreshes to keep the controls visually stable.
       const phase = kindRef.current === 2 ? weatherLoadingPhase(info.playbackWaitingMs) : 0;
@@ -186,15 +203,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       if (sliderRef.current) {
         if (grid) sliderRef.current.max = String(Math.max(1, grid.hours - 1));
         if (!dragRef.current) sliderRef.current.value = String(info.hour);
-      }
-      if (kindRef.current === 2) {
-        modelRef.current?.setPlaybackActive(engine.playing);
-        modelRef.current?.sync(info.timeMs);
-      }
-      // Diagnostics are opt-in and sampled at 1Hz, not on every map frame.
-      if (diagnosticsOpenRef.current && performance.now() - diagnosticsTickRef.current > 1000) {
-        diagnosticsTickRef.current = performance.now();
-        setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
       }
     };
     engine.onFrame = paint;
