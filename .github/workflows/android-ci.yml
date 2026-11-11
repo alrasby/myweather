@@ -44,6 +44,12 @@ jobs:
       - name: Install locked JavaScript dependencies
         working-directory: project
         run: npm ci
+      - name: Audit locked dependencies (direct, transitive, production)
+        working-directory: project
+        run: node scripts/security-audit.mjs
+      - name: Verify upgraded auth and parser APIs
+        working-directory: project
+        run: node scripts/security-compat.mjs
       - name: Typecheck
         working-directory: project
         run: npm run typecheck
@@ -51,7 +57,7 @@ jobs:
         working-directory: project
         run: |
           node --test scripts/browser-smoke-verdict.test.mjs scripts/sign-out-plan.test.mjs scripts/widget-visual-contract.test.mjs
-          node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts src/weather/modelTileReadiness.test.ts src/weather/modelFrameTimeline.test.ts src/weather/modelFrameQueue.test.ts src/weather/spatialNativeQueue.test.ts src/weather/spatialRangeCache.test.ts src/weather/spatialRun.test.ts src/weather/spatialLayerTelemetry.test.ts src/weather/spatialRangeFlights.test.ts src/weather/spatialTransferMetrics.test.ts src/weather/spatialPerformance.test.ts src/weather/spatialTilePolicy.test.ts src/weather/satelliteBasemap.test.ts src/weather/spatialViewportBounds.test.ts src/weather/weatherPlayback.test.ts src/weather/modelRenderPolicy.test.ts src/weather/solarForecast.test.ts src/weather/defaultCities.test.ts src/weather/lastViewedPlace.test.ts src/weather/pinnedAlerts.test.ts src/weather/forecastQuality.test.ts src/weather/spatialWatchdog.test.ts src/weather/qibla.test.ts src/weather/weatherApiTiles.test.ts
+          node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts src/weather/modelTileReadiness.test.ts src/weather/modelFrameTimeline.test.ts src/weather/modelFrameQueue.test.ts src/weather/spatialNativeQueue.test.ts src/weather/spatialRangeCache.test.ts src/weather/spatialRun.test.ts src/weather/spatialLayerTelemetry.test.ts src/weather/spatialRangeFlights.test.ts src/weather/spatialTransferMetrics.test.ts src/weather/spatialPerformance.test.ts src/weather/spatialTilePolicy.test.ts src/weather/satelliteBasemap.test.ts src/weather/spatialViewportBounds.test.ts src/weather/weatherPlayback.test.ts src/weather/modelRenderPolicy.test.ts src/weather/solarForecast.test.ts src/weather/defaultCities.test.ts src/weather/lastViewedPlace.test.ts src/weather/pinnedAlerts.test.ts src/weather/alertVisibility.test.ts src/weather/forecastQuality.test.ts src/weather/spatialWatchdog.test.ts src/weather/qibla.test.ts src/weather/weatherApiTiles.test.ts
       # Legacy root weather tests target the replaced net.ts API (requestLane,
       # requestWeight and budget persistence). They must not run against this
       # deliberately restored 1.0.54 source. Keep them in git for reference.
@@ -75,6 +81,19 @@ jobs:
           else
             exit 1
           fi
+      - name: Android Lint — platform security and correctness
+        working-directory: project/android
+        run: |
+          ./gradlew --no-daemon :app:lintDebug || {
+            echo "Android Lint failures:"
+            REPORT="app/build/reports/lint-results-debug.txt"
+            if [ -f "$REPORT" ]; then
+              grep -nE 'Error:|Warning:|errors?, [0-9]+ warnings?' "$REPORT" | head -100 || true
+            else
+              find app/build -type f -name 'lint-results-*.txt' -print | head -15
+            fi
+            exit 1
+          }
       - name: Build and verify signed release
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         working-directory: project/android

@@ -1021,21 +1021,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             <Icon />
           </button>
         ))}
-        {kind === 2 ? (
-          <button
-            type="button"
-            className="map-tool"
-            onClick={() => {
-              setWeatherDiagnosticsOpen((isOpen) => !isOpen);
-              setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
-            }}
-            aria-label={lang === "ar" ? "تشخيص مصدر الغيوم والمطر والثلوج" : "Diagnose cloud, rain and snow sources"}
-            title={lang === "ar" ? "تشخيص الطقس" : "Weather diagnostics"}
-            aria-expanded={weatherDiagnosticsOpen}
-          >
-            <span aria-hidden="true" className="text-lg font-semibold">ⓘ</span>
-          </button>
-        ) : null}
+        {/* Diagnostics remain available via three taps on the rain layer button;
+            do not show a permanent ⓘ control on the public map. */}
         <button type="button" className="map-tool map-tool-gap" onClick={() => mapRef.current?.zoomIn()} aria-label="+">
           <PlusMark />
         </button>

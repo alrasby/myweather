@@ -6,6 +6,9 @@
     <string name="widget_opacity">عتامة خلفية الويدجت</string>
     <string name="widget_tint">لون الزجاج</string>
     <string name="widget_tint_ocean">محيطي</string>
+    <string name="widget_tint_adaptive">تكيفي</string>
+    <string name="widget_tint_white">أبيض</string>
+    <string name="widget_tint_black">أسود</string>
     <string name="widget_tint_blue">أزرق</string>
     <string name="widget_tone">درجة اللون — فاتح إلى عميق</string>
     <string name="widget_strength">شدّة اللون</string>

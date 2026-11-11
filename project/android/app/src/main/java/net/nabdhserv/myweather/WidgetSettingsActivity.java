@@ -15,6 +15,7 @@ import android.os.SystemClock;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.activity.OnBackPressedCallback;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -57,6 +58,9 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         ((TextView) findViewById(R.id.labelTheme)).setText(getString(R.string.widget_theme));
         ((TextView) findViewById(R.id.labelTint)).setText(getString(R.string.widget_tint));
         ((TextView) findViewById(R.id.tintOcean)).setText(getString(R.string.widget_tint_ocean));
+        ((TextView) findViewById(R.id.tintAdaptive)).setText(getString(R.string.widget_tint_adaptive));
+        ((TextView) findViewById(R.id.tintWhite)).setText(getString(R.string.widget_tint_white));
+        ((TextView) findViewById(R.id.tintBlack)).setText(getString(R.string.widget_tint_black));
         ((TextView) findViewById(R.id.tintBlue)).setText(getString(R.string.widget_tint_blue));
         ((TextView) findViewById(R.id.labelTone)).setText(getString(R.string.widget_tone));
         ((TextView) findViewById(R.id.labelStrength)).setText(getString(R.string.widget_strength));
@@ -90,13 +94,18 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         });
         findViewById(R.id.light).setOnClickListener(v -> {
             dark = false;
+            if ("adaptive".equals(tint)) tint = "white";
             save();
         });
         findViewById(R.id.dark).setOnClickListener(v -> {
             dark = true;
+            if ("adaptive".equals(tint)) tint = "black";
             save();
         });
         bindTint(R.id.tintOcean, "ocean");
+        bindTint(R.id.tintAdaptive, "adaptive");
+        bindTint(R.id.tintWhite, "white");
+        bindTint(R.id.tintBlack, "black");
         bindTint(R.id.tintBlue, "blue");
         bindTint(R.id.tintTeal, "teal");
         bindTint(R.id.tintViolet, "violet");
@@ -141,6 +150,19 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         showAlpha();
         paintChips();
         buildCities();
+        // Android gesture navigation bypasses the deprecated onBackPressed().
+        // Keep launcher-widget configuration result semantics identical.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (configuring) {
+                    Intent data = new Intent();
+                    data.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+                    setResult(RESULT_CANCELED, data);
+                }
+                finish();
+            }
+        });
     }
 
     private void showAlpha() {
@@ -157,10 +179,13 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         ImageView image = findViewById(R.id.glassPreview);
         if (image != null) {
             // Small bitmap for the configuration preview: no large churn while dragging sliders.
-            image.setImageBitmap(WeatherWidget.glass(440, 148, alpha, dark, 1f, tint, tone, strength));
+            boolean previewDark = WeatherWidget.isDarkGlass(this, tint, dark);
+            image.setImageBitmap(WeatherWidget.glass(440, 148, alpha, previewDark, 1f,
+                tint, tone, strength, this));
         }
         TextView sample = findViewById(R.id.previewLabel);
-        if (sample != null) sample.setTextColor(dark ? Color.WHITE : 0xFF182C44);
+        if (sample != null) sample.setTextColor(
+            WeatherWidget.isDarkGlass(this, tint, dark) ? Color.WHITE : 0xFF182C44);
     }
 
     private void paintChips() {
@@ -168,6 +193,9 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         chip(R.id.dark, dark);
         chip(R.id.styleWeather, !clock);
         chip(R.id.styleClock, clock);
+        tintChip(R.id.tintAdaptive, "adaptive");
+        tintChip(R.id.tintWhite, "white");
+        tintChip(R.id.tintBlack, "black");
         tintChip(R.id.tintOcean, "ocean");
         tintChip(R.id.tintBlue, "blue");
         updatePreview(true);
@@ -185,6 +213,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
     private void bindTint(int id, String name) {
         findViewById(id).setOnClickListener(v -> {
             tint = name;
+            if ("white".equals(name)) dark = false;
+            if ("black".equals(name)) dark = true;
             save();
         });
     }
@@ -194,7 +224,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         boolean selected = name.equals(tint);
         GradientDrawable background = new GradientDrawable();
         background.setCornerRadius(dp(18));
-        int color = WeatherWidget.glassTint(name, dark, tone, strength);
+        int color = WeatherWidget.glassTint(this, name,
+            WeatherWidget.isDarkGlass(this, name, dark), tone, strength);
         background.setColor(color);
         background.setStroke(dp(selected ? 3 : 1), selected ? 0xFFDEA73D : 0xFF98A7B6);
         view.setBackground(background);
@@ -293,13 +324,4 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         finish();
     }
 
-    @Override
-    public void onBackPressed() {
-        if (configuring) {
-            Intent data = new Intent();
-            data.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
-            setResult(RESULT_CANCELED, data);
-        }
-        super.onBackPressed();
-    }
 }
