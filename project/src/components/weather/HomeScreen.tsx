@@ -21,6 +21,7 @@ import { t, weatherKey, type CopyKey } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
 import { lookupPlace } from "@/weather/placeLookup";
 import { pinWeatherAlerts } from "@/weather/pinnedAlerts";
+import { suppressCityOnRefresh, visibleWeatherNotices } from "@/weather/alertVisibility";
 import { activePlace, useWeather } from "@/weather/store";
 import type { DayPoint, HourPoint, Lang, QuietHours, WeatherBundle } from "@/weather/types";
 
@@ -119,13 +120,14 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     // alerts are intentionally represented by their stable joined signature.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alertScope, alertSignature, prefs.alerts]);
-  const shownAlerts = (prefs.alerts && !refreshHiddenCities.includes(place.id)
-    ? pinnedAlerts[alertScope] ?? alerts : [])
-    .filter((item) => !dismissed.includes(`${place.id}|${item}`));
+  const shownAlerts = visibleWeatherNotices(
+    prefs.alerts ? pinnedAlerts[alertScope] ?? alerts : [],
+    refreshHiddenCities, place.id, dismissed,
+  );
   const hideAlertsAfterPull = () => {
     setRefreshHiddenCities((prev) => {
       if (prev.includes(place.id)) return prev;
-      const next = [...prev, place.id].slice(-32);
+      const next = suppressCityOnRefresh(prev, place.id);
       try { sessionStorage.setItem("myweather-alert-refresh-hidden", JSON.stringify(next)); }
       catch { /* session storage may be disabled */ }
       return next;
