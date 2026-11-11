@@ -17,7 +17,7 @@ import {
 import { compassFrom } from "@/weather/heading";
 import { aqiKey, moonKey, t } from "@/weather/i18n";
 import { useWeather } from "@/weather/store";
-import type { Lang, Place, PressureUnit, WeatherBundle, WindUnit } from "@/weather/types";
+import type { Lang, Place, PressureUnit, WeatherBundle } from "@/weather/types";
 
 export function DetailCards({
   bundle,
@@ -43,6 +43,7 @@ export function DetailCards({
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
   const coastal = bundle.marine?.coastal === true;
   const pressureUnit = useWeather((s) => s.prefs.pressure);
+  const windUnit = useWeather((s) => s.prefs.wind);
 
   return (
     <div className="mt-3 space-y-3">
@@ -111,9 +112,13 @@ export function DetailCards({
           <p className="text-sm text-fg">
             {bundle.current.visibility >= 16000 ? t(lang, "unlimited") : t(lang, "limited")}
           </p>
-          <p className="fig mt-auto pt-3 text-fg">{formatKm(bundle.current.visibility, lang)}</p>
-          <p className="mt-2 text-sm text-muted">
+          <p className="fig mt-1 font-semibold text-fg">{formatKm(bundle.current.visibility, lang)}</p>
+          <p className="mt-1 text-sm text-muted">
             {t(lang, "dust")} {dust == null ? "—" : formatNumber(dust, lang, 0)} {t(lang, "perM3")}
+          </p>
+          <p className="mt-2 text-[0.72rem] leading-snug text-fg">
+            {t(lang, "wind")} {formatWind(bundle.current.wind, windUnit, lang)}
+            <span className="font-semibold text-accent"> · {compassFrom(bundle.current.dir, lang)}</span>
           </p>
         </article>
       </div>
@@ -182,15 +187,12 @@ function pressureHoursAgo(bundle: WeatherBundle, now: number, hours: number): nu
 /** One sensor-backed compass: red points north, turquoise points to the Kaaba. */
 /** Single compass rose with two independently positioned, sensor-synchronised bearings. */
 export function QiblaCard({
-  lat, lon, reading, lang, wind, windFrom, windUnit, deviceLocation, locationAccuracy, locationFailed, locating, onLocate,
+  lat, lon, reading, lang, deviceLocation, locationAccuracy, locationFailed, locating, onLocate,
 }: {
   lat: number;
   lon: number;
   reading: CompassReading;
   lang: Lang;
-  wind: number;
-  windFrom: number;
-  windUnit: WindUnit;
   deviceLocation: boolean;
   locationAccuracy: number | null;
   locationFailed: boolean;
@@ -202,12 +204,12 @@ export function QiblaCard({
   const northOnScreen = heading == null ? 0 : -heading;
   const qiblaOnScreen = bearing == null ? null : heading == null ? bearing : relativeQiblaDirection(bearing, heading);
   const ar = lang === "ar";
-  const confidence = heading == null ? (ar ? "البوصلة غير متاحة" : "Sensor unavailable")
-    : !trueNorth ? (ar ? "الشمال المغناطيسي/غير مُصحّح" : "Magnetic/uncorrected north")
-    : accuracy === "low" ? (ar ? "المستشعر يحتاج إلى معايرة" : "Calibrate compass sensor")
-    : accuracy === "medium" ? (ar ? "دقة المستشعر متوسطة" : "Medium sensor accuracy")
-    : accuracy === "high" ? (ar ? "إشارة مستشعر جيدة" : "Good sensor signal")
-    : (ar ? "دقة المستشعر غير معروفة" : "Sensor accuracy unknown");
+  // Sensor accuracy is not a measured angular error. Do not suggest that "high"
+  // accuracy or a GPS radius guarantees a physically correct north bearing.
+  const warning = heading == null ? (ar ? "البوصلة غير متاحة" : "Compass unavailable")
+    : !trueNorth ? (ar ? "الشمال المغناطيسي؛ حدّد موقعك لتصحيحه" : "Magnetic north; locate yourself to correct it")
+    : accuracy === "low" ? (ar ? "عاير مستشعر البوصلة" : "Calibrate the compass sensor")
+    : null;
   return (
     <article className="wx-card flex items-center gap-3 px-3 py-3.5">
       <svg className="size-[8.2rem] shrink-0 text-fg" viewBox="0 0 160 160" role="img"
@@ -220,12 +222,17 @@ export function QiblaCard({
               stroke="currentColor" strokeWidth={i % 18 === 0 ? 1.7 : 0.85}
               strokeOpacity={i % 3 === 0 ? 0.6 : 0.3} transform={`rotate(${i * 5} 80 80)`} />
           ))}
-          {(["N", "E", "S", "W"] as const).map((label, i) => (
-            <text key={label} x="80" y="39" textAnchor="middle" fontSize="12" fontWeight="700"
-              fill={i === 0 ? "var(--color-danger)" : "currentColor"}
-              transform={`rotate(${i * 90} 80 80) rotate(${-i * 90} 80 35)`}>{label}</text>
+          {([
+            { label: "N", x: 80, y: 36 },
+            { label: "E", x: 125, y: 84 },
+            { label: "S", x: 80, y: 132 },
+            { label: "W", x: 35, y: 84 },
+          ] as const).map(({ label, x, y }) => (
+            <text key={label} x={x} y={y} textAnchor="middle" fontSize="12" fontWeight="700"
+              fill={label === "N" ? "var(--color-danger)" : "currentColor"}
+              transform={`rotate(${-northOnScreen} ${x} ${y})`}>{label}</text>
           ))}
-          <path d="M80 11 L86 50 L80 44 L74 50 Z" fill="var(--color-danger)" />
+          <path d="M80 43 L86 69 L80 63 L74 69 Z" fill="var(--color-danger)" />
         </g>
         {qiblaOnScreen != null ? (
           <g transform={`rotate(${qiblaOnScreen} 80 80)`}>
@@ -251,21 +258,18 @@ export function QiblaCard({
           <span className="text-accent">{ar ? "القبلة" : "Qibla"}</span>
           <span className="ms-1" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</span>
         </p>
-        <p className="mt-1 text-[0.7rem] leading-snug text-muted">{confidence}</p>
+        {warning ? <p className="mt-1 text-[0.7rem] leading-snug text-muted">{warning}</p> : null}
         <button type="button" className="mt-1.5 rounded-full border border-line px-2 py-1 text-[0.7rem] text-accent"
           onClick={onLocate} disabled={locating}>
           {locating ? (ar ? "تحديد الموقع…" : "Locating…") : deviceLocation
             ? (ar ? "تحديث موقعي للقبلة" : "Refresh Qibla location")
             : (ar ? "تحديد موقعي للقبلة" : "Use my location")}
+          {deviceLocation && locationAccuracy != null && Number.isFinite(locationAccuracy)
+            ? <span className="ms-1" dir="ltr">· ±{Math.round(locationAccuracy)} m</span> : null}
         </button>
         {!deviceLocation ? <p className="mt-1 text-[0.65rem] text-muted">
           {ar ? "الاتجاه الحالي محسوب للمدينة المختارة" : "Calculated for selected city"}
         </p> : null}
-        {deviceLocation && locationAccuracy != null ? (
-          <p className="mt-1 text-[0.65rem] text-muted">
-            {ar ? "دقة تحديد الموقع التقريبية" : "Approximate GPS accuracy"} ±{Math.round(locationAccuracy)} m
-          </p>
-        ) : null}
         {locationFailed ? <p className="mt-1 text-[0.65rem] text-muted" role="status">
           {ar ? "تعذر تحديد الموقع؛ تحقق من الإذن وGPS" : "Location unavailable; check GPS permission"}
         </p> : null}
@@ -274,10 +278,6 @@ export function QiblaCard({
             {ar ? "أبعد الهاتف عن المعادن وحرّكه بشكل 8 لمعايرة المستشعر" : "Move away from metal; make a figure-eight motion"}
           </p>
         ) : null}
-        <p className="mt-1 text-xs text-fg">
-          {t(lang, "wind")} {formatWind(wind, windUnit, lang)}
-          <span className="font-semibold text-accent"> · {compassFrom(windFrom, lang)}</span>
-        </p>
       </div>
     </article>
   );
