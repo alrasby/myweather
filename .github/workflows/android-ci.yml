@@ -47,6 +47,9 @@ jobs:
       - name: Audit locked dependencies (direct, transitive, production)
         working-directory: project
         run: node scripts/security-audit.mjs
+      - name: Resolve patched lockfile safely (audit fix probe; read-only to repository)
+        working-directory: project
+        run: node scripts/security-lock-probe.mjs
       - name: Typecheck
         working-directory: project
         run: npm run typecheck
