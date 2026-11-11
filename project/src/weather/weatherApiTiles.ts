@@ -54,6 +54,9 @@ export class WeatherApiTiles {
     // Never show a previously selected physical variable while loading another.
     if (this.key && !this.key.startsWith(`${kind}:`)) this.hide();
     if (key === this.key || key === this.requestKey) return;
+    // Fast playback must not cancel each in-flight hour before its PNG tiles finish.
+    // Finish the in-flight frame then skip straight to the newest requested hour.
+    if (this.incoming && this.requestKey.startsWith(`${kind}:`)) return;
     if (this.now() < this.retryAt) return;
     this.clearIncoming();
     this.requestKey = key;
