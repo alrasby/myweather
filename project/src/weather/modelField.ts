@@ -4,6 +4,7 @@ import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTim
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
+import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
@@ -38,6 +39,8 @@ export type WeatherModelDiagnostics = {
   errors: number[];
   visibleOpacity: number;
   metadataAvailable: boolean;
+  modelRunPinned: boolean;
+  modelRunReferenceTime: string | null;
   error: string | null;
   cacheHits: number;
   nativeReads: number;
@@ -356,7 +359,10 @@ export function installSpatialFetch(): void {
     throw new Error("spatial-fetch");
   };
 }
-function tileUrl(variable: string, index: number): string {
+function tileUrl(variable: string, index: number, run: PinnedSpatialRun | null): string {
+  if (run) return pinnedSpatialTileUrl(run, variable, index);
+  // Compatibility-only fallback for a provider missing reference_time.
+  // The capture path must not be used for normal, valid ECMWF run metadata.
   const q = new URLSearchParams({
     time_step: `valid_times_${index}`,
     variable,
@@ -373,6 +379,7 @@ export class ModelField {
   private map: LeafletMap | null = null;
   private adapter: Adapter | null = null;
   private times: number[] = [];
+  private pinnedRun: PinnedSpatialRun | null = null;
   private lastError: string | null = null;
   private base = 0;
   private blend = 0;
@@ -411,9 +418,10 @@ export class ModelField {
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
+    this.pinnedRun = null;
     this.ready = fetch(META)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((json: { valid_times?: string[]; variables?: string[] }) => {
+      .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -422,7 +430,14 @@ export class ModelField {
           this.times = [];
           return;
         }
-        this.times = (json.valid_times ?? []).map((t) => Date.parse(t)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+        // Resolve one immutable run for the entire time animation.
+        // The Capture API resolves latest.json separately per layer/tile and
+        // can change runs mid-playback after its 60-second metadata TTL.
+        // Keep identical run and valid time across clouds, rain and snow.
+        this.pinnedRun = pinSpatialRun(json);
+        this.times = this.pinnedRun
+          ? [...this.pinnedRun.validTimes]
+          : (json.valid_times ?? []).map((t) => Date.parse(t)).filter(Number.isFinite).sort((a, b) => a - b);
       })
       .catch((error: unknown) => {
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
@@ -488,6 +503,8 @@ export class ModelField {
       errors: frame?.errorCounts.slice() ?? [0, 0, 0],
       visibleOpacity: frame?.opacity ?? 0,
       metadataAvailable: this.times.length > 0,
+      modelRunPinned: this.pinnedRun !== null,
+      modelRunReferenceTime: this.pinnedRun ? new Date(this.pinnedRun.referenceTime).toISOString() : null,
       error: this.lastError,
       cacheHits: spatialCacheHits,
       nativeReads: spatialNativeReads,
@@ -645,9 +662,9 @@ export class ModelField {
     const cloudOpts = spatialTileOptions("wx-clouds");
     const rainOpts = spatialTileOptions("wx-model");
     const made = [
-      adapter.createTileLayer(tileUrl("cloud_cover", step), cloudOpts),
-      adapter.createTileLayer(tileUrl("precipitation", step), rainOpts),
-      adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step), rainOpts),
+      adapter.createTileLayer(tileUrl("cloud_cover", step, this.pinnedRun), cloudOpts),
+      adapter.createTileLayer(tileUrl("precipitation", step, this.pinnedRun), rainOpts),
+      adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.pinnedRun), rainOpts),
     ] as AnyLayer[];
     const frame = {
       layers: made, token, opacity: -1, ready: false,
