@@ -44,6 +44,9 @@ jobs:
       - name: Install locked JavaScript dependencies
         working-directory: project
         run: npm ci
+      - name: Audit locked dependencies (direct, transitive, production)
+        working-directory: project
+        run: node scripts/security-audit.mjs
       - name: Typecheck
         working-directory: project
         run: npm run typecheck
