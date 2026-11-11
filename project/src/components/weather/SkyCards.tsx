@@ -182,7 +182,7 @@ function pressureHoursAgo(bundle: WeatherBundle, now: number, hours: number): nu
 /** One sensor-backed compass: red points north, turquoise points to the Kaaba. */
 /** Single compass rose with two independently positioned, sensor-synchronised bearings. */
 export function QiblaCard({
-  lat, lon, reading, lang, wind, windFrom, windUnit, deviceLocation, locating, onLocate,
+  lat, lon, reading, lang, wind, windFrom, windUnit, deviceLocation, locationAccuracy, locationFailed, locating, onLocate,
 }: {
   lat: number;
   lon: number;
@@ -192,6 +192,8 @@ export function QiblaCard({
   windFrom: number;
   windUnit: WindUnit;
   deviceLocation: boolean;
+  locationAccuracy: number | null;
+  locationFailed: boolean;
   locating: boolean;
   onLocate: () => void;
 }) {
@@ -258,6 +260,14 @@ export function QiblaCard({
         </button>
         {!deviceLocation ? <p className="mt-1 text-[0.65rem] text-muted">
           {ar ? "الاتجاه الحالي محسوب للمدينة المختارة" : "Calculated for selected city"}
+        </p> : null}
+        {deviceLocation && locationAccuracy != null ? (
+          <p className="mt-1 text-[0.65rem] text-muted">
+            {ar ? "دقة تحديد الموقع التقريبية" : "Approximate GPS accuracy"} ±{Math.round(locationAccuracy)} m
+          </p>
+        ) : null}
+        {locationFailed ? <p className="mt-1 text-[0.65rem] text-muted" role="status">
+          {ar ? "تعذر تحديد الموقع؛ تحقق من الإذن وGPS" : "Location unavailable; check GPS permission"}
         </p> : null}
         {heading != null && (!trueNorth || accuracy === "low") ? (
           <p className="mt-0.5 text-[0.65rem] text-muted">
@@ -373,6 +383,9 @@ function TideCard({
       <div className="text-end">
         <h2 className="text-sm font-semibold text-fg">{t(lang, "tide")}</h2>
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
+        <p className="mt-1 text-[0.66rem] text-muted">{lang === "ar"
+          ? "تقدير فلكي غير مُعاير لمحطة ساحلية؛ لا يُستخدم للملاحة"
+          : "Uncalibrated astronomical estimate; not for navigation"}</p>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
