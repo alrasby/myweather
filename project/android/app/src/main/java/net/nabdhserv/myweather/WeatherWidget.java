@@ -30,6 +30,7 @@ public class WeatherWidget extends AppWidgetProvider {
     static final String PREFS = "myweather_widget";
     static final String KEY_JSON = "payload";
     static final String KEY_ALPHA = "alpha";
+    static final String KEY_TINT = "tint";
     static final String KEY_DARK = "dark";
     static final String KEY_CLOCK = "clock";
     static final String KEY_PLACE = "place";
@@ -69,6 +70,7 @@ public class WeatherWidget extends AppWidgetProvider {
         boolean clock = sp.getBoolean(KEY_CLOCK, false);
         boolean dark = sp.getBoolean(KEY_DARK, false);
         int alpha = sp.getInt(KEY_ALPHA, 60);
+        String tint = sp.getString(KEY_TINT, "ocean");
         int layout;
         boolean forecast = false;
         boolean details = false;
@@ -120,7 +122,7 @@ public class WeatherWidget extends AppWidgetProvider {
         if (forecast) bindDays(views, data, fg, dark, density);
         int wPx = Math.max(1, Math.round(Math.max(w, 110) * density));
         int hPx = Math.max(1, Math.round(Math.max(h, 40) * density));
-        views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density));
+        views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint));
         Intent open = new Intent(context, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(
@@ -208,24 +210,52 @@ public class WeatherWidget extends AppWidgetProvider {
         return R.drawable.ic_w_cloud;
     }
 
-    static Bitmap glass(int w, int h, int alphaPct, boolean dark, float density) {
-        int a = Math.max(40, Math.min(235, Math.round(255f * alphaPct / 100f)));
-        if (dark) a = Math.max(a, 188);
+    /** Colors are separate from opacity: reducing opacity never forces a dark or white wash. */
+    static int glassTint(String choice, boolean dark) {
+        switch (choice == null ? "" : choice) {
+            case "teal":   return Color.parseColor(dark ? "#17474B" : "#D0F0E9");
+            case "violet": return Color.parseColor(dark ? "#37345C" : "#E8DFF7");
+            case "rose":   return Color.parseColor(dark ? "#542F4D" : "#F4DFEC");
+            default:       return Color.parseColor(dark ? "#173449" : "#D7E8F5");
+        }
+    }
+
+    private static int mixRgb(int a, int b, float weight) {
+        float t = Math.max(0f, Math.min(1f, weight));
+        return Color.rgb(
+            Math.round(Color.red(a) * (1f - t) + Color.red(b) * t),
+            Math.round(Color.green(a) * (1f - t) + Color.green(b) * t),
+            Math.round(Color.blue(a) * (1f - t) + Color.blue(b) * t)
+        );
+    }
+
+    static Bitmap glass(int w, int h, int alphaPct, boolean dark, float density, String tintName) {
+        // Alpha is *actual* alpha, including dark mode (no minimum 188 override).
+        int a = Math.round(255f * Math.max(15, Math.min(95, alphaPct)) / 100f);
+        int tint = glassTint(tintName, dark);
+        int topRgb = mixRgb(tint, Color.WHITE, dark ? 0.13f : 0.10f);
+        int bottomRgb = mixRgb(tint, dark ? Color.BLACK : Color.WHITE, dark ? 0.25f : 0.07f);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bmp);
         float r = 22f * Math.max(1f, density);
         RectF box = new RectF(1.5f, 1.5f, w - 1.5f, h - 1.5f);
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        int top = dark ? Color.argb(a, 28, 30, 34) : Color.argb(Math.min(245, a + 18), 255, 255, 255);
-        int bot = dark ? Color.argb(a, 8, 9, 12) : Color.argb(a, 226, 232, 238);
-        paint.setShader(new LinearGradient(0, 0, 0, h, top, bot, Shader.TileMode.CLAMP));
+        paint.setShader(new LinearGradient(0, 0, w * 0.18f, h,
+            Color.argb(a, Color.red(topRgb), Color.green(topRgb), Color.blue(topRgb)),
+            Color.argb(a, Color.red(bottomRgb), Color.green(bottomRgb), Color.blue(bottomRgb)),
+            Shader.TileMode.CLAMP));
         canvas.drawRoundRect(box, r, r, paint);
-        paint.setShader(new LinearGradient(0, 0, 0, h * 0.42f, Color.argb(dark ? 48 : 120, 255, 255, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP));
+        // A subtle highlight follows selected opacity, instead of turning a
+        // transparent widget opaque with a second independent white gradient.
+        int sheen = Math.round(a * (dark ? 0.12f : 0.24f));
+        paint.setShader(new LinearGradient(0, 0, w * 0.4f, h * 0.64f,
+            Color.argb(sheen, 255, 255, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP));
         canvas.drawRoundRect(box, r, r, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(Math.max(1f, density));
-        paint.setColor(Color.argb(dark ? 70 : 170, 255, 255, 255));
+        paint.setColor(Color.argb(Math.min(180, Math.round(a * (dark ? 0.45f : 0.64f))),
+            233, 246, 255));
         canvas.drawRoundRect(box, r, r, paint);
         return bmp;
     }

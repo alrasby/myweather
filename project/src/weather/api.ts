@@ -1,6 +1,7 @@
 import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
 import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
+import { metRainRate, isRecentObservation, validDailyTemperatures } from "@/weather/forecastQuality";
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
@@ -157,7 +158,7 @@ function buildBundle(
       isDay: num(current.is_day) === 1,
     },
     hourly: hourRows.filter((row) => Number.isFinite(row.t)),
-    daily: dayRows.filter((row) => Number.isFinite(row.t)),
+    daily: dayRows.filter((row) => Number.isFinite(row.t) && validDailyTemperatures(row.tmax, row.tmin)),
     air,
     marine,
   };
@@ -269,12 +270,22 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
     "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,uv_index_max,wind_speed_10m_max",
   );
   url.searchParams.set("forecast_days", "15");
+  // Best-match combines the finest available regional and global models;
+  // fixed ECMWF-only forecasts would lower local accuracy in many regions.
+  url.searchParams.set("models", "best_match");
   url.searchParams.set("timezone", "auto");
   url.searchParams.set("wind_speed_unit", "kmh");
   url.searchParams.set("temperature_unit", "celsius");
   url.searchParams.set("precipitation_unit", "mm");
   url.searchParams.set("cell_selection", "land");
-  const res = await proxyFetch(url.toString(), signal);
+  const forecastRequest = proxyFetch(url.toString(), signal);
+  // Air quality and coastal observations are independent. Starting them in
+  // parallel saves the previously serialized two extra network round trips.
+  const supplements = Promise.all([
+    fetchAir(place, signal).catch(() => null),
+    fetchMarine(place, signal).catch(() => null),
+  ]);
+  const res = await forecastRequest;
   if (res.status === 429) {
     const body = await res.text().catch(() => "");
     if (/daily (api )?request limit|daily limit exceeded/i.test(body)) markQuota(30 * 60_000);
@@ -287,11 +298,13 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
     if (/daily (api )?request limit|daily limit exceeded/i.test(reason)) markQuota(30 * 60_000);
     throw new Error(reason || "forecast");
   }
-  const [air, marine] = await Promise.all([
-    fetchAir(place, signal).catch(() => null),
-    fetchMarine(place, signal).catch(() => null),
-  ]);
-  return buildBundle(place, json, air, marine);
+  const [air, marine] = await supplements;
+  const bundle = buildBundle(place, json, air, marine);
+  if (!Number.isFinite(bundle.current.temp) || bundle.hourly.length < 6 ||
+      bundle.daily.length < 3 || !isRecentObservation(bundle.current.t, Date.now())) {
+    throw new Error("incomplete-or-stale-open-meteo-forecast");
+  }
+  return bundle;
 }
 
 const MET_UA = "MyWeather/1.0 (net.nabdhserv.myweather)";
@@ -373,8 +386,9 @@ function metPeriodMm(data: MetData, stepH: number): number {
   const one = data.next_1_hours?.details?.precipitation_amount;
   const six = data.next_6_hours?.details?.precipitation_amount;
   const twelve = data.next_12_hours?.details?.precipitation_amount;
-  const raw = stepH <= 2 ? (one ?? six ?? twelve) : stepH <= 8 ? (six ?? twelve ?? one) : (twelve ?? six ?? one);
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+  // Long-window amounts are not per-hour values. Normalize before integrating
+  // irregular MET.no time steps, or daily totals can be grossly exaggerated.
+  return metRainRate(one, six, twelve) * Math.max(1, stepH);
 }
 
 function feelsLike(temp: number, rh: number, windKmh: number): number {

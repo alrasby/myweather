@@ -7,7 +7,12 @@
     <string name="widget_name">MyWeather</string>
     <string name="widget_desc">Glass weather widget. Drag the edges to change width and height.</string>
     <string name="widget_config_title">Weather and Clock</string>
-    <string name="widget_opacity">Transparency</string>
+    <string name="widget_opacity">Background opacity</string>
+    <string name="widget_tint">Glass color</string>
+    <string name="widget_tint_ocean">Ocean</string>
+    <string name="widget_tint_teal">Teal</string>
+    <string name="widget_tint_violet">Violet</string>
+    <string name="widget_tint_rose">Rose</string>
     <string name="widget_theme">Appearance</string>
     <string name="widget_light">Light</string>
     <string name="widget_dark">Dark</string>

@@ -7,3 +7,11 @@
 export function needsSatelliteUnderlay(zoom: number, nativeZoom = 5): boolean {
   return Number.isFinite(zoom) && zoom > nativeZoom;
 }
+
+/** Chromium on high-density Android devices can expose a 1 CSS-pixel
+ * raster tile seam between individually GPU-composited Esri tile images.
+ * Apply a small raster-only edge bleed; never stretch OM weather-model data.
+ */
+export function needsRasterSeamGuard(agent: string, dpr: number): boolean {
+  return /Android/i.test(agent) && Number.isFinite(dpr) && dpr >= 1.5;
+}
