@@ -34,7 +34,6 @@ export class WeatherApiTiles {
   private readonly L: typeof Leaflet;
   private readonly map: LeafletMap;
   private onAvailability: (visible: boolean, frameTimeMs: number | null) => void;
-  private currentTimeMs: number | null = null;
   private cooldownKind: WeatherApiKind | null = null;
   private now: () => number;
 
@@ -96,7 +95,6 @@ export class WeatherApiTiles {
       this.incoming = null;
       this.current = tile;
       this.key = key;
-      this.currentTimeMs = valid;
       this.requestKey = "";
       if (this.timeout) clearTimeout(this.timeout);
       this.timeout = null;
@@ -125,7 +123,6 @@ export class WeatherApiTiles {
     if (this.current) this.map.removeLayer(this.current);
     this.current = null;
     this.key = "";
-    this.currentTimeMs = null;
     this.requestKey = "";
     this.onAvailability(false, null);
   }
