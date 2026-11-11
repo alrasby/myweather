@@ -9,6 +9,7 @@ export type SpatialPerformanceSnapshot = {
   nativeQueue: SpatialTimingStats;
   nativeNetwork: SpatialTimingStats;
   nativeFailures: number;
+  nativeCancellations: number;
   nativeBytes: number;
   tilePipeline: SpatialTimingStats[];
   tileFailures: number[];
@@ -25,6 +26,7 @@ export class SpatialPerformance {
   private readonly tiles: number[][] = [[], [], []];
   private readonly tileErrors: number[] = [0, 0, 0];
   private failures = 0;
+  private cancellations = 0;
   private bytes = 0;
   private static readonly sampleLimit = 120;
   private add(samples: number[], value: number) {
@@ -32,11 +34,12 @@ export class SpatialPerformance {
     samples.push(value);
     if (samples.length > SpatialPerformance.sampleLimit) samples.shift();
   }
-  networkRequest(queueMs: number, networkMs: number, bytes: number, success: boolean) {
+  networkRequest(queueMs: number, networkMs: number, bytes: number, success: boolean, canceled = false) {
     this.add(this.queue, queueMs);
     this.add(this.network, networkMs);
     if (Number.isFinite(bytes) && bytes >= 0) this.bytes += bytes;
-    if (!success) this.failures++;
+    if (canceled) this.cancellations++;
+    else if (!success) this.failures++;
   }
   tile(index: number, ms: number, success: boolean) {
     if (index < 0 || index >= 3) return;
@@ -48,6 +51,7 @@ export class SpatialPerformance {
       nativeQueue: summarizeDurations(this.queue),
       nativeNetwork: summarizeDurations(this.network),
       nativeFailures: this.failures,
+      nativeCancellations: this.cancellations,
       nativeBytes: this.bytes,
       tilePipeline: this.tiles.map(summarizeDurations),
       tileFailures: [...this.tileErrors],

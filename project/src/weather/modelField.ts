@@ -4,6 +4,8 @@ import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTim
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
+import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
+import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
@@ -44,6 +46,8 @@ export type WeatherModelDiagnostics = {
   error: string | null;
   cacheHits: number;
   nativeReads: number;
+  sharedRangeReads: number;
+  activeSharedRanges: number;
   layerTimings: SpatialLayerTiming[];
   loadingFrames: number[];
   cacheEligible: number;
@@ -195,6 +199,7 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
 const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
+const spatialRangeFlights = new SpatialRangeFlights<Response>();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
 let spatialCacheEligible = 0;
@@ -217,20 +222,33 @@ async function measuredNativeRequest(
       spatialNativeReads++;
       return CapacitorHttp.request(options);
     });
-    const headerValue = Object.entries(result.headers ?? {}).find(([key]) => key.toLowerCase() === "content-length")?.[1];
-    const bytes = Number(headerValue);
+    const bytes = spatialTransferBytes(options.method ?? "GET", result.status, result.headers ?? {}, result.data);
     spatialPerformance.networkRequest(
       started - queued, performance.now() - started,
-      Number.isFinite(bytes) && bytes >= 0 ? bytes : 0, result.status >= 200 && result.status < 400,
+      bytes, result.status >= 200 && result.status < 400,
     );
     return result;
   } catch (error) {
-    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false);
+    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
     throw error;
   }
 }
 
 async function pluginSpatial(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const range = method === "GET" ? headers.get("range") : null;
+  const key = range && /^bytes=\d+-\d+$/i.test(range) ? `${url}|${range}` : null;
+  if (!key) return pluginSpatialUnshared(url, init, headers);
+  // Separate consumers of one file range share the native fetch while their
+  // abort signals remain independent. Return separate readable bodies.
+  const response = await spatialRangeFlights.run(
+    key, init?.signal ?? undefined,
+    (signal) => pluginSpatialUnshared(url, { ...init, signal }, headers),
+  );
+  return response.clone();
+}
+
+async function pluginSpatialUnshared(url: string, init: RequestInit | undefined, headers: Headers): Promise<Response> {
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key)) bag[key] = value;
@@ -450,6 +468,13 @@ export class ModelField {
     return this.ready.then(() => this.times.length);
   }
 
+  /** Whether a complete ECMWF spatial image currently covers the rain map.
+   * The separate Open-Meteo regional fallback does not need to fetch while
+   * this is true; the already loaded fallback grid remains intact. */
+  isSpatialVisible(): boolean {
+    return this.visible && this.spatialVisible;
+  }
+
   /** Playback safety gate for the rain/snow map only. Frame decoding is
    * bounded; hold playback at a temporal boundary until ECMWF can show it.
    * Never freeze playback permanently when the upstream request is in cooldown. */
@@ -508,6 +533,8 @@ export class ModelField {
       error: this.lastError,
       cacheHits: spatialCacheHits,
       nativeReads: spatialNativeReads,
+      sharedRangeReads: spatialRangeFlights.joined,
+      activeSharedRanges: spatialRangeFlights.active,
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,

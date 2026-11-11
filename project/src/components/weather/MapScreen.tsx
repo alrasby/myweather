@@ -93,6 +93,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
   const modelRef = useRef<ModelField | null>(null);
+  const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
+  const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
   const engineRef = useRef<FieldEngine | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -260,8 +262,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           // cells to remain visible as rectangles over real ECMWF spatial tiles.
           // The global model is restored immediately when the spatial frame
           // is incomplete, unavailable, or fails to load.
-          modelRef.current.onLive = () => engine.setModelCover(true);
-          modelRef.current.onMiss = () => engine.setModelCover(false);
+          modelRef.current.onLive = () => {
+            engine.setModelCover(true);
+            rainFallbackSuspendRef.current?.();
+          };
+          modelRef.current.onMiss = () => {
+            engine.setModelCover(false);
+            rainFallbackRefreshRef.current?.();
+          };
         }
         map.on("click", (event) => {
           window.clearTimeout(clickTimer.current);
@@ -495,6 +503,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     let viewAc: AbortController | null = null;
     let pendingView: FetchBox | null = null;
     let loadedView: Awaited<ReturnType<typeof fetchGrid>> | null = null;
+    let fineWorldAc: AbortController | null = null;
+    let fineWorldPending = false;
+    let fineWorldLoaded = false;
+    let quickWorldReady = false;
+    let detailAllowed = false;
+    let fallbackTimer = 0;
     const hours = prefs.mapHours === 72 ? 48 : prefs.mapHours;
     const saver = prefs.dataSaver;
 
@@ -511,17 +525,32 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       };
       try {
         const quick = await fetchGrid({ ...box, cols: saver ? 18 : 36, rows: saver ? 10 : 18 });
-        if (!dead) engine.setRainWorld(quick);
-        if (saver || dead) return;
-        const fine = await fetchGrid({ ...box, cols: 72, rows: 36 });
-        if (!dead) engine.setRainWorld(fine);
+        if (dead) return;
+        engine.setRainWorld(quick);
+        quickWorldReady = true;
+        // Fine fallback work is scheduled only if ECMWF remains unavailable.
+        // Starting 72x36 global + 4200-point regional fetches alongside
+        // heavy ECMWF WASM workers was wasting bandwidth and CPU on imagery
+        // hidden behind an already-complete model layer.
       } catch {
-        /* الطبقة تبقى على شبكة الحرارة المحمّلة، بلا فراغ */
+        // Do not enter an endless timer loop when the quick fallback fails.
+        // The existing generic weather field still remains available.
+        quickWorldReady = true;
       }
     };
 
     const pullView = () => {
-      if (saver || dead) return;
+      if (saver || dead || !detailAllowed) return;
+      // A complete ECMWF model already supplies high-resolution on-screen
+      // rain/snow/cloud imagery. Avoid competing Open-Meteo regional requests
+      // whenever the user pans the map while that imagery is visible.
+      if (modelRef.current?.isSpatialVisible()) {
+        viewGen += 1;
+        viewAc?.abort();
+        viewAc = null;
+        pendingView = null;
+        return;
+      }
       const size = map.getSize();
       const nw = map.containerPointToLatLng([0, 0]);
       const se = map.containerPointToLatLng([size.x, size.y]);
@@ -609,8 +638,71 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       })();
     };
 
+    // Schedule expensive fallback only if the spatial model has failed to
+    // provide coverage for a sustained interval. The quick world fallback is
+    // always fetched immediately, so the app is not blank while waiting.
+    const loadFineFallback = () => {
+      if (dead || saver || modelRef.current?.isSpatialVisible() ||
+          fineWorldLoaded || fineWorldPending) return;
+      fineWorldPending = true;
+      const controller = new AbortController();
+      fineWorldAc = controller;
+      void fetchGrid({
+        south: -80, north: 84, west: -180, lonSpan: 360, hours,
+        full: true, dryRain: true, signal: controller.signal,
+        cols: 72, rows: 36,
+      }).then((grid) => {
+        if (dead || controller.signal.aborted) return;
+        fineWorldLoaded = true;
+        engine.setRainWorld(grid);
+      }).catch(() => {
+        // Keep the already loaded quick world fallback available.
+      }).finally(() => {
+        if (fineWorldAc === controller) {
+          fineWorldAc = null;
+          fineWorldPending = false;
+        }
+      });
+    };
+    const enableDetailedFallback = () => {
+      if (dead || saver || modelRef.current?.isSpatialVisible()) return;
+      if (!quickWorldReady) {
+        fallbackTimer = window.setTimeout(enableDetailedFallback, 1000);
+        return;
+      }
+      detailAllowed = true;
+      loadFineFallback();
+      pullView();
+    };
+    const scheduleDetailedFallback = () => {
+      if (dead || saver || detailAllowed || fallbackTimer ||
+          modelRef.current?.isSpatialVisible()) return;
+      // Short intermittent ECMWF misses during an animation should not
+      // trigger another expensive pointwise API workload.
+      fallbackTimer = window.setTimeout(() => {
+        fallbackTimer = 0;
+        enableDetailedFallback();
+      }, 8000);
+    };
+    const suspendDetailedFallback = () => {
+      if (!detailAllowed && !fallbackTimer && !viewAc && !fineWorldAc) return;
+      window.clearTimeout(fallbackTimer);
+      fallbackTimer = 0;
+      detailAllowed = false;
+      viewGen += 1;
+      viewAc?.abort();
+      viewAc = null;
+      pendingView = null;
+      fineWorldAc?.abort();
+      fineWorldAc = null;
+      fineWorldPending = false;
+      // A completed fallback stays in memory for future ECMWF outages.
+    };
+    rainFallbackRefreshRef.current = scheduleDetailedFallback;
+    rainFallbackSuspendRef.current = suspendDetailedFallback;
+
     void loadWorld();
-    pullView();
+    scheduleDetailedFallback();
     const consider = () => {
       if (dead) return;
       window.clearTimeout(timer);
@@ -620,9 +712,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     map.on("zoomend", consider);
     return () => {
       dead = true;
+      if (rainFallbackRefreshRef.current === scheduleDetailedFallback) rainFallbackRefreshRef.current = null;
+      if (rainFallbackSuspendRef.current === suspendDetailedFallback) rainFallbackSuspendRef.current = null;
       worldAc.abort();
+      fineWorldAc?.abort();
       viewAc?.abort();
       window.clearTimeout(timer);
+      window.clearTimeout(fallbackTimer);
       map.off("moveend", consider);
       map.off("zoomend", consider);
     };
@@ -940,6 +1036,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
+          <p>{lang === "ar" ? "طلبات مشتركة دون تكرار" : "Shared in-flight reads"}: {weatherDiagnostics?.sharedRangeReads ?? 0}
+            {" · "}{lang === "ar" ? "طلبات نشطة" : "active ranges"}: {weatherDiagnostics?.activeSharedRanges ?? 0}
+          </p>
           <p>{lang === "ar" ? "طلبات مؤهلة للتخزين" : "Cache-eligible misses"}: {weatherDiagnostics?.cacheEligible ?? 0}
             {" · "}{lang === "ar" ? "حُفظت" : "stored"}: {weatherDiagnostics?.cacheStored ?? 0}
             {" · "}{lang === "ar" ? "غير قابلة للتخزين" : "rejected"}: {weatherDiagnostics?.cacheRejected ?? 0}
@@ -976,8 +1075,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </p>
             ))}
             <p>{"native errors "}{weatherDiagnostics?.performance.nativeFailures ?? 0}
+              {" · canceled "}{weatherDiagnostics?.performance.nativeCancellations ?? 0}
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
-              {" · MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
+              {" · transfer MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
             </p>
             <p>{"SharedArrayBuffer: "}{weatherDiagnostics?.performance.runtime.crossOriginIsolated ? "available" : "unavailable"}
               {" · JS heap: "}{weatherDiagnostics?.performance.runtime.heapUsedMb == null

@@ -35,3 +35,12 @@ test("percentiles are deterministic and empty probes never invent observations",
   assert.deepEqual(summarizeDurations([]), { count:0, p50Ms:null, p95Ms:null, maxMs:null });
   assert.deepEqual(summarizeDurations([10,20,30,40,50,NaN,-3]), { count:5, p50Ms:30, p95Ms:50, maxMs:50 });
 });
+
+test("cancelled tile requests are not mislabeled as network failures", () => {
+  const p = new SpatialPerformance();
+  p.networkRequest(20, 10, 0, false, true);
+  p.networkRequest(30, 20, 0, false);
+  const snap = p.snapshot(false, null);
+  assert.equal(snap.nativeCancellations, 1);
+  assert.equal(snap.nativeFailures, 1);
+});
