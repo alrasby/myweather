@@ -4,7 +4,7 @@ import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid"
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
-import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback } from "@/weather/weatherPlayback";
+import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -317,6 +317,7 @@ export class FieldEngine {
   private systems: PaintedSystem[] = [];
   private frameBox: { north: number; south: number; west: number; east: number } | null = null;
   private modelCover = false;
+  private lastRainEmitAt = 0;
   private whirl = 0;
 
   constructor(private host: HTMLElement) {
@@ -390,6 +391,7 @@ export class FieldEngine {
   setKind(kind: ShadeKind) {
     this.kind = kind;
     this.weatherWaitSince = null;
+    this.lastRainEmitAt = 0;
     this.particles = [];
     this.clearParticles();
     this.drawField();
@@ -744,6 +746,11 @@ export class FieldEngine {
 
   private emit() {
     if (!this.onFrame) return;
+    if (this.kind === 2) {
+      const now = performance.now();
+      if (!shouldEmitRainFrame(now, this.lastRainEmitAt)) return;
+      this.lastRainEmitAt = now;
+    }
     const grid = this.pick();
     const timeMs = grid ? indexToMs(grid.times, this.hour) : Date.now();
     let sample: FieldSample | null = null;
