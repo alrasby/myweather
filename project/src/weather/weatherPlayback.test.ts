@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback } from "./weatherPlayback.ts";
+import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame } from "./weatherPlayback.ts";
 
 test("rain/snow playback does not outrun ECMWF; wind and temperature retain their cadence", () => {
   assert.equal(secondsPerForecastHour(2), 4);
@@ -33,4 +33,12 @@ test("only covered rain/snow skips redundant fallback RAF paints", () => {
   assert.equal(shouldPaintWeatherFallback(2, false), true);
   assert.equal(shouldPaintWeatherFallback(0, true), true);
   assert.equal(shouldPaintWeatherFallback(1, true), true);
+});
+
+test("rain frame sampling uses 20Hz while keeping initial frame and other layers unchanged", () => {
+  assert.equal(shouldEmitRainFrame(100, 0), true);
+  assert.equal(shouldEmitRainFrame(149, 100), false);
+  assert.equal(shouldEmitRainFrame(150, 100), true);
+  assert.equal(shouldEmitRainFrame(180, 150), false);
+  assert.equal(shouldEmitRainFrame(200, 150), true);
 });
