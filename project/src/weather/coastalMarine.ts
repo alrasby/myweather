@@ -8,7 +8,7 @@ export function preserveCoastalMarine(
   previous: MarineSnap | null,
 ): MarineSnap | null {
   if (fresh?.coastal && fresh.wave != null && Number.isFinite(fresh.wave)) return fresh;
-  if (previous?.coastal) return { coastal: true, wave: previous.wave };
+  if (previous?.coastal) return { coastal: true, wave: null };
   return fresh;
 }
 
