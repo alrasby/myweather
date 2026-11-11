@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
+import android.hardware.GeomagneticField;
 import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -125,6 +126,9 @@ public class MainActivity extends BridgeActivity {
         private SensorManager sensors;
         private boolean listening;
         private float last = -999f;
+        private float declination = 0f;
+        private boolean hasLocation;
+        private int accuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
 
         CompassBridge(MainActivity activity) {
             this.activity = activity;
@@ -132,6 +136,19 @@ public class MainActivity extends BridgeActivity {
 
         void attach(WebView web) {
             this.web = web;
+        }
+
+        @JavascriptInterface
+        public void setLocation(double lat, double lon) {
+            main.post(() -> {
+                if (!Double.isFinite(lat) || !Double.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+                    hasLocation = false;
+                    return;
+                }
+                declination = new GeomagneticField((float) lat, (float) lon, 0f, System.currentTimeMillis()).getDeclination();
+                hasLocation = true;
+                last = -999f;
+            });
         }
 
         @JavascriptInterface
@@ -188,17 +205,23 @@ public class MainActivity extends BridgeActivity {
             if (!SensorManager.remapCoordinateSystem(rotation, x, y, remapped)) return;
             SensorManager.getOrientation(remapped, orientation);
             float deg = (float) Math.toDegrees(orientation[0]);
-            if (deg < 0) deg += 360f;
+            // Android azimuth is magnetic-north referenced. Convert to true north
+            // with the geomagnetic model for the currently selected location.
+            if (hasLocation) deg += declination;
+            deg = ((deg % 360f) + 360f) % 360f;
             float delta = deg - last;
             if (delta > 180) delta -= 360;
             if (delta < -180) delta += 360;
             if (Math.abs(delta) < 0.6f) return;
             last = deg;
-            String js = "window.__wxHeading&&window.__wxHeading(" + String.format(Locale.US, "%.1f", deg) + ")";
+            String js = "window.__wxHeadingMeta&&window.__wxHeadingMeta(" +
+                String.format(Locale.US, "%.2f", deg) + "," + accuracy + "," + hasLocation + ")";
             web.evaluateJavascript(js, null);
         }
 
         @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+            this.accuracy = accuracy;
+        }
     }
 }
