@@ -23,13 +23,11 @@ export function DetailCards({
   place,
   lang,
   now,
-  heading,
 }: {
   bundle: WeatherBundle;
   place: Place;
   lang: Lang;
   now: number;
-  heading: number | null;
 }) {
   const day = bundle.daily[0];
   const rise = day?.sunrise ?? now;
@@ -43,7 +41,6 @@ export function DetailCards({
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
   const coastal = bundle.marine?.coastal === true;
-  const windUnit = useWeather((s) => s.prefs.wind);
   const pressureUnit = useWeather((s) => s.prefs.pressure);
 
   return (
