@@ -1,7 +1,7 @@
 import { ChevronDown, MapPin, SunMedium, Sunrise, Sunset, Thermometer, Umbrella, Wind, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DetailCards, QiblaCard } from "@/components/weather/SkyCards";
-import { useDeviceHeading } from "@/weather/deviceHeading";
+import { useDeviceCompass } from "@/weather/deviceHeading";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
 import { readBestPosition } from "@/weather/geo";
@@ -37,7 +37,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const setHere = useWeather((s) => s.setHere);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
-  const heading = useDeviceHeading();
+  const reading = useDeviceCompass(place.lat, place.lon);
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
   const [pulling, setPulling] = useState(0);
@@ -249,7 +249,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </section>
 
           <div className="mt-3">
-            <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} />
+            <QiblaCard lat={place.lat} lon={place.lon} reading={reading} lang={lang} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={prefs.wind} />
           </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
