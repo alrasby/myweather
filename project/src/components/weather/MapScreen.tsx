@@ -7,7 +7,7 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
-import { needsRasterSeamGuard } from "@/weather/satelliteBasemap";
+
 import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -215,8 +215,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const L = await loadLeaflet();
         if (dead) return;
         leafletRef.current = L;
-        // Raster-only 1px seam mask for Chromium high-DPI compositing; OM forecast panes stay untouched.
-        if (needsRasterSeamGuard(navigator.userAgent, window.devicePixelRatio)) el.classList.add("wx-android-raster-bleed");
         map = L.map(el, {
           zoomControl: false,
           attributionControl: false,

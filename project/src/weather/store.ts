@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { clearBundles, loadWeather, readCacheFile, writeCacheFile } from "@/weather/api";
 import { estimateBundle } from "@/weather/estimate";
 import { INITIAL_CITIES, upgradeInitialCities } from "@/weather/defaultCities";
+import { readLastViewed, restoreViewedPlace, saveLastViewed } from "@/weather/lastViewedPlace";
 import {
   CACHE_TTL_MS,
   MUSCAT,
@@ -155,12 +156,15 @@ export const useWeather = create<WeatherState>((set, get) => ({
     // Existing user cities stay intact except for the requested legacy swap.
     const upgrade = upgradeInitialCities(file.places.slice(0, MAX_CACHED_PLACES), file.activeId);
     const places = upgrade.places;
-    const activeId = upgrade.changed ? upgrade.activeId :
+    const fallbackId = upgrade.changed ? upgrade.activeId :
       places.some((p) => p.id === file.activeId) ? file.activeId :
       (places.find((p) => p.primary)?.id ?? MUSCAT.id);
-    if (upgrade.changed) persistPlaces(places, activeId);
+    const viewed = restoreViewedPlace(readLastViewed(), places, fallbackId);
+    // A manually viewed but unsaved location remains active after restart;
+    // it does NOT silently join the user's saved-city list.
+    if (upgrade.changed) persistPlaces(places, fallbackId);
     savePrefs(prefs);
-    set({ prefs, places, activeId, peek: null, here, hydrated: true });
+    set({ prefs, places, activeId: viewed.activeId, peek: viewed.peek, here, hydrated: true });
   },
   loadActive: async (force, signal) => {
     const peek = get().peek;
@@ -191,7 +195,9 @@ export const useWeather = create<WeatherState>((set, get) => ({
     }
   },
   setActive: (id) => {
-    if (!get().places.some((p) => p.id === id)) return;
+    const place = get().places.find(p => p.id === id);
+    if (!place) return;
+    saveLastViewed(place);
     set({ activeId: id, peek: null });
     persistPlaces(get().places, id);
   },
@@ -201,6 +207,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
       get().setActive(saved.id);
       return;
     }
+    saveLastViewed(place);
     set({ peek: place, activeId: place.id, revision: get().revision + 1 });
   },
   locatePlace: (place) => {
@@ -209,8 +216,9 @@ export const useWeather = create<WeatherState>((set, get) => ({
       get().setActive(saved.id);
       return;
     }
-    // Current-location preview must not add or remove saved cities.
+    // Persist last selected GPS preview without ever adding it to saved cities.
     // Only explicit save/delete actions may change the persisted list.
+    saveLastViewed(place);
     set({ peek: place, activeId: place.id, revision: get().revision + 1 });
   },
   setHere: (place) => {
@@ -234,6 +242,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
         peek: get().peek?.id === place.id ? null : get().peek,
         revision: activate && (moved || activeChanged) ? get().revision + 1 : get().revision,
       });
+      if (activate) saveLastViewed(places[idx]!);
       persistPlaces(places, places.some((p) => p.id === activeId) ? activeId : prev.id);
       return;
     }
@@ -251,6 +260,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
       peek: get().peek?.id === place.id ? null : get().peek,
       revision: activate ? get().revision + 1 : get().revision,
     });
+    if (activate) saveLastViewed(next.find((p) => p.id === keep) ?? null);
     persistPlaces(next, keep);
   },
   removePlace: (id) => {
@@ -259,6 +269,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
     if (!places.some((p) => p.primary)) places = places.map((p, i) => ({ ...p, primary: i === 0 }));
     const removedActive = get().activeId === id;
     const activeId = removedActive ? (places.find((p) => p.primary)?.id ?? places[0]!.id) : get().activeId;
+    if (removedActive) saveLastViewed(places.find(p => p.id === activeId) ?? null);
     set({ places, activeId, revision: removedActive ? get().revision + 1 : get().revision });
     persistPlaces(places, activeId);
   },
@@ -275,6 +286,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
   },
   makePrimary: (id) => {
     const places = get().places.map((p) => ({ ...p, primary: p.id === id }));
+    saveLastViewed(places.find(p => p.id === id) ?? null);
     set({ places, activeId: id, revision: id === get().activeId ? get().revision : get().revision + 1 });
     persistPlaces(places, id);
   },

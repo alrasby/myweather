@@ -187,15 +187,12 @@ function pressureHoursAgo(bundle: WeatherBundle, now: number, hours: number): nu
 /** One sensor-backed compass: red points north, turquoise points to the Kaaba. */
 /** Single compass rose with two independently positioned, sensor-synchronised bearings. */
 export function QiblaCard({
-  lat, lon, reading, lang, deviceLocation, locationAccuracy, locationFailed, locating, onLocate,
+  lat, lon, reading, lang, locating, onLocate,
 }: {
   lat: number;
   lon: number;
   reading: CompassReading;
   lang: Lang;
-  deviceLocation: boolean;
-  locationAccuracy: number | null;
-  locationFailed: boolean;
   locating: boolean;
   onLocate: () => void;
 }) {
@@ -254,15 +251,8 @@ export function QiblaCard({
         </p>
         <button type="button" className="mt-1.5 rounded-full border border-line px-2 py-1 text-[0.7rem] text-accent"
           onClick={onLocate} disabled={locating}>
-          {locating ? (ar ? "تحديد الموقع…" : "Locating…") : deviceLocation
-            ? (ar ? "تحديث موقعي للقبلة" : "Refresh Qibla location")
-            : (ar ? "تحديد موقعي للقبلة" : "Use my location")}
-          {deviceLocation && locationAccuracy != null && Number.isFinite(locationAccuracy)
-            ? <span className="ms-1" dir="ltr">· ±{Math.round(locationAccuracy)} m</span> : null}
+          {ar ? "تحديث موقعي الجغرافي" : "Update my location"}
         </button>
-        {locationFailed ? <p className="mt-1 text-[0.65rem] text-muted" role="status">
-          {ar ? "تعذر تحديد الموقع؛ تحقق من الإذن وGPS" : "Location unavailable; check GPS permission"}
-        </p> : null}
       </div>
     </article>
   );

@@ -306,6 +306,17 @@ html.light {
   mask-image: linear-gradient(180deg, #000 0 22%, transparent);
 }
 
+
+/* Broken full-width cloud veils previously occupied a 27px masked strip.
+   Distinct partly-cloudy billows get room to move, feathered into the sky;
+   the surrounding layout and weather-map renderer are left unchanged. */
+.sky-clouds.is-puffs {
+  top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 3.4rem);
+  height: 7.6rem;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 9%, #000 76%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 9%, #000 76%, transparent 100%);
+}
+
 .sky-clouds.is-deck {
   top: 0;
   height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 12.7rem + 5mm);
@@ -429,16 +440,9 @@ html:not(.light) .pop-chance {
   max-height: none !important;
 }
 
-/* Chromium/Android high-DPR raster grids can expose narrow horizontal seams
-   between adjacent 256px Esri PNG/JPEG tiles when translated by subpixels.
-   Bleed ONE CSS pixel on the satellite and reference-label grids only.
-   ECMWF .om cloud/rain/snow panes, field canvases and temperature/wind never
-   receive this styling. Re-evaluate against physical-device recordings. */
-.wx-android-raster-bleed .leaflet-tile-pane img.leaflet-tile,
-.wx-android-raster-bleed .wx-labels img.leaflet-tile {
-  width: 257px !important;
-  height: 257px !important;
-}
+/* Retain native Leaflet raster tile dimensions: the 257px override made
+   tile-edge bright lines visible across latitude and longitude while panning.
+   No transform, tile size or weather animation is changed here. */
 
 
 .map-tools {

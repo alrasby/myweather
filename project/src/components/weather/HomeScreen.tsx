@@ -20,6 +20,7 @@ import {
 import { t, weatherKey, type CopyKey } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
 import { lookupPlace } from "@/weather/placeLookup";
+import { pinWeatherAlerts } from "@/weather/pinnedAlerts";
 import { activePlace, useWeather } from "@/weather/store";
 import type { DayPoint, HourPoint, Lang, QuietHours, WeatherBundle } from "@/weather/types";
 
@@ -37,7 +38,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const setHere = useWeather((s) => s.setHere);
   const [compassLocating, setCompassLocating] = useState(false);
   const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
-  const [compassLocationFailed, setCompassLocationFailed] = useState(false);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
   // Do not silently treat a GPS fix saved in a previous session as current.
@@ -51,6 +51,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const locateGen = useRef(0);
   const [openDay, setOpenDay] = useState<number | null>(null);
   const [hideMorning, setHideMorning] = useState(false);
+  const [pinnedAlerts, setPinnedAlerts] = useState<Record<string, string[]>>({});
   const [dismissed, setDismissed] = useState<string[]>(() => {
     if (typeof sessionStorage === "undefined") return [];
     try {
@@ -65,12 +66,9 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const locateCompass = () => {
     if (compassLocating) return;
     setCompassLocating(true);
-    setCompassLocationFailed(false);
     void readBestPosition((pos) => {
       setQiblaFix({ lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy });
-    }).then((fix) => {
-      if (!fix) setCompassLocationFailed(true);
-    }).catch(() => setCompassLocationFailed(true))
+    }).catch(() => undefined)
       .finally(() => setCompassLocating(false));
   };
 
@@ -98,8 +96,25 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     });
   };
 
-  const alerts = bundle && prefs.alerts && !inQuiet(prefs.quiet, bundle.timezone, now) ? buildAlerts(bundle, prefs, lang, now) : [];
-  const shownAlerts = alerts.filter((item) => !dismissed.includes(`${place.id}|${item}`));
+  const alerts = bundle && bundle.placeId === place.id && prefs.alerts && !inQuiet(prefs.quiet, bundle.timezone, now)
+    ? buildAlerts(bundle, prefs, lang, now) : [];
+  const alertScope = `${place.id}|${lang}`;
+  // Pull-to-refresh changes live forecast objects. Keep already displayed
+  // alerts pinned to the selected city until the user explicitly dismisses.
+  // A new alert may be added; old alerts must not vanish mid-refresh.
+  const alertSignature = alerts.join("\\u0001");
+  useEffect(() => {
+    if (!prefs.alerts || !alerts.length) return;
+    setPinnedAlerts((previous) => {
+      const present = previous[alertScope] ?? [];
+      const merged = pinWeatherAlerts(present, alerts);
+      return merged.length === present.length ? previous : { ...previous, [alertScope]: merged };
+    });
+    // alerts are intentionally represented by their stable joined signature.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alertScope, alertSignature, prefs.alerts]);
+  const shownAlerts = (prefs.alerts ? pinnedAlerts[alertScope] ?? alerts : [])
+    .filter((item) => !dismissed.includes(`${place.id}|${item}`));
   const dismissAlert = (key: string) => {
     setDismissed((prev) => {
       const next = prev.includes(key) ? prev : [...prev, key].slice(-40);
@@ -267,7 +282,8 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </section>
 
           <div className="mt-3">
-            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang} deviceLocation={qiblaFix != null} locationAccuracy={qiblaFix?.accuracy ?? null} locationFailed={compassLocationFailed} locating={compassLocating} onLocate={locateCompass} />
+            <QiblaCard lat={compassPlace.lat} lon={compassPlace.lon} reading={reading} lang={lang}
+              locating={compassLocating} onLocate={locateCompass} />
           </div>
           <DetailCards bundle={bundle} place={place} lang={lang} now={now} />
         </>
