@@ -81,6 +81,9 @@ jobs:
           else
             exit 1
           fi
+      - name: Android Lint — platform security and correctness
+        working-directory: project/android
+        run: ./gradlew --no-daemon :app:lintDebug
       - name: Build and verify signed release
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         working-directory: project/android
