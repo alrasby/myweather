@@ -185,7 +185,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (grid) sliderRef.current.max = String(Math.max(1, grid.hours - 1));
         if (!dragRef.current) sliderRef.current.value = String(info.hour);
       }
-      if (kindRef.current === 2) modelRef.current?.sync(info.timeMs);
+      if (kindRef.current === 2) {
+        modelRef.current?.setPlaybackActive(engine.playing);
+        modelRef.current?.sync(info.timeMs);
+      }
       // Diagnostics are opt-in and sampled at 1Hz, not on every map frame.
       if (diagnosticsOpenRef.current && performance.now() - diagnosticsTickRef.current > 1000) {
         diagnosticsTickRef.current = performance.now();
