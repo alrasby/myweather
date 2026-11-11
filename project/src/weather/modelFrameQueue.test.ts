@@ -68,10 +68,10 @@ test("a genuinely failed spatial hour may continue only via explicit fallback", 
   assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set([16]), new Set()), true);
 });
 
-test("second-hour lookahead starts only when current and next are complete", () => {
+test("decoded-state budget avoids speculative third hour evicting displayed OM fields", () => {
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set(), false, 0, true),
-    { cancel: [], start: 10 },
+    { cancel: [], start: null },
   );
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8]), new Set(), new Set()),
@@ -79,7 +79,7 @@ test("second-hour lookahead starts only when current and next are complete", () 
   );
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), false, 0, true),
-    { cancel: [], start: null },
+    { cancel: [10], start: null },
   );
 });
 
@@ -90,10 +90,14 @@ test("two-hour prefetch is bounded to existing forecast horizon", () => {
   );
 });
 
-test("continuous viewport refresh does not cancel active second-hour prefetch", () => {
+test("continuing viewport refresh retains only the adjacent frame within memory budget", () => {
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), true, 200, true),
-    { cancel: [], start: null },
+    { cancel: [10], start: null },
+  );
+  assert.deepEqual(
+    planSpatialRequests(9, 32, new Set([8, 9]), new Set(), new Set(), true, 200, true),
+    { cancel: [], start: 10 },
   );
 });
 
