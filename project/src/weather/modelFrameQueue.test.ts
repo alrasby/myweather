@@ -70,7 +70,7 @@ test("a genuinely failed spatial hour may continue only via explicit fallback", 
 
 test("second-hour lookahead starts only when current and next are complete", () => {
   assert.deepEqual(
-    planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set()),
+    planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set(), false, 0, true),
     { cancel: [], start: 10 },
   );
   assert.deepEqual(
@@ -78,21 +78,36 @@ test("second-hour lookahead starts only when current and next are complete", () 
     { cancel: [], start: 9 },
   );
   assert.deepEqual(
-    planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set()),
+    planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), false, 0, true),
     { cancel: [], start: null },
   );
 });
 
 test("two-hour prefetch is bounded to existing forecast horizon", () => {
   assert.deepEqual(
-    planSpatialRequests(30, 32, new Set([30, 31]), new Set(), new Set()),
+    planSpatialRequests(30, 32, new Set([30, 31]), new Set(), new Set(), false, 0, true),
     { cancel: [], start: null },
   );
 });
 
 test("continuous viewport refresh does not cancel active second-hour prefetch", () => {
   assert.deepEqual(
-    planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), true, 200),
+    planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), true, 200, true),
     { cancel: [], start: null },
   );
+});
+
+test("active playback bypasses pan-prefetch grace and prepares the next ECMWF time", () => {
+  const plan = planSpatialRequests(8, 32, new Set([8]), new Set(), new Set(), true, 100, true);
+  assert.deepEqual(plan, { cancel: [], start: 9 });
+});
+
+test("a still map does not decode a second unused future hour", () => {
+  const plan = planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set());
+  assert.deepEqual(plan, { cancel: [], start: null });
+});
+
+test("playback never starts more than one unready frame while the next is loading", () => {
+  const plan = planSpatialRequests(8, 32, new Set([8]), new Set([9]), new Set(), true, 5000, true);
+  assert.deepEqual(plan, { cancel: [], start: null });
 });

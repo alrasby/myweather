@@ -185,7 +185,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (grid) sliderRef.current.max = String(Math.max(1, grid.hours - 1));
         if (!dragRef.current) sliderRef.current.value = String(info.hour);
       }
-      if (kindRef.current === 2) modelRef.current?.sync(info.timeMs);
+      if (kindRef.current === 2) {
+        modelRef.current?.setPlaybackActive(engine.playing);
+        modelRef.current?.sync(info.timeMs);
+      }
       // Diagnostics are opt-in and sampled at 1Hz, not on every map frame.
       if (diagnosticsOpenRef.current && performance.now() - diagnosticsTickRef.current > 1000) {
         diagnosticsTickRef.current = performance.now();
@@ -931,6 +934,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
           <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"}</p>
+          <p>{lang === "ar" ? "إصدار ECMWF الثابت" : "Pinned ECMWF model run"}: {weatherDiagnostics?.modelRunPinned ? "OK" : "capture fallback"}
+            {weatherDiagnostics?.modelRunReferenceTime ? ` · ${weatherDiagnostics.modelRunReferenceTime}` : ""}
+          </p>
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>

@@ -38,3 +38,11 @@ test("cached buffers are copies, not caller-owned mutable storage", () => {
   item.bytes[0] = 99;
   assert.equal(c.get("x", 6)?.bytes[0], 0);
 });
+
+test("default mobile cache retains verified medium-sized OM ranges across a weather tour", () => {
+  const cache = new SpatialRangeCache();
+  const item = entry(300 * 1024);
+  cache.put("model|bytes=0-307199", item, 1000);
+  assert.equal(cache.get("model|bytes=0-307199", 1000 + 180_000)?.bytes.byteLength, 300 * 1024);
+  assert.equal(cache.get("model|bytes=0-307199", 1000 + 300_000), null);
+});
