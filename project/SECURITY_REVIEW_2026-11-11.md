@@ -30,6 +30,10 @@ Npm's resolver reported **0 findings in both the complete and production-only au
 - `capacitor.config.ts` explicitly disables WebView debugging and mixed HTTP content. Android fine/coarse location permissions support the requested GPS compass features.
 - The Android manifest currently permits OS-managed app backups. This is a **privacy/configuration consideration**, not one of the npm findings; backup policy should be revisited for a public release if the app begins persisting sensitive account/session information. Do not silently disable expected settings restore for an existing user during this narrowly scoped dependency patch.
 
+## Better Auth 1.7 client API migration
+
+The official 1.7 upgrade removed `genericOAuthClient()` and `authClient.signIn.oauth2({ providerId })`. Updated `src/lib/auth/client.ts` to use `authClient.signIn.social({ provider: providerId })` and the standard client without the removed plugin. New local generic provider callback path is `/api/auth/callback/:providerId` (formerly `/api/auth/oauth2/callback/:providerId`). If auth is enabled against the external broker, **the broker's registered redirect URLs must be verified/updated** before rollout; this requires access to its OAuth registration. The Android weather application ships with auth disabled by default. Unit/type/API smoke tests cannot perform a real OAuth redirect.
+
 ## Auth migration caveat
 
 `better-auth` is actually imported in `src/lib/auth/server.ts` and `client.ts`. Do not remove or mock it out. The 1.7 upgrade includes potential database schema / OAuth changes for feature-specific deployments: <https://better-auth.com/docs/1.6/guides/1-7-upgrade-guide>. Before enabling auth on a production server that has real user accounts, generate/review the corresponding schema migration and test OAuth sign-in, session recovery and sign-out **against that environment**. CI cannot access external identity-provider credentials or production databases; source, exports and unit tests cannot substitute for those checks.
