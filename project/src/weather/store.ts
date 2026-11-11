@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { clearBundles, loadWeather, readCacheFile, writeCacheFile } from "@/weather/api";
 import { estimateBundle } from "@/weather/estimate";
+import { INITIAL_CITIES, upgradeInitialCities } from "@/weather/defaultCities";
 import {
   CACHE_TTL_MS,
   MUSCAT,
@@ -134,7 +135,7 @@ function kmBetween(aLat: number, aLon: number, bLat: number, bLon: number): numb
 
 export const useWeather = create<WeatherState>((set, get) => ({
   hydrated: false,
-  places: [MUSCAT],
+  places: INITIAL_CITIES.map((p) => ({ ...p })),
   activeId: MUSCAT.id,
   prefs: DEFAULT_PREFS,
   bundle: null,
@@ -148,23 +149,18 @@ export const useWeather = create<WeatherState>((set, get) => ({
   here: null,
   hydrate: () => {
     const prefs = readPrefs();
-    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(CACHE_KEY);
     const file = readCacheFile();
     const here = readHere();
-    let places = file.places.length ? file.places.slice(0, MAX_CACHED_PLACES) : raw ? [] : [MUSCAT];
-    let activeId = places.some((p) => p.id === file.activeId)
-      ? file.activeId
-      : (places.find((p) => p.primary)?.id ?? places[0]?.id ?? "");
-    let peek: Place | null = null;
-    if (!places.length && here) {
-      peek = here;
-      activeId = here.id;
-    } else if (!places.length) {
-      places = [MUSCAT];
-      activeId = MUSCAT.id;
-    }
+    // Starter cities are deterministic, independent of an unapproved GPS fix.
+    // Existing user cities stay intact except for the requested legacy swap.
+    const upgrade = upgradeInitialCities(file.places.slice(0, MAX_CACHED_PLACES), file.activeId);
+    const places = upgrade.places;
+    const activeId = upgrade.changed ? upgrade.activeId :
+      places.some((p) => p.id === file.activeId) ? file.activeId :
+      (places.find((p) => p.primary)?.id ?? MUSCAT.id);
+    if (upgrade.changed) persistPlaces(places, activeId);
     savePrefs(prefs);
-    set({ prefs, places, activeId, peek, here, hydrated: true });
+    set({ prefs, places, activeId, peek: null, here, hydrated: true });
   },
   loadActive: async (force, signal) => {
     const peek = get().peek;
