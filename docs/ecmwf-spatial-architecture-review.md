@@ -59,6 +59,11 @@ compatible resources; Android WebView support must be validated separately.
 - Coalesce **concurrent identical OM byte-range reads** before the completed
   cache becomes available. Consumers have independent abort signals; after the
   last abort the waiting native work is skipped.
+- Avoid starting a separate detailed Open-Meteo regional/global fallback grid
+  when complete ECMWF spatial imagery is already on screen. Retain the
+  lightweight fallback already loaded; request detail again if ECMWF becomes
+  unavailable. This removes competing pointwise data-processing work while
+  the model workers render their tiles.
 - Keep the existing single-incomplete-forecast cap, pinned model run,
   per-hour timestamps and source-integrity rules.
 - Correct diagnostics: `HEAD` Content-Length is not transferred bytes, and
