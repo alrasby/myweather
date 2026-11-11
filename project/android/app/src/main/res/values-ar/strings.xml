@@ -3,7 +3,12 @@
     <string name="widget_name">طقسي</string>
     <string name="widget_desc">ودجت زجاجي. اسحب الحواف لتغيير العرض والارتفاع حتى يناسب خانة الشاشة.</string>
     <string name="widget_config_title">الطقس والساعة</string>
-    <string name="widget_opacity">شفافية الودجت</string>
+    <string name="widget_opacity">عتامة خلفية الويدجت</string>
+    <string name="widget_tint">لون الزجاج</string>
+    <string name="widget_tint_ocean">محيطي</string>
+    <string name="widget_tint_teal">تركوازي</string>
+    <string name="widget_tint_violet">بنفسجي</string>
+    <string name="widget_tint_rose">وردي</string>
     <string name="widget_theme">المظهر</string>
     <string name="widget_light">فاتح</string>
     <string name="widget_dark">غامق</string>
