@@ -13,7 +13,6 @@ import {
   formatWind,
   placeTitle,
 } from "@/weather/format";
-import { useDeviceHeading } from "@/weather/deviceHeading";
 import { compassFrom } from "@/weather/heading";
 import { aqiKey, moonKey, t } from "@/weather/i18n";
 import { useWeather } from "@/weather/store";
@@ -24,11 +23,13 @@ export function DetailCards({
   place,
   lang,
   now,
+  heading,
 }: {
   bundle: WeatherBundle;
   place: Place;
   lang: Lang;
   now: number;
+  heading: number | null;
 }) {
   const day = bundle.daily[0];
   const rise = day?.sunrise ?? now;
@@ -42,7 +43,6 @@ export function DetailCards({
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
   const coastal = bundle.marine?.coastal === true;
-  const heading = useDeviceHeading();
   const windUnit = useWeather((s) => s.prefs.wind);
   const pressureUnit = useWeather((s) => s.prefs.pressure);
 
@@ -61,7 +61,6 @@ export function DetailCards({
       </article>
 
       <CompassCard lang={lang} heading={heading} wind={bundle.current.wind} windFrom={bundle.current.dir} windUnit={windUnit} />
-      <QiblaCard lat={place.lat} lon={place.lon} heading={heading} lang={lang} />
 
       <article className="wx-card px-3 py-2" dir="ltr">
         <SunArc progress={sunProgress(now, rise, set)} />
@@ -214,7 +213,7 @@ function CompassCard({
   );
 }
 
-function QiblaCard({ lat, lon, heading, lang }: { lat: number; lon: number; heading: number | null; lang: Lang }) {
+export function QiblaCard({ lat, lon, heading, lang }: { lat: number; lon: number; heading: number | null; lang: Lang }) {
   const bearing = qiblaBearing(lat, lon);
   const relative = bearing == null || heading == null ? null : relativeQiblaDirection(bearing, heading);
   const ar = lang === "ar";
