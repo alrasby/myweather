@@ -104,6 +104,7 @@ export type AirQuality = {
 export type MarineSnap = {
   coastal: boolean;
   wave: number | null;
+  tides?: { t: number; level: number }[];
 };
 
 export type WeatherBundle = {
