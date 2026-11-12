@@ -49,6 +49,22 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   // Declination must use the phone's measured position, not an unrelated selected city.
   const reading = useDeviceCompass(qiblaFix?.lat ?? Number.NaN, qiblaFix?.lon ?? Number.NaN);
   const scroller = useRef<HTMLDivElement>(null);
+  // The global sky sits outside this scroll container. Fade its cloud layer
+  // smoothly as the forecast cards approach the top of the viewport.
+  // Direct style updates avoid React renders and extra animation frames.
+  const syncSkyScroll = () => {
+    const top = scroller.current?.scrollTop ?? 0;
+    const t = Math.min(1, Math.max(0, top / 155));
+    const eased = t * t * (3 - 2 * t);
+    document.documentElement.style.setProperty("--wx-sky-cloud-opacity", String(1 - eased));
+  };
+  useEffect(() => {
+    syncSkyScroll();
+    return () => document.documentElement.style.removeProperty("--wx-sky-cloud-opacity");
+    // The scroll node remains stable throughout a HomeScreen mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pull = useRef(0);
   const swipeStart = useRef<{ x: number; y: number; eligible: boolean } | null>(null);
   const [pulling, setPulling] = useState(0);
@@ -160,6 +176,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   return (
     <div
       ref={scroller}
+      onScroll={syncSkyScroll}
       className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
       onTouchStart={(e) => {
         if (e.touches.length !== 1) {
