@@ -89,3 +89,20 @@ test("visible version stays 1.0.0 while upgrade-safe Android code remains 55", (
   assert.match(gradle, /versionCode 55\\s+versionName "1\\.0\\.0"/);
   assert.ok(workflow.includes("versionCode='55' versionName='1.0.0'"));
 });
+
+test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
+  const gradle = read("project/android/app/build.gradle");
+  const manifest = read("project/android/app/src/main/AndroidManifest.xml");
+  const service = read("project/android/app/src/main/java/net/nabdhserv/myweather/WeatherCarAppService.java");
+  const descriptor = read("project/android/app/src/main/res/xml/automotive_app_desc.xml");
+  assert.ok(gradle.includes('androidx.car.app:app:1.7.0'));
+  assert.ok(gradle.includes('androidx.car.app:app-projected:1.7.0'));
+  assert.ok(manifest.includes('androidx.car.app.category.WEATHER'));
+  assert.ok(manifest.includes('com.google.android.gms.car.application'));
+  assert.ok(descriptor.includes('<uses name="template" />'));
+  assert.ok(service.includes('new ListTemplate.Builder()'));
+  assert.ok(service.includes('WeatherWidget.readPayload(WeatherWidget.prefs(getCarContext()))'));
+  assert.ok(service.includes('hosts_allowlist_sample'));
+  assert.ok(service.includes('ApplicationInfo.FLAG_DEBUGGABLE'));
+  assert.ok(!service.includes('HttpURLConnection') && !service.includes('WebView'));
+});
