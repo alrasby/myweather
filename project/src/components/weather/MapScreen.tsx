@@ -718,7 +718,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       fallbackTimer = window.setTimeout(() => {
         fallbackTimer = 0;
         enableDetailedFallback();
-      }, 8000);
+      }, 4500);
     };
     const suspendDetailedFallback = () => {
       if (!detailAllowed && !fallbackTimer && !viewAc && !fineWorldAc) return;
