@@ -37,7 +37,7 @@ test("viewport refresh temporarily defers starting new prefetch", () => {
   assert.deepEqual(settled, { cancel: [], start: 9 });
 });
 
-test("continuous panning cannot starve the next forecast after 2.5 seconds", () => {
+test("continuous panning cannot starve future model hours after bounded viewport grace", () => {
   const ready = new Set([8]);
   const plan = planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PREFETCH_GRACE_MS);
   assert.deepEqual(plan, { cancel: [], start: 9 });
@@ -103,10 +103,14 @@ test("continuous viewport refresh preserves existing second-hour work while not 
   );
 });
 
-test("active playback briefly favors the visible viewport but resumes future hours promptly", () => {
+test("active playback favors visible ECMWF decoding for a bounded period", () => {
   const ready = new Set([8]);
   assert.deepEqual(
     planSpatialRequests(8, 32, ready, new Set([9]), new Set(), true, 100, true),
+    { cancel: [], start: null },
+  );
+  assert.deepEqual(
+    planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS - 1, true),
     { cancel: [], start: null },
   );
   assert.deepEqual(

@@ -764,7 +764,7 @@ export class ModelField {
       this.blend = f;
       // The animation blend continues at 20Hz, but planning/canceling work
       // cannot become a hot loop while tiles decode or the slider is held.
-      // Poll once every 500ms so the 2.5s prefetch fairness deadline and
+      // Poll every 500ms so the bounded viewport priority deadline and
       // failed-provider cooldown are still observed.
       if (shouldReplanSpatialFrame(hourChanged, now, this.lastScheduledAt)) {
         this.lastScheduledAt = now;
@@ -795,9 +795,9 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    // Favor the visible tile queues briefly, but DO NOT restart this clock
-    // on each Leaflet pan/loading event. This guarantees that the next forecast
-    // can begin within the configured grace period during continuous panning.
+    // Favor the visible tile queues before speculative forecast hours; do
+    // not restart this clock for every tile 'loading' event. The bounded
+    // grace still lets playback prepare the next hour on slow connections.
     const current = this.frames.get(this.base);
     const now = Date.now();
     const viewportRefreshing = !!current?.ready && (

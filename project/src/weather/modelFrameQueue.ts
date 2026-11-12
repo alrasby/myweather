@@ -1,7 +1,11 @@
 /** Maximum time a refreshed visible viewport can defer *starting* the
  * next forecast. Continuous panning must not starve animation forever. */
-export const SPATIAL_PREFETCH_GRACE_MS = 2500;
-export const SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS = 1200;
+// Device QA: 95th-percentile weather-tile completion exceeded 8 seconds
+// while transport itself was under 2 seconds. Protect current viewport
+// decoding before beginning a second model hour. Both limits are bounded
+// to avoid stalling animation or offline provider failure indefinitely.
+export const SPATIAL_PREFETCH_GRACE_MS = 8500;
+export const SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS = 5000;
 
 /** Avoid cancelling an expensive native forecast decode for every tiny pan.
  * A real viewport shift (>35% of either dimension) or zoom invalidates
