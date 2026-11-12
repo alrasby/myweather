@@ -1,36 +1,10 @@
 import { CapacitorHttp } from "@capacitor/core";
 import { proxyWeather } from "@/weather/proxy.functions";
+import { RequestSlots, raceRequestTimeout } from "@/weather/requestSlots";
 
 function nativeApp(): boolean {
   const cap = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return !!cap?.isNativePlatform?.();
-}
-
-function raceTimeout<T>(work: Promise<T>, ms: number, signal?: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("proxy-timeout")), ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException("aborted", "AbortError"));
-    };
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    signal?.addEventListener("abort", onAbort, { once: true });
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        reject(err);
-      },
-    );
-  });
 }
 
 function htmlPage(body: string): boolean {
@@ -39,28 +13,8 @@ function htmlPage(body: string): boolean {
 }
 
 /** ويب فيو أندرويد يعلّق الطلب إلى الأبد إن لم يُقطع، فيقف الجلب كله. */
-const MAX_IN_FLIGHT = 5;
-let inFlight = 0;
-const waiters: Array<() => void> = [];
-
-function takeSlot(): Promise<void> {
-  if (inFlight < MAX_IN_FLIGHT) {
-    inFlight += 1;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    waiters.push(() => {
-      inFlight += 1;
-      resolve();
-    });
-  });
-}
-
-function releaseSlot(): void {
-  inFlight = Math.max(0, inFlight - 1);
-  const next = waiters.shift();
-  if (next) next();
-}
+// Native HTTP and browser fallback share one bounded, abort-aware budget.
+const slots = new RequestSlots(5, 32);
 
 const headers = {
   Accept: "application/json, text/plain, */*",
@@ -73,9 +27,9 @@ async function nativePluginFetch(
   hdrs: Record<string, string>,
 ): Promise<Response> {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-  await takeSlot();
+  const release = await slots.acquire(signal);
   try {
-    const result = await raceTimeout(
+    const result = await raceRequestTimeout(
       CapacitorHttp.request({
         url,
         method: "GET",
@@ -91,7 +45,7 @@ async function nativePluginFetch(
     const body = typeof data === "string" ? data : JSON.stringify(data ?? "");
     return new Response(body, { status: result.status || 0 });
   } finally {
-    releaseSlot();
+    release();
   }
 }
 
@@ -101,7 +55,7 @@ async function timedFetch(
   ms: number,
   hdrs: Record<string, string>,
 ): Promise<Response> {
-  await takeSlot();
+  const release = await slots.acquire(signal);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   const onAbort = () => ctrl.abort();
@@ -115,7 +69,7 @@ async function timedFetch(
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
-    releaseSlot();
+    release();
   }
 }
 
@@ -133,7 +87,7 @@ export async function proxyFetch(url: string, signal?: AbortSignal, extra?: Reco
     }
   } else {
     try {
-      const result = await raceTimeout(proxyWeather({ data: { url } }), 10000, signal);
+      const result = await raceRequestTimeout(proxyWeather({ data: { url } }), 10000, signal);
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       const body = result?.body ?? "";
       const status = result?.status ?? 0;
