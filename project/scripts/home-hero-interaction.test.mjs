@@ -11,7 +11,7 @@ test("weather animation is behind the upper cards, not a child of scrolling temp
   const style = read("project/src/styles.css");
   assert.ok(home.includes('className="temp-under-orb'), "keep original temperature layout");
   assert.ok(!home.includes("<HeroClouds"), "remove cloud canvas that was glued to the hero card");
-  assert.ok(sky.includes("heroWeather ? <HeroClouds"), "preserve adaptive clouds/rain/snow in independent sky scene");
+  assert.ok(sky.includes("heroWeather ? <HeroPrecipitation"), "retain only weather-driven precipitation in sky scene");
   assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}'));
   assert.ok(style.includes(".wx-hero-atmosphere") && style.includes("pointer-events: none;"));
   assert.ok(style.includes("height: 11.5rem"), "precipitation remains bounded above the cards");
@@ -22,7 +22,7 @@ test("hero weather scene is bounded to low frame rate, pauses outside viewport a
   for (const phrase of [
     'data-hero-weather="localized"', 'IntersectionObserver', 'document.hidden',
     'prefers-reduced-motion: reduce', 'ResizeObserver', 'window.setTimeout', '65)',
-    'heroAtmosphere(code, cover, wind)', 'heroCloudTextures(day, plan.dark)',
+    'heroAtmosphere(code, cover, wind)', 'if (plan.precipitation === "none") return;',
     'plan.precipitation', 'observer?.disconnect()',
   ]) assert.ok(sky.includes(phrase), phrase);
 });
@@ -77,7 +77,7 @@ test("both interactive cloud layers fade away before hourly cards scroll beneath
   assert.ok(!app.includes("showClouds={false}"), "restore dynamic weather-driven sky clouds");
   assert.ok(app.includes("<SkyBackdrop"), "preserve responsive sky, sun and moon");
   assert.ok(sky.includes("showClouds ? <CloudField"), "restore original CloudField lifecycle");
-  assert.ok(sky.includes("heroWeather ? <HeroClouds"), "retain adaptive local clouds and precipitation in background");
+  assert.ok(sky.includes("heroWeather ? <HeroPrecipitation"), "local rain/snow is drawn apart from unified cloud field");
   assert.ok(!home.includes("<HeroClouds"), "no cloud canvas on the scrolling hero");
   assert.ok(home.includes("onScroll={syncCloudsWithScroll}"), "tie both cloud layers to the real Home scroller");
   assert.ok(home.includes("top / 200"), "fully fade the clouds before cards reach the sky band");
@@ -267,12 +267,12 @@ test("map painting performs only one viewport projection for each wind/temperatu
   assert.ok(src.includes("private drawField() {") && src.includes("this.syncViewport()"), "field painting still uses current map geometry");
 });
 
-test("loaded real ECMWF tiles enter with a short fade, never interpolated weather data", () => {
+test("loaded ECMWF tiles avoid a second rectangular alpha fade on top of frame-level interpolation", () => {
   const css = read("project/src/styles.css");
   assert.ok(css.includes(".leaflet-wx-clouds-pane .leaflet-tile") && css.includes(".leaflet-wx-model-pane .leaflet-tile"));
-  assert.ok(css.includes(".leaflet-tile.leaflet-tile-loaded"));
-  assert.ok(css.includes("transition: opacity 160ms ease-out"), "gentle compositor-only tile entry");
-  assert.ok(css.includes("@media (prefers-reduced-motion: reduce)"));
+  assert.ok(!css.includes("transition: opacity 160ms ease-out;"), "remove duplicate tile-level alpha fades");
+  assert.ok(!css.includes("transition: opacity 160ms ease-out"), "use only Leaflet and ECMWF frame-level fading");
+  assert.ok(css.includes("@media (prefers-reduced-motion: reduce)"), "existing reduced-motion support remains");
   const model = read("project/src/weather/spatialTilePolicy.ts");
   assert.ok(model.includes("updateWhenIdle: true") && model.includes("keepBuffer: 1"));
 });
@@ -297,4 +297,21 @@ test("map raster city labels no longer stretch during pinch and do not steal ini
   assert.ok(labels.includes('map.on("zoomend", onZoomEnd)'));
   assert.ok(labels.includes('layer.isLoading()'), "wait for actual raster labels, not arbitrary timeout");
   assert.ok(labels.includes('map.on("unload", dispose)'), "event handlers released on map removal");
+});
+
+test("weather hero uses one atmospheric cloud generator, with precipitation-only upper-band animation", () => {
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  const css = read("project/src/styles.css");
+  const model = read("project/src/weather/modelField.ts");
+  assert.ok(sky.includes("showClouds ? <CloudField"), "one ambient weather-dependent cloud field");
+  assert.ok(sky.includes("heroWeather ? <HeroPrecipitation"), "real state controls upper rain and snow");
+  assert.ok(!sky.includes("heroCloudTextures") && !sky.includes("heroSpriteCache"), "no repeated cloud sprite attached to temperature text");
+  assert.ok(!sky.includes("for (let i = 0; i < plan.clouds"), "no second cloud bank loop");
+  assert.ok(sky.includes("const density = heroAtmosphere(code, cover, 0).coverage"), "cloud transparency adapts to city WMO and cover");
+  assert.ok(sky.includes('if (heroAtmosphere(code, cover, wind).precipitation === "none") return null'), "no empty precip animation in sunny cities");
+  assert.ok(sky.includes('plan.precipitation === "snow"'), "snow retains existing weather-specific particle type");
+  assert.ok(css.includes("height: 11.5rem"), "precip stays clipped to upper region");
+  assert.ok(css.includes("opacity: var(--wx-cloud-scroll-opacity, 1)"), "sky and precipitation scroll away gradually");
+  assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "never composite partial ECMWF cloud tiles over different fallback model");
+  assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
 });
