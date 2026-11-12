@@ -1,6 +1,7 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
+import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
@@ -983,8 +984,8 @@ export class ModelField {
     // A real Open-Meteo fallback and ECMWF are separate forecast products.
     // Do not cross-fade their coarse/fine raster imagery: the overlap is seen
     // as rectangular cloud/rain patches during fast pans and time playback.
-    const fallbackForHour = this.sourceBackedFallback && !readySteps.has(this.base);
-    const returningToReadyModel = this.fallbackForMissingHour && !fallbackForHour && readySteps.has(this.base);
+    const { fallback: fallbackForHour, snapCompleteModel: returningToReadyModel } =
+      chooseWeatherSource(readySteps.has(this.base), this.sourceBackedFallback, this.fallbackForMissingHour);
     this.fallbackForMissingHour = fallbackForHour;
     const plan = fallbackForHour
       ? { goals: new Map<number, number>(), anchor: null, holding: false }
