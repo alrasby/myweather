@@ -822,7 +822,11 @@ export class FieldEngine {
     // retain their original per-frame paint behaviour.
     const fallbackDue = shouldPaintWeatherFallback(this.kind, this.modelCover) &&
       (this.kind !== 2 || shouldUpdateRainFallback(now, this.lastRainFallbackPaintAt));
-    if (this.kind !== 2 || cycloneDue) this.pinView();
+    // drawField() already synchronizes the viewport and georeferenced
+    // canvas. Calling pinView() immediately before it repeated expensive
+    // Leaflet projection calculations on every wind frame (60Hz).
+    // Only cyclone-only frames still need a separate viewport sync.
+    if (cycloneDue && !fallbackDue) this.pinView();
     if (fallbackDue) {
       if (this.kind === 2) this.lastRainFallbackPaintAt = now;
       this.drawField();
