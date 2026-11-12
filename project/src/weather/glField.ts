@@ -4,7 +4,7 @@ import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid"
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
-import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback } from "@/weather/weatherPlayback";
+import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback, rainClockWithoutGrid } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -294,6 +294,10 @@ export class FieldEngine {
   private rainView: GridField | null = null;
   private kind: ShadeKind = 0;
   private hourMax = 47;
+  private rainClockOriginMs = Date.now();
+  private rainForecastTime(grid: GridField | null, hour: number): number {
+    return grid ? indexToMs(grid.times, hour) : rainClockWithoutGrid(this.rainClockOriginMs, hour);
+  }
   private particles: Particle[] = [];
   private particleTarget = 420;
   private paused = false;
@@ -399,6 +403,7 @@ export class FieldEngine {
   }
 
   setKind(kind: ShadeKind) {
+    if (kind === 2 && this.kind !== 2) this.rainClockOriginMs = Date.now();
     this.kind = kind;
     this.weatherWaitSince = null;
     this.lastRainEmitAt = 0;
@@ -691,6 +696,10 @@ export class FieldEngine {
       // can supply rainfall until the official spatial frame is ready.
       if (this.detail && this.detailFillsView(this.detail) &&
           !this.detail.id.startsWith("est|")) return this.detail;
+      // The wind/heat global grid is also fetched from Open-Meteo and
+      // contains real precipitation fields. Reuse it if present, but NEVER
+      // use the synthetic estimateGrid() bootstrap as a rain forecast.
+      if (this.global && !this.global.id.startsWith("est|")) return this.global;
       return null;
     }
     if (this.detail && this.detailFillsView(this.detail)) return this.detail;
@@ -770,7 +779,7 @@ export class FieldEngine {
       const step = nextPlaybackHour(
         this.hour, dt, max, secondsPerForecastHour(this.kind),
         (candidate) => this.kind !== 2 || !this.canAdvanceRainTime ||
-          this.canAdvanceRainTime(grid ? indexToMs(grid.times, candidate) : Date.now()),
+          this.canAdvanceRainTime(this.rainForecastTime(grid, candidate)),
       );
       this.hour = step.hour;
       if (step.waiting) this.weatherWaitSince ??= now;
@@ -807,7 +816,7 @@ export class FieldEngine {
       this.lastRainEmitAt = now;
     }
     const grid = this.pick();
-    const timeMs = grid ? indexToMs(grid.times, this.hour) : Date.now();
+    const timeMs = this.kind === 2 ? this.rainForecastTime(grid, this.hour) : grid ? indexToMs(grid.times, this.hour) : Date.now();
     let sample: FieldSample | null = null;
     if (grid && this.map) {
       const c = this.map.getCenter();
