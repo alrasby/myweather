@@ -10,7 +10,7 @@ import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
-import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
+import { spatialViewportBounds, canReuseSpatialWindow, type SpatialBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
@@ -481,6 +481,19 @@ export class ModelField {
   private firstCloudReadyMs: number | null = null;
   private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
+  private decodeWindow: SpatialBounds | null = null;
+  // Leaflet emits paired move/zoom start/end events. While the gesture or
+  // inertia is active keep existing forecast tiles and decode work alive,
+  // but do not schedule obsolete new timeframes on every playback tick.
+  private mapInteractions = 0;
+  private onMapStart = () => { this.mapInteractions++; };
+  private onMapStop = () => {
+    this.mapInteractions = Math.max(0, this.mapInteractions - 1);
+    if (this.mapInteractions === 0 && this.visible && this.times.length) {
+      this.lastScheduledAt = 0;
+      this.pump();
+    }
+  };
 
   attach(L: unknown, map: LeafletMap) {
     this.attachedAt = performance.now();
@@ -490,6 +503,14 @@ export class ModelField {
     installSpatialFetch();
     this.metadataAbort?.abort();
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    if (this.map) {
+      this.map.off("movestart", this.onMapStart);
+      this.map.off("zoomstart", this.onMapStart);
+      this.map.off("moveend", this.onMapStop);
+      this.map.off("zoomend", this.onMapStop);
+    }
+    this.mapInteractions = 0;
+    this.decodeWindow = null;
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -509,16 +530,25 @@ export class ModelField {
     // The official Open-Meteo Leaflet example uses this exact hook.
     const updateBounds = () => {
       const bounds = map.getBounds();
-      updateCurrentBounds(spatialViewportBounds({
+      const requested = spatialViewportBounds({
         west: bounds.getWest(), south: bounds.getSouth(),
         east: bounds.getEast(), north: bounds.getNorth(),
-      }));
+      });
+      // Cropping a .om file repeatedly on a tiny pan evicts working tiles
+      // and delays the next hour. Skip only when FULL padded coverage fits.
+      if (canReuseSpatialWindow(this.decodeWindow, requested)) return;
+      updateCurrentBounds(requested);
+      this.decodeWindow = requested;
     };
     updateBounds();
     // Register before GridLayer moveend listeners: when pan/zoom finishes
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
     this.updateBoundsListener = updateBounds;
+    map.on("movestart", this.onMapStart);
+    map.on("zoomstart", this.onMapStart);
+    map.on("moveend", this.onMapStop);
+    map.on("zoomend", this.onMapStop);
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
@@ -721,7 +751,7 @@ export class ModelField {
   }
 
   private pump() {
-    if (!this.visible || !this.adapter || !this.map) return;
+    if (!this.visible || !this.adapter || !this.map || this.mapInteractions > 0) return;
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
@@ -1070,6 +1100,14 @@ export class ModelField {
     this.metadataAbort?.abort();
     this.metadataAbort = null;
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    if (this.map) {
+      this.map.off("movestart", this.onMapStart);
+      this.map.off("zoomstart", this.onMapStart);
+      this.map.off("moveend", this.onMapStop);
+      this.map.off("zoomend", this.onMapStop);
+    }
+    this.mapInteractions = 0;
+    this.decodeWindow = null;
     this.updateBoundsListener = null;
     this.visible = false;
     this.playbackActive = false;
