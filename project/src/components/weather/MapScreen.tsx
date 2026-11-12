@@ -9,7 +9,7 @@ import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { needsSatelliteUnderlay, idleBaseTilesOnAndroid } from "@/weather/satelliteBasemap";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -287,6 +287,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const here = placeRef.current;
         map.setView([here.lat, here.lon], 5);
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+        // Android/Chromium can omit or misplace Esri tiles when a pinch or
+        // fling keeps changing transforms as new images are composited.
+        // Schedule base imagery ONLY on settled views (Leaflet-supported
+        // option). Reuse the normal tile cache; no extra service requests.
+        const baseIdle = idleBaseTilesOnAndroid(navigator.userAgent);
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
         // At world zoom (<=5) the underlay and detailed imagery requested the
@@ -298,7 +303,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           maxNativeZoom: 5,
           maxZoom: 16,
           zIndex: 0,
-          updateWhenIdle: false,
+          updateWhenIdle: baseIdle,
+          updateWhenZooming: false,
           updateInterval: 200,
           keepBuffer: 2,
         });
@@ -313,7 +319,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const imagery = L.tileLayer(imageryUrl, {
           maxZoom: 16,
           zIndex: 1,
-          updateWhenIdle: false,
+          updateWhenIdle: baseIdle,
+          updateWhenZooming: false,
           updateInterval: 150,
           keepBuffer: 3,
         }).addTo(map);
@@ -323,7 +330,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: baseIdle, updateWhenZooming: false, updateInterval: 150, keepBuffer: 3 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
