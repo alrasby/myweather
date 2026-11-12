@@ -927,7 +927,11 @@ export class ModelField {
       const previewChanged = frame.previewReady !== preview || frame.previewMask !== previewMask;
       frame.previewReady = preview;
       frame.previewMask = previewMask;
-      if (step === this.base && preview && this.firstCloudReadyMs === null) {
+      // Measure when the cloud field really finishes, not when policy allows
+      // the cloud-only preview to be shown. This keeps mobile QA timings
+      // comparable after the synchronized three-layer display change.
+      if (step === this.base && this.firstCloudReadyMs === null &&
+          frame.loaded[0] && frame.tileCounts[0]! > 0 && !frame.errored.has(0)) {
         this.firstCloudReadyMs = performance.now() - this.attachedAt;
       }
       // A completed successful reload clears stale timeout errors, even when
