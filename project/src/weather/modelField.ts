@@ -466,6 +466,9 @@ export class ModelField {
     this.lastError = null;
     this.pinnedRun = null;
     this.metaAbort = new AbortController();
+    // No indefinitely pending metadata request: if ECMWF is inaccessible,
+    // fall back to the already supported global precipitation field.
+    const metadataTimeout = window.setTimeout(() => this.metaAbort?.abort(), 14000);
     this.ready = fetch(META, { signal: this.metaAbort.signal })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
@@ -492,7 +495,8 @@ export class ModelField {
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
         console.warn("MyWeather: spatial metadata fetch failed", this.lastError);
         this.times = [];
-      });
+      })
+      .finally(() => window.clearTimeout(metadataTimeout));
   }
 
   /** Explicitly release ECMWF tile layers, timers, callbacks and the map.
