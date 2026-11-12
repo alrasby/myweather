@@ -1,5 +1,6 @@
 import type { Map as LeafletMap } from "leaflet";
 import { nearestWorldLongitude, windScreenStepDegrees } from "@/weather/windProjection";
+import { usablePrecipitationGrid } from "@/weather/rainRasterQuality";
 import type { LiveCyclone } from "@/weather/cyclones";
 import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid";
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
@@ -312,18 +313,24 @@ export class FieldEngine {
     // A screen-projected wind trail cannot survive a Leaflet pan/zoom:
     // its historical points refer to a different map transform. Keep
     // particle positions and original wind speed, discard only old paths.
-    for (const p of this.particles) p.trail.length = 0;
+    // After a fling the old particles still occupied the entire particle
+    // budget in the PREVIOUS viewport. Clearing trails alone did not
+    // redistribute them, producing a small island of wind streaks.
+    this.particles.length = 0;
     this.partCtx?.clearRect(0, 0, this.partCanvas.width, this.partCanvas.height);
   };
   private onMove = () => {
     this.drawField();
-    if (this.kind === 0) this.drawParticles(0);
+    if (this.kind === 0) {
+      this.particles.length = 0;
+      this.drawParticles(0);
+    }
   };
   private onZoom = () => {
     // Wind traces are screen-projected from geographic coordinates; a zoom
     // transforms historical tail points disproportionately. Keep the particle
     // positions and count, but rebuild their trails after zoom settles.
-    if (this.kind === 0) for (const p of this.particles) p.trail.length = 0;
+    if (this.kind === 0) this.particles.length = 0;
     this.zoomSeen = this.map?.getZoom() ?? this.zoomSeen;
     this.drawField();
   };
@@ -696,24 +703,26 @@ export class FieldEngine {
 
   private pick(): GridField | null {
     if (this.kind === 2) {
+      const usable = (grid: GridField | null): grid is GridField =>
+        !!grid && !grid.id.startsWith("est|") &&
+        usablePrecipitationGrid(grid.lonSpan, grid.cols, this.map?.getZoom() ?? 0);
       const world = this.rainWorld;
       const view = this.rainView;
-      if (view && this.detailFillsView(view)) {
+      if (usable(view) && this.detailFillsView(view)) {
         const viewCell = view.lonSpan / Math.max(1, view.cols);
         const worldCell = world ? world.lonSpan / Math.max(1, world.cols) : 99;
         if ((!world || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
       }
-      if (world) return world;
+      if (usable(world)) return world;
       // The initial global grid may be estimateGrid(). Never sample it as
       // real precipitation (or let a missing model fabricate rain on a map).
       // Only a successfully fetched rain/world/view or measured detail
       // can supply rainfall until the official spatial frame is ready.
-      if (this.detail && this.detailFillsView(this.detail) &&
-          !this.detail.id.startsWith("est|")) return this.detail;
+      if (usable(this.detail) && this.detailFillsView(this.detail)) return this.detail;
       // The wind/heat global grid is also fetched from Open-Meteo and
       // contains real precipitation fields. Reuse it if present, but NEVER
       // use the synthetic estimateGrid() bootstrap as a rain forecast.
-      if (this.global && !this.global.id.startsWith("est|")) return this.global;
+      if (usable(this.global)) return this.global;
       return null;
     }
     if (this.detail && this.detailFillsView(this.detail)) return this.detail;
