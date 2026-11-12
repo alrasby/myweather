@@ -20,7 +20,7 @@ test("weather animation is behind the upper cards, not a child of scrolling temp
 test("hero weather scene is bounded to low frame rate, pauses outside viewport and supports accessibility", () => {
   const sky = read("project/src/components/weather/SkyBackdrop.tsx");
   for (const phrase of [
-    'data-hero-weather="localized"', 'IntersectionObserver', 'document.hidden',
+    'data-hero-weather="precipitation-only"', 'IntersectionObserver', 'document.hidden',
     'prefers-reduced-motion: reduce', 'ResizeObserver', 'window.setTimeout', '65)',
     'heroAtmosphere(code, cover, wind)', 'if (plan.precipitation === "none") return;',
     'plan.precipitation', 'observer?.disconnect()',
@@ -209,7 +209,7 @@ test("regression: map does not mount PR81 duplicate safety grids or defer spatia
 test("regression: fallback and ECMWF are switched atomically, not alpha-composited into rectangular artifacts", () => {
   const model = read("project/src/weather/modelField.ts");
   assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
-  assert.ok(model.includes("(!fallbackForHour || coldCloudPreview) && !cooldown"), "keep genuine cold-start ECMWF clouds available");
+  assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "only show cloud preview when no incompatible fallback product is visible");
   assert.ok(model.includes("(!fallbackForHour || idx === 0)"), "never duplicate fallback rain/snow with partial ECMWF precipitation");
   assert.ok(model.includes("fallbackForHour || returningToReadyModel ? goal"));
   assert.ok(model.includes("!fallbackForHour && this.diagnosticMode"));
