@@ -452,6 +452,27 @@ html:not(.light) .pop-chance {
    tile-edge bright lines visible across latitude and longitude while panning.
    No transform, tile size or weather animation is changed here. */
 
+/* The weather canvas is rendered by the OM worker and tiles arrive at
+   different times after a fling. Ease each *real loaded tile* into view
+   instead of flashing its rectangular boundary in a single frame. This
+   only affects the visual entry (160ms), not the data, colour ramp,
+   sampling, tile geometry or the layer's time-frame opacity. */
+.leaflet-container .leaflet-wx-clouds-pane .leaflet-tile,
+.leaflet-container .leaflet-wx-model-pane .leaflet-tile {
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+.leaflet-container .leaflet-wx-clouds-pane .leaflet-tile.leaflet-tile-loaded,
+.leaflet-container .leaflet-wx-model-pane .leaflet-tile.leaflet-tile-loaded {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .leaflet-container .leaflet-wx-clouds-pane .leaflet-tile,
+  .leaflet-container .leaflet-wx-model-pane .leaflet-tile {
+    transition: none;
+  }
+}
+
 
 .map-tools {
   position: absolute;
