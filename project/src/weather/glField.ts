@@ -307,8 +307,10 @@ export class FieldEngine {
   private last = 0;
   private zoomSeen = -1;
   private dpr = 1;
+  private windGestureActive = false;
   private onMoveStart = () => {
     if (this.kind !== 0) return;
+    this.windGestureActive = true;
     // A screen-projected wind trail cannot survive a Leaflet pan/zoom:
     // its historical points refer to a different map transform. Keep
     // particle positions and original wind speed, discard only old paths.
@@ -316,8 +318,12 @@ export class FieldEngine {
     this.partCtx?.clearRect(0, 0, this.partCanvas.width, this.partCanvas.height);
   };
   private onMove = () => {
-    this.drawField();
-    if (this.kind === 0) this.drawParticles(0);
+    this.windGestureActive = false;
+    // The active RAF renders wind on the next display frame. Redrawing the
+    // particle and shader canvases synchronously on Leaflet's moveend made
+    // the map stutter exactly when the user released a fling.
+    if (this.kind === 0) this.syncViewport();
+    else this.drawField();
   };
   private onZoom = () => {
     // Wind traces are screen-projected from geographic coordinates; a zoom
@@ -325,7 +331,9 @@ export class FieldEngine {
     // positions and count, but rebuild their trails after zoom settles.
     if (this.kind === 0) for (const p of this.particles) p.trail.length = 0;
     this.zoomSeen = this.map?.getZoom() ?? this.zoomSeen;
-    this.drawField();
+    this.windGestureActive = false;
+    if (this.kind === 0) this.syncViewport();
+    else this.drawField();
   };
   private settle = () => {
     this.drawField();
@@ -541,6 +549,7 @@ export class FieldEngine {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.windGestureActive = false;
     this.map?.off("movestart", this.onMoveStart);
     this.map?.off("zoomstart", this.onMoveStart);
     this.map?.off("moveend", this.onMove);
@@ -1204,7 +1213,13 @@ export class FieldEngine {
     if (this.particles.length > cap) this.particles.length = cap;
     ctx.lineCap = "butt";
     ctx.lineJoin = "miter";
-    for (const p of this.particles) {
+    // Keep 60Hz wind animation and the same native U/V speed. During a
+    // physical map gesture only, draw half the wind streamlines so Leaflet
+    // can transform imagery without competing with hundreds of polyline
+    // projections. The full density returns on release automatically.
+    const stride = this.kind === 0 && this.windGestureActive ? 2 : 1;
+    for (let i = 0; i < this.particles.length; i += stride) {
+      const p = this.particles[i]!;
       p.life -= dt * (rain ? 0.32 : 0.28);
       const sample = sampleGrid(grid, p.lat, p.lon, this.hour);
       const here = this.local(p.lat, p.lon);
