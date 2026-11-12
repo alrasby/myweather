@@ -696,3 +696,35 @@ html:not(.light) .pop-chance {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Theme-aware settings surface: localized to SettingsScreen, no map
+   repaint and no extra animations while weather models are decoding. */
+.wx-settings .wx-card {
+  border-color: color-mix(in srgb, var(--color-fg) 12%, transparent);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, #eff6fa 95%, transparent),
+    color-mix(in srgb, #dfeaf1 92%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.75), 0 10px 26px rgb(20 50 75 / 0.10);
+}
+html:not(.light) .wx-settings .wx-card {
+  background: linear-gradient(145deg,
+    color-mix(in srgb, #17394e 95%, transparent),
+    color-mix(in srgb, #0e273b 94%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 10px 26px rgb(0 0 0 / 0.18);
+}
+.wx-settings .chip-track {
+  background: color-mix(in srgb, var(--color-fg) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-fg) 8%, transparent);
+}
+.wx-settings .chip-on {
+  background: color-mix(in srgb, var(--color-chip) 91%, var(--color-accent) 9%);
+  color: var(--color-chip-fg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 2px 6px rgb(0 0 0 / 0.15);
+}
+.wx-settings :is(button, [role="switch"]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.wx-settings button:disabled {
+  cursor: not-allowed;
+}
