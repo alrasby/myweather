@@ -5,6 +5,7 @@ import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrame
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
+import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
@@ -57,6 +58,9 @@ export type WeatherModelDiagnostics = {
   cacheStored: number;
   cacheRejected: number;
   performance: SpatialPerformanceSnapshot;
+  rateLimitedResponses: number;
+  rateLimitRemainingMs: number;
+  startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
 };
 
 type AnyLayer = {
@@ -203,6 +207,7 @@ const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
 const spatialRangeFlights = new SpatialRangeFlights<Response>();
+const spatialRateLimit = new SpatialRateLimit();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
 let spatialCacheEligible = 0;
@@ -222,9 +227,13 @@ async function measuredNativeRequest(
   try {
     const result = await spatialNativeQueue.run(signal, () => {
       started = performance.now();
+      spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
     });
+    const retryAfter = Object.entries(result.headers ?? {})
+      .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
+    spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));
     const bytes = spatialTransferBytes(options.method ?? "GET", result.status, result.headers ?? {}, result.data);
     spatialPerformance.networkRequest(
       started - queued, performance.now() - started,
@@ -232,7 +241,7 @@ async function measuredNativeRequest(
     );
     return result;
   } catch (error) {
-    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
+    if (!(error instanceof SpatialRateLimitError)) spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
     throw error;
   }
 }
@@ -363,10 +372,15 @@ export function installSpatialFetch(): void {
     if (native) {
       try {
         return await pluginSpatial(url, { ...init, method, signal }, headers);
-      } catch {
+      } catch (error) {
+        // Never double-send a 429/Retry-After request through browser fallback:
+        // that worsens provider throttling and delays the first real frame.
+        if (error instanceof SpatialRateLimitError || spatialRateLimit.remainingMs() > 0) {
+          throw new SpatialRateLimitError(spatialRateLimit.remainingMs());
+        }
         // A cancelled Leaflet frame must never start another network request.
         if (signal?.aborted) throw new Error("spatial-request-aborted");
-        /* الطلب الأصلي للمتصفح إن رفضت الإضافة الطول */
+        /* Use browser transport only when the native bridge fails otherwise. */
       }
     }
     const ctrl = new AbortController();
@@ -437,9 +451,19 @@ export class ModelField {
   private refreshSince = 0;
   private ready: Promise<void> = Promise.resolve();
   private metadataAbort: AbortController | null = null;
+  // First-session readiness timings are read-only and measured on device.
+  // They are NOT claimed to isolate WASM decoding from worker rasterization.
+  private attachedAt = 0;
+  private metadataReadyMs: number | null = null;
+  private firstCloudReadyMs: number | null = null;
+  private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
+    this.attachedAt = performance.now();
+    this.metadataReadyMs = null;
+    this.firstCloudReadyMs = null;
+    this.firstCompleteReadyMs = null;
     installSpatialFetch();
     this.metadataAbort?.abort();
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
@@ -480,6 +504,7 @@ export class ModelField {
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
         if (metadataAbort.signal.aborted || this.map !== map) return;
+        this.metadataReadyMs = performance.now() - this.attachedAt;
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -583,6 +608,13 @@ export class ModelField {
         globalThis.crossOriginIsolated === true,
         (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize ?? null,
       ),
+      rateLimitedResponses: spatialRateLimit.incidents,
+      rateLimitRemainingMs: spatialRateLimit.remainingMs(),
+      startupMs: {
+        metadata: this.metadataReadyMs,
+        firstCloudReady: this.firstCloudReadyMs,
+        firstCompleteReady: this.firstCompleteReadyMs,
+      },
       layerTimings: Array.from({ length: SPATIAL_LAYER_COUNT }, (_, index) =>
         spatialLayerTiming(Date.now(), frame?.layerStartedAt[index] ?? 0,
           frame?.layerFirstTileAt[index] ?? 0, frame?.layerLastTileAt[index] ?? 0,
@@ -776,6 +808,9 @@ export class ModelField {
       const previewChanged = frame.previewReady !== preview || frame.previewMask !== previewMask;
       frame.previewReady = preview;
       frame.previewMask = previewMask;
+      if (step === this.base && preview && this.firstCloudReadyMs === null) {
+        this.firstCloudReadyMs = performance.now() - this.attachedAt;
+      }
       // A completed successful reload clears stale timeout errors, even when
       // the previous frame already remained visible during the refresh.
       if (frame.loaded.every(Boolean) && frame.errored.size === 0 && frame.tileCounts.every((n) => n > 0)) {
@@ -797,6 +832,9 @@ export class ModelField {
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
+        if (step === this.base && this.firstCompleteReadyMs === null) {
+          this.firstCompleteReadyMs = performance.now() - this.attachedAt;
+        }
         this.loading.delete(step);
         this.failedUntil.delete(step);
         this.lastError = null;
