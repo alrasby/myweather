@@ -201,10 +201,11 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
         <Field label={t(lang, "windMotion")}>
           <Chips
-            value={prefs.particles === "high" ? "high" : "low"}
+            value={prefs.particles}
             disabled={prefs.dataSaver}
             options={[
               ["low", t(lang, "motionLight")],
+              ["med", lang === "ar" ? "متوازن" : "Balanced"],
               ["high", t(lang, "motionClear")],
             ]}
             onChange={(particles) => setPrefs({ particles })}
