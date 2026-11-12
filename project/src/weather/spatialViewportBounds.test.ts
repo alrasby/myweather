@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { spatialViewportBounds } from "./spatialViewportBounds.ts";
+import { spatialViewportBounds, canReuseSpatialWindow } from "./spatialViewportBounds.ts";
 
 test("Norway viewport requests a small padded area instead of the world", () => {
   const bounds = spatialViewportBounds({ west: 8, east: 24, south: 57, north: 72 });
@@ -39,4 +39,22 @@ test("invalid or nonfinite viewports fail safe to global model", () => {
   const bounds = spatialViewportBounds({ west: NaN, east: 10, south: 1, north: 20 });
   assert.deepEqual(bounds.slice(0,1), [-180]);
   assert.equal(bounds[2], 180);
+});
+
+test("small pans inside a padded .om window do not retrigger full decoding", () => {
+  const current = spatialViewportBounds({ west: 40, east: 60, south: 15, north: 30 });
+  const slight = spatialViewportBounds({ west: 40.3, east: 60.3, south: 15.1, north: 30.1 });
+  assert.equal(canReuseSpatialWindow(current, slight), false,
+    "once the padded edge moves outside, refresh to preserve coverage");
+  const stillWithin = [current[0] + 0.1, current[1] + 0.1, current[2] - 0.1, current[3] - 0.1];
+  assert.equal(canReuseSpatialWindow(current, stillWithin as typeof current), true);
+  const distant = spatialViewportBounds({ west: 75, east: 95, south: 15, north: 30 });
+  assert.equal(canReuseSpatialWindow(current, distant), false);
+});
+test("world coverage may shrink back to regional windows and cannot hide dateline data", () => {
+  const world = spatialViewportBounds({ west: 170, east: 195, south: -10, north: 40 });
+  const regional = spatialViewportBounds({ west: 60, east: 80, south: -10, north: 40 });
+  assert.equal(canReuseSpatialWindow(world, regional), false);
+  assert.equal(canReuseSpatialWindow(regional, world), false);
+  assert.equal(canReuseSpatialWindow(world, world), true);
 });
