@@ -49,6 +49,26 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   // Declination must use the phone's measured position, not an unrelated selected city.
   const reading = useDeviceCompass(qiblaFix?.lat ?? Number.NaN, qiblaFix?.lon ?? Number.NaN);
   const scroller = useRef<HTMLDivElement>(null);
+  // The atmospheric sky and the localized hero are separate canvases.
+  // Fade BOTH before forecast cards reach the cloud area: neither a fixed
+  // backdrop nor a scrolling hero should appear attached to the cards.
+  // Scroll updates write one compositor-friendly CSS variable, without
+  // React state changes, timers or additional canvas draw calls.
+  const syncCloudsWithScroll = () => {
+    const top = Math.max(0, scroller.current?.scrollTop ?? 0);
+    const t = Math.min(1, top / 96);
+    const opacity = 1 - t * t * (3 - 2 * t);
+    document.documentElement.style.setProperty("--wx-cloud-scroll-opacity", opacity.toFixed(4));
+  };
+  useEffect(() => {
+    syncCloudsWithScroll();
+    return () => {
+      document.documentElement.style.removeProperty("--wx-cloud-scroll-opacity");
+    };
+    // The ref points to the same Home scroll container for its lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pull = useRef(0);
   const swipeStart = useRef<{ x: number; y: number; eligible: boolean } | null>(null);
   const [pulling, setPulling] = useState(0);
@@ -160,6 +180,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   return (
     <div
       ref={scroller}
+      onScroll={syncCloudsWithScroll}
       className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
       onTouchStart={(e) => {
         if (e.touches.length !== 1) {
