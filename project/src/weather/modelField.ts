@@ -10,7 +10,7 @@ import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
-import { spatialTileOptions } from "@/weather/spatialTilePolicy";
+import { spatialTileOptions, useCompactSpatialTiles, COMPACT_SPATIAL_TILE_SIZE } from "@/weather/spatialTilePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
@@ -479,6 +479,9 @@ export class ModelField {
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
   private viewportHoldUntil = 0;
+  // Android WebView lacks SharedArrayBuffer: avoid showing cloud/rain/snow
+  // one by one before a complete same-run ECMWF frame is ready.
+  private compactSpatialTiles = false;
   private ready: Promise<void> = Promise.resolve();
   private metadataAbort: AbortController | null = null;
   // First-session readiness timings are read-only and measured on device.
@@ -505,6 +508,7 @@ export class ModelField {
     if (this.map && this.moveListener) this.map.off("move", this.moveListener);
     this.viewportMoving = false;
     this.viewportHoldUntil = 0;
+    this.compactSpatialTiles = useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true);
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -874,12 +878,17 @@ export class ModelField {
     // Use coherent ECMWF model fields for actual cloud shape, precipitation
     // and snowfall instead of inflating low-resolution point forecasts.
     // Keep already-loaded tiles during gestures; load new coverage after idle.
-    const cloudOpts = spatialTileOptions("wx-clouds");
-    const rainOpts = spatialTileOptions("wx-model");
+    const cloudOpts = spatialTileOptions("wx-clouds", this.compactSpatialTiles);
+    const rainOpts = spatialTileOptions("wx-model", this.compactSpatialTiles);
+    const renderUrl = (variable: string) => {
+      const url = tileUrl(variable, step, this.pinnedRun);
+      // OM render tile_size must match Leaflet's canvas tileSize.
+      return this.compactSpatialTiles ? `${url}&tile_size=${COMPACT_SPATIAL_TILE_SIZE}` : url;
+    };
     const made = [
-      adapter.createTileLayer(tileUrl("cloud_cover", step, this.pinnedRun), cloudOpts),
-      adapter.createTileLayer(tileUrl("precipitation", step, this.pinnedRun), rainOpts),
-      adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.pinnedRun), rainOpts),
+      adapter.createTileLayer(renderUrl("cloud_cover"), cloudOpts),
+      adapter.createTileLayer(renderUrl("precipitation"), rainOpts),
+      adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
     const frame = {
       layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0, previewOpacityKey: "",
@@ -908,7 +917,10 @@ export class ModelField {
       // the visible viewport; do not expose the low-resolution global fallback
       // every time a cloud/rain/snow tile queue enters "loading".
       const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
-      const preview = spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
+      // Keep current genuine fallback until all three ECMWF layers finish,
+      // rather than visibly replacing them in three separate passes.
+      const preview = !this.compactSpatialTiles &&
+        spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
       const previewMask = frame.loaded.reduce((mask, complete, index) =>
         complete && frame.tileCounts[index]! > 0 && !frame.errored.has(index)
           ? mask | (1 << index) : mask, 0);

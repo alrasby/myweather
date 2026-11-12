@@ -4,15 +4,17 @@ import { planSpatialRequests, canAdvanceSpatialTime, SPATIAL_PREFETCH_GRACE_MS, 
 
 test("only one current ECMWF frame loads; next is prefetched after it becomes ready", () => {
   assert.deepEqual(planSpatialRequests(6, 30, new Set(), new Set(), new Set()), { cancel: [], start: 6 });
-  assert.deepEqual(planSpatialRequests(6, 30, new Set([6]), new Set(), new Set()), { cancel: [], start: 7 });
-  assert.deepEqual(planSpatialRequests(6, 30, new Set([6]), new Set([7]), new Set()), { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(6, 30, new Set([6]), new Set(), new Set()), { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(6, 30, new Set([6]), new Set(), new Set(), false, 0, true), { cancel: [], start: 7 });
+  assert.deepEqual(planSpatialRequests(6, 30, new Set([6]), new Set([7]), new Set(), false, 0, true), { cancel: [], start: null });
 });
 test("an obsolete in-flight frame is cancelled instead of saturating the decoder", () => {
   assert.deepEqual(planSpatialRequests(18, 40, new Set([6]), new Set([7]), new Set()), { cancel: [7], start: 18 });
   assert.deepEqual(planSpatialRequests(18, 40, new Set([6]), new Set([18]), new Set()), { cancel: [], start: null });
 });
 test("retry cooldown allows the adjacent hour instead of hammering a failed frame", () => {
-  assert.deepEqual(planSpatialRequests(18, 40, new Set([6]), new Set(), new Set([18])), { cancel: [], start: 19 });
+  assert.deepEqual(planSpatialRequests(18, 40, new Set([6]), new Set(), new Set([18])), { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(18, 40, new Set([6]), new Set(), new Set([18]), false, 0, true), { cancel: [], start: 19 });
   assert.deepEqual(planSpatialRequests(19, 20, new Set([6]), new Set(), new Set()), { cancel: [], start: 19 });
   assert.deepEqual(planSpatialRequests(19, 20, new Set([19]), new Set(), new Set()), { cancel: [], start: null });
 });
@@ -34,12 +36,14 @@ test("viewport refresh temporarily defers starting new prefetch", () => {
   assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), true, 0), { cancel: [], start: null });
   assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PREFETCH_GRACE_MS - 1), { cancel: [], start: null });
   const settled = planSpatialRequests(8, 32, ready, new Set(), new Set(), false);
-  assert.deepEqual(settled, { cancel: [], start: 9 });
+  assert.deepEqual(settled, { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), false, 0, true),
+    { cancel: [], start: 9 });
 });
 
 test("continuous panning cannot starve future model hours after bounded viewport grace", () => {
   const ready = new Set([8]);
-  const plan = planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PREFETCH_GRACE_MS);
+  const plan = planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PREFETCH_GRACE_MS, true);
   assert.deepEqual(plan, { cancel: [], start: 9 });
 });
 
@@ -52,6 +56,8 @@ test("small map drags preserve in-flight prefetch but do not launch new work", (
   assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), true, 5000, true, true),
     { cancel: [], start: null });
   assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), false),
+    { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), false, 0, true),
     { cancel: [], start: 9 });
 });
 
@@ -80,7 +86,7 @@ test("second-hour lookahead starts only when current and next are complete", () 
     { cancel: [], start: 10 },
   );
   assert.deepEqual(
-    planSpatialRequests(8, 32, new Set([8]), new Set(), new Set()),
+    planSpatialRequests(8, 32, new Set([8]), new Set(), new Set(), false, 0, true),
     { cancel: [], start: 9 },
   );
   assert.deepEqual(
@@ -119,9 +125,13 @@ test("active playback favors visible ECMWF decoding for a bounded period", () =>
   );
 });
 
-test("a still map does not decode a second unused future hour", () => {
-  const plan = planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set());
-  assert.deepEqual(plan, { cancel: [], start: null });
+test("a still map never decodes unused future hours", () => {
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8]), new Set(), new Set()),
+    { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set()),
+    { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set(), false, 0, true),
+    { cancel: [], start: 10 });
 });
 
 test("playback never starts more than one unready frame while the next is loading", () => {

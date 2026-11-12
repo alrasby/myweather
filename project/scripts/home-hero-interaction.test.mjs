@@ -373,3 +373,14 @@ test("home sky renders gently but never competes with weather map tile decoding 
   assert.ok(sky.includes('document.removeEventListener("visibilitychange", onVisibility)'));
   assert.ok(sky.includes("pause();") && sky.includes("ro.disconnect();"));
 });
+\n
+test("mobile weather displays complete same-run ECMWF layers without per-variable first-paint succession", () => {
+  const src = read("project/src/weather/modelField.ts");
+  const policy = read("project/src/weather/spatialTilePolicy.ts");
+  const planner = read("project/src/weather/modelFrameQueue.ts");
+  assert.ok(policy.includes("COMPACT_SPATIAL_TILE_SIZE = 1024"));
+  assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
+  assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
+  assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
+  assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
+});

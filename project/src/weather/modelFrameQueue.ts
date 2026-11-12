@@ -46,7 +46,10 @@ export function planSpatialRequests(
   // don't consume network and battery decoding unused hours on a still map.
   const lookahead = playbackActive && ready.has(requested) && ready.has(requested + 1)
     ? requested + 2 : -1;
-  const candidates = [requested, requested + 1, lookahead].filter(
+  // A paused map should decode ONLY the requested forecast hour. Without
+  // shared memory, idle-hour prefetch copies huge arrays and delays panning.
+  // Active playback still primes its next hour for smooth animation.
+  const candidates = [requested, playbackActive ? requested + 1 : -1, lookahead].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
   // The visible viewport has precedence over future forecast hours, even

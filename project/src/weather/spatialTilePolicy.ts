@@ -11,9 +11,20 @@
  * zoom 12. Beyond that we re-use native tiles rather than asking for false
  * additional forecast detail or unnecessarily decoding more tiles.
  */
-export function spatialTileOptions(pane: "wx-clouds" | "wx-model") {
+/** Non-isolated Android WebView clones the full model variable for EACH
+ * worker tile. One 1024px tile replaces up to four 512px worker jobs.
+ * The URL explicitly requests 1024 model raster pixels: no image stretching.
+ * A shared-memory browser retains the original 512px behavior. */
+export const COMPACT_SPATIAL_TILE_SIZE = 1024;
+export function useCompactSpatialTiles(native: boolean, isolated: boolean): boolean {
+  return native && !isolated;
+}
+
+export function spatialTileOptions(pane: "wx-clouds" | "wx-model", compact = false) {
   return {
     pane,
+    tileSize: compact ? COMPACT_SPATIAL_TILE_SIZE : 512,
+    zoomOffset: compact ? -2 : -1,
     opacity: 0,
     updateWhenIdle: true,
     updateWhenZooming: false,
@@ -21,7 +32,7 @@ export function spatialTileOptions(pane: "wx-clouds" | "wx-model") {
     // A single surrounding ring covers normal short drags without
     // scheduling two extra rings of expensive OM decoding for every hour.
     keepBuffer: 1,
-    maxNativeZoom: 12,
+    maxNativeZoom: compact ? 13 : 12,
     maxZoom: 16,
   };
 }
