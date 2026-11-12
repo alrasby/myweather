@@ -192,7 +192,7 @@ test("a missing rain grid uses a stable forecast time reference, never Date.now 
   assert.ok(engine.includes("this.rainForecastTime(grid, candidate)"));
   assert.ok(engine.includes("this.rainForecastTime(grid, this.hour)"));
   assert.ok(helper.includes("rainClockWithoutGrid(startMs: number, hour: number)"));
-  assert.ok(engine.includes('this.global && !this.global.id.startsWith("est|")'));
+  assert.ok(engine.includes("if (usable(this.global)) return this.global;"), "real global data must also meet visible raster-quality constraints");
 });
 
 test("regression: map does not mount PR81 duplicate safety grids or defer spatial frames during dragging", () => {
@@ -229,4 +229,24 @@ test("ECMWF remains visible through short playback seeks; real-data fallback act
   assert.ok(map.includes("!engine.playing || !modelRef.current?.isSpatialVisible()"));
   assert.ok(map.includes("info.playbackWaitingMs >= 1600"));
   assert.ok(map.includes("setSourceBackedFallback(needFallback)"));
+});
+
+test("wind flings replenish the VISIBLE viewport rather than keeping an old offscreen particle budget", () => {
+  const engine = read("project/src/weather/glField.ts");
+  const start = engine.split("private onMoveStart = () => {")[1]?.split("  private onMove =")[0];
+  const settle = engine.split("private onMove = () => {")[1]?.split("  private onZoom =")[0];
+  assert.ok(start?.includes("this.particles.length = 0"), "pan start discards outdated particle positions");
+  assert.ok(settle?.includes("this.particles.length = 0"), "after inertia the new viewport is fully seeded");
+  assert.ok(settle?.includes("this.drawParticles(0)"), "draw new positions without waiting for old lifetimes");
+  assert.ok(engine.includes("const bornCap = 110"), "bounded seeding avoids a single-frame CPU spike");
+});
+
+test("fallback rain grid cells must not become large blurry polygons after zoom", () => {
+  const field = read("project/src/weather/glField.ts");
+  const quality = read("project/src/weather/rainRasterQuality.ts");
+  assert.ok(field.includes("usablePrecipitationGrid(grid.lonSpan, grid.cols"));
+  assert.ok(field.includes("if (usable(world)) return world;"));
+  assert.ok(field.includes("if (usable(this.detail) && this.detailFillsView(this.detail))"));
+  assert.ok(quality.includes("pixelsPerCell <= maxCellPixels"));
+  assert.ok(field.includes('!grid.id.startsWith("est|")'), "no estimated rain tiles");
 });
