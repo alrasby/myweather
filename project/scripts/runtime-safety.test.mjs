@@ -21,7 +21,7 @@ test("long wind threads remain bounded and rendered with one faded gradient stro
 });
 test("native activity releases sensor, WebView and message queue on destruction", () => {
   const activity = read("project/android/app/src/main/java/net/nabdhserv/myweather/MainActivity.java");
-  assert.ok(activity.includes("protected void onDestroy()"));
+  assert.ok(activity.includes("public void onDestroy()"));
   for (const item of ["compass.dispose()", "main.removeCallbacksAndMessages(null)", "web = null",
     "SENSOR_DELAY_UI", "sensors.unregisterListener(this)"]) assert.ok(activity.includes(item),item);
   const model = read("project/src/weather/modelField.ts");
