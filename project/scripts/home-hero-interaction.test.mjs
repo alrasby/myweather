@@ -209,8 +209,8 @@ test("regression: map does not mount PR81 duplicate safety grids or defer spatia
 test("regression: fallback and ECMWF are switched atomically, not alpha-composited into rectangular artifacts", () => {
   const model = read("project/src/weather/modelField.ts");
   assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
-  assert.ok(model.includes("(!fallbackForHour || coldCloudPreview) && !cooldown"), "keep genuine cold-start ECMWF clouds available");
-  assert.ok(model.includes("(!fallbackForHour || idx === 0)"), "never duplicate fallback rain/snow with partial ECMWF precipitation");
+  assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "never layer ECMWF clouds over a coarse precipitation fallback");
+  assert.ok(!model.includes("coldCloudPreview"), "source-mixed cold preview must stay disabled");
   assert.ok(model.includes("fallbackForHour || returningToReadyModel ? goal"));
   assert.ok(model.includes("!fallbackForHour && this.diagnosticMode"));
 });
@@ -229,4 +229,37 @@ test("ECMWF remains visible through short playback seeks; real-data fallback act
   assert.ok(map.includes("!engine.playing || !modelRef.current?.isSpatialVisible()"));
   assert.ok(map.includes("info.playbackWaitingMs >= 1600"));
   assert.ok(map.includes("setSourceBackedFallback(needFallback)"));
+});
+
+test("Android basemap and labels load after map motion, without touching ECMWF tile policy", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const tilePolicy = read("project/src/weather/spatialTilePolicy.ts");
+  const base = read("project/src/weather/satelliteBasemap.ts");
+  assert.ok(map.includes("const baseIdle = idleBaseTilesOnAndroid(navigator.userAgent)"));
+  assert.ok(map.includes('zIndex: 1,\n          updateWhenIdle: baseIdle,\n          updateWhenZooming: false,'));
+  assert.ok(map.includes('pane: "wx-labels", updateWhenIdle: baseIdle, updateWhenZooming: false'));
+  assert.ok(base.includes("export function idleBaseTilesOnAndroid("));
+  assert.ok(tilePolicy.includes("updateWhenIdle: true"));
+  assert.ok(tilePolicy.includes("keepBuffer: 1"));
+  assert.ok(!map.includes("underlay4") && !map.includes("underlay5"), "no duplicate base raster grids from prior regression");
+});
+
+test("wind preserves full-frame FPS but reduces duplicate transform workload during gestures", () => {
+  const wind = read("project/src/weather/glField.ts");
+  assert.ok(wind.includes("private windGestureActive = false"));
+  assert.ok(wind.includes("this.windGestureActive = true"));
+  assert.ok(wind.includes("this.windGestureActive = false"));
+  assert.ok(wind.includes("const stride = this.kind === 0 && this.windGestureActive ? 2 : 1"));
+  assert.ok(!wind.includes("now - this.last < 32"));
+  assert.ok(wind.includes("if (this.kind === 0) this.syncViewport();"));
+  assert.ok(!wind.includes("if (this.kind === 0) this.drawParticles(0);"));
+});
+
+test("cloud previews remain real ECMWF data and never overlay a mismatched model fallback", () => {
+  const model = read("project/src/weather/modelField.ts");
+  assert.ok(model.includes("requested.previewReady"));
+  assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"));
+  assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
+  assert.ok(model.includes("completedOpacity >= 0.88"));
+  assert.ok(!model.includes("coldCloudPreview"));
 });
