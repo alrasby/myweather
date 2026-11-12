@@ -188,7 +188,16 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
-        modelRef.current?.setSourceBackedFallback(engine.hasSourceRain());
+        // Do not jump to the coarse real-data fallback at EVERY hourly
+        // boundary when the next high-resolution ECMWF frame may finish
+        // shortly. Wait briefly while a previous ECMWF frame is showing;
+        // start the real fallback immediately for cold start / missing data.
+        const hasRealRain = engine.hasSourceRain();
+        const needFallback = hasRealRain && (
+          !engine.playing || !modelRef.current?.isSpatialVisible() ||
+          info.playbackWaitingMs >= 1600
+        );
+        modelRef.current?.setSourceBackedFallback(needFallback);
         modelRef.current?.setPlaybackActive(engine.playing);
         modelRef.current?.sync(info.timeMs);
         // While the next spatial hour decodes, fetch ONE lightweight genuine
