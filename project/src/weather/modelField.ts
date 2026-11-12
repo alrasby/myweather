@@ -399,6 +399,9 @@ export class ModelField {
 
   private map: LeafletMap | null = null;
   private adapter: Adapter | null = null;
+  private boundUpdate: (() => void) | null = null;
+  private metaAbort: AbortController | null = null;
+  private destroyed = false;
   private times: number[] = [];
   private pinnedRun: PinnedSpatialRun | null = null;
   private lastError: string | null = null;
@@ -428,6 +431,7 @@ export class ModelField {
   private ready: Promise<void> = Promise.resolve();
 
   attach(L: unknown, map: LeafletMap) {
+    if (this.destroyed) return;
     installSpatialFetch();
     this.map = map;
     if (!map.getPane("wx-clouds")) {
@@ -445,6 +449,7 @@ export class ModelField {
     // ECMWF grid for every requested forecast hour and all three variables.
     // The official Open-Meteo Leaflet example uses this exact hook.
     const updateBounds = () => {
+      if (this.destroyed) return;
       const bounds = map.getBounds();
       updateCurrentBounds(spatialViewportBounds({
         west: bounds.getWest(), south: bounds.getSouth(),
@@ -455,13 +460,16 @@ export class ModelField {
     // Register before GridLayer moveend listeners: when pan/zoom finishes
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
+    this.boundUpdate = updateBounds;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
     this.pinnedRun = null;
-    this.ready = fetch(META)
+    this.metaAbort = new AbortController();
+    this.ready = fetch(META, { signal: this.metaAbort.signal })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
+        if (this.destroyed) return;
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -480,10 +488,32 @@ export class ModelField {
           : (json.valid_times ?? []).map((t) => Date.parse(t)).filter(Number.isFinite).sort((a, b) => a - b);
       })
       .catch((error: unknown) => {
+        if (this.destroyed) return;
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
         console.warn("MyWeather: spatial metadata fetch failed", this.lastError);
         this.times = [];
       });
+  }
+
+  /** Explicitly release ECMWF tile layers, timers, callbacks and the map.
+   * The main FieldEngine has its own destroy(); both must be called on unmount.
+   */
+  destroy(): void {
+    if (this.destroyed) return;
+    this.setVisible(false);
+    this.destroyed = true;
+    this.metaAbort?.abort();
+    this.metaAbort = null;
+    if (this.boundUpdate && this.map) this.map.off("moveend", this.boundUpdate);
+    this.boundUpdate = null;
+    this.onLive = null;
+    this.onMiss = null;
+    this.map = null;
+    this.adapter = null;
+    this.pinnedRun = null;
+    this.times = [];
+    this.failedUntil.clear();
+    this.loading.clear();
   }
 
   whenReady(): Promise<number> {
