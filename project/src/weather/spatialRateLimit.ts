@@ -3,8 +3,10 @@
  * No background timers, additional concurrency, or fabricated image data.
  */
 export class SpatialRateLimitError extends Error {
-  constructor(public readonly waitMs: number) {
+  readonly waitMs: number;
+  constructor(waitMs: number) {
     super("spatial-provider-rate-limited");
+    this.waitMs = waitMs;
     this.name = "SpatialRateLimitError";
   }
 }
