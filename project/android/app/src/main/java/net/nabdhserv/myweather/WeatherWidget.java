@@ -32,6 +32,7 @@ public class WeatherWidget extends AppWidgetProvider {
     static final String KEY_JSON = "payload";
     static final String KEY_ALPHA = "alpha";
     static final String KEY_TINT = "tint";
+    static final String KEY_TEXT_TINT = "text_tint";
     static final String KEY_TONE = "tone";
     static final String KEY_STRENGTH = "strength";
     static final String KEY_DARK = "dark";
@@ -61,7 +62,9 @@ public class WeatherWidget extends AppWidgetProvider {
         String action = intent == null ? null : intent.getAction();
         if (Intent.ACTION_WALLPAPER_CHANGED.equals(action) ||
             Intent.ACTION_CONFIGURATION_CHANGED.equals(action)) {
-            if ("adaptive".equals(prefs(context).getString(KEY_TINT, "ocean"))) {
+            SharedPreferences saved = prefs(context);
+            if ("adaptive".equals(saved.getString(KEY_TEXT_TINT, "adaptive")) ||
+                "adaptive".equals(saved.getString(KEY_TINT, "ocean"))) {
                 updateAll(context);
             }
         }
@@ -85,7 +88,11 @@ public class WeatherWidget extends AppWidgetProvider {
         boolean tall = h >= 90;
         SharedPreferences sp = prefs(context);
         boolean clock = sp.getBoolean(KEY_CLOCK, false);
-        String tint = sp.getString(KEY_TINT, "ocean");
+        String savedTint = sp.getString(KEY_TINT, "ocean");
+        // Previous releases used "adaptive" for the glass. Preserve that setting
+        // without coupling text contrast to background color from now on.
+        String tint = "adaptive".equals(savedTint) ? "ocean" : savedTint;
+        String textTint = sp.getString(KEY_TEXT_TINT, "adaptive");
         boolean dark = isDarkGlass(context, tint, sp.getBoolean(KEY_DARK, false));
         int alpha = sp.getInt(KEY_ALPHA, 60);
         int tone = sp.getInt(KEY_TONE, 50);
@@ -115,15 +122,16 @@ public class WeatherWidget extends AppWidgetProvider {
         JSONObject data = pickCity(root, sp.getString(KEY_PLACE, ""));
         boolean rtl = root.optBoolean("rtl", true);
         views.setInt(R.id.root, "setLayoutDirection", rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
-        int fg = dark ? Color.parseColor("#F7F8FA") : Color.parseColor("#142433");
-        int muted = dark ? Color.parseColor("#C5CED6") : Color.parseColor("#3E5364");
+        int[] ink = textColors(context, textTint, dark, tint, tone, strength);
+        int fg = ink[0];
+        int muted = ink[1];
         views.setTextViewText(R.id.city, data.optString("city", "طقسي"));
         views.setTextColor(R.id.city, muted);
         views.setTextViewText(R.id.temp, data.optString("temp", "--°"));
         views.setTextColor(R.id.temp, fg);
         float density = densityOf(context);
         int iconDp = iconDp(h, wide, tall);
-        bindGlyph(views, data.optString("icon", "cloud"), dark, density, iconDp);
+        bindGlyph(views, data.optString("icon", "cloud"), density, iconDp);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             views.setViewLayoutWidth(R.id.flip, iconDp, TypedValue.COMPLEX_UNIT_DIP);
             views.setViewLayoutHeight(R.id.flip, iconDp, TypedValue.COMPLEX_UNIT_DIP);
@@ -138,9 +146,16 @@ public class WeatherWidget extends AppWidgetProvider {
             views.setTextColor(R.id.clock, fg);
             views.setTextColor(R.id.date, muted);
         }
-        if (forecast) bindDays(views, data, fg, dark, density);
+        if (forecast) bindDays(views, data, fg, density);
         int wPx = Math.max(1, Math.round(Math.max(w, 110) * density));
         int hPx = Math.max(1, Math.round(Math.max(h, 40) * density));
+        // Keep native RemoteViews binder payloads bounded on large tablet widgets.
+        final long maxPixels = 220_000L;
+        if ((long) wPx * hPx > maxPixels) {
+            double factor = Math.sqrt((double) maxPixels / ((long) wPx * hPx));
+            wPx = Math.max(1, (int) Math.floor(wPx * factor));
+            hPx = Math.max(1, (int) Math.floor(hPx * factor));
+        }
         views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint, tone, strength, context));
         Intent open = new Intent(context, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -165,13 +180,14 @@ public class WeatherWidget extends AppWidgetProvider {
         return Math.max(floor, Math.min(cap, dp));
     }
 
-    private static void bindGlyph(RemoteViews views, String name, boolean dark, float density, int dp) {
+    private static void bindGlyph(RemoteViews views, String name, float density, int dp) {
         int px = Math.max(96, Math.round(dp * density));
-        Bitmap[] frames = WeatherGlyphs.frames(name, px, dark);
-        views.setImageViewBitmap(R.id.icon_a, frames[0]);
+        // Exactly one bitmap is shown: do not allocate three discarded frames.
+        // WeatherGlyphs uses condition-specific colors, never the text color.
+        views.setImageViewBitmap(R.id.icon_a, WeatherGlyphs.frame(name, px, false, 0));
     }
 
-    private static void bindDays(RemoteViews views, JSONObject data, int fg, boolean dark, float density) {
+    private static void bindDays(RemoteViews views, JSONObject data, int fg, float density) {
         JSONArray days = data.optJSONArray("days");
         int mark = Math.max(24, Math.round(18f * density));
         for (int i = 0; i < 4; i++) {
@@ -189,7 +205,7 @@ public class WeatherWidget extends AppWidgetProvider {
             views.setTextColor(NAMES[i], fg);
             views.setTextViewText(TEMPS[i], day.optString("temp", ""));
             views.setTextColor(TEMPS[i], fg);
-            views.setImageViewBitmap(ICONS[i], WeatherGlyphs.frame(day.optString("icon", "cloud"), mark, dark, 0));
+            views.setImageViewBitmap(ICONS[i], WeatherGlyphs.frame(day.optString("icon", "cloud"), mark, false, 0));
         }
     }
 
@@ -237,6 +253,24 @@ public class WeatherWidget extends AppWidgetProvider {
                 Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         }
         return requestedDark;
+    }
+
+    /**
+     * Text color is independent of both the weather glyph palette and glass
+     * tint. "Adaptive" maximizes foreground contrast against the selected
+     * glass and follows Android light/dark mode; manual white/black stay fixed.
+     */
+    static int[] textColors(Context context, String style, boolean dark,
+                            String tint, int tone, int strength) {
+        if ("white".equals(style)) return new int[]{ 0xFFFCFDFF, 0xFFE5EBF4 };
+        if ("black".equals(style)) return new int[]{ 0xFF101C29, 0xFF334759 };
+        int panel = glassTint(context, tint, dark, tone, strength);
+        double luminance = 0.2126 * Color.red(panel) + 0.7152 * Color.green(panel) +
+                           0.0722 * Color.blue(panel);
+        boolean useLightInk = dark || luminance < 114;
+        return useLightInk
+            ? new int[]{ 0xFFFAFDFF, 0xFFE0EAF4 }
+            : new int[]{ 0xFF142433, 0xFF344C60 };
     }
 
     /** Material You wallpaper-derived system palette on Android 12+.

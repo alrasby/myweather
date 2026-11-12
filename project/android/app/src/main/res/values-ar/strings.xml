@@ -4,6 +4,7 @@
     <string name="widget_desc">ودجت زجاجي. اسحب الحواف لتغيير العرض والارتفاع حتى يناسب خانة الشاشة.</string>
     <string name="widget_config_title">الطقس والساعة</string>
     <string name="widget_opacity">عتامة خلفية الويدجت</string>
+    <string name="widget_text_tint">لون خط الويدجت</string>
     <string name="widget_tint">لون الزجاج</string>
     <string name="widget_tint_ocean">محيطي</string>
     <string name="widget_tint_adaptive">تكيفي</string>

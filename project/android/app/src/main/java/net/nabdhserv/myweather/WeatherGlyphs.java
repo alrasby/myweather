@@ -28,9 +28,17 @@ public final class WeatherGlyphs {
     }
 
     private static void draw(Canvas canvas, String kind, boolean dark, int step) {
-        int cloud = dark ? Color.parseColor("#F4F8FC") : Color.parseColor("#4C6780");
-        int drop = dark ? Color.parseColor("#9ECBFF") : Color.parseColor("#2F7FBF");
-        int snow = dark ? Color.parseColor("#F7FBFF") : Color.parseColor("#7FA4C4");
+        // Weather icons remain colorful and semantic regardless of widget text
+        // preset (Adaptive/White/Black). The dark parameter is retained for
+        // source compatibility but cannot recolor condition-specific glyphs.
+        int cloud = Color.parseColor("#8FB5CD");
+        if ("partly".equals(kind) || "partly-night".equals(kind)) cloud = Color.parseColor("#C6DFEE");
+        else if ("rain".equals(kind)) cloud = Color.parseColor("#779DBB");
+        else if ("snow".equals(kind)) cloud = Color.parseColor("#A3BDD3");
+        else if ("storm".equals(kind)) cloud = Color.parseColor("#657E9D");
+        else if ("fog".equals(kind)) cloud = Color.parseColor("#B3C7D4");
+        int drop = Color.parseColor("#25A4ED");
+        int snow = Color.parseColor("#ECF9FF");
         if ("sun".equals(kind)) {
             sun(canvas, 24f, 24f, 8.6f, step * 18f);
             return;

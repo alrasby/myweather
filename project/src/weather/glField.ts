@@ -1142,7 +1142,9 @@ export class FieldEngine {
     const zoomNow = this.map?.getZoom() ?? 0;
     if (this.zoomSeen >= 0 && Math.abs(zoomNow - this.zoomSeen) > 1.25) this.particles.length = 0;
     this.zoomSeen = zoomNow;
-    const cap = this.kind === 2 ? Math.max(this.particleTarget, 680) : this.particleTarget;
+    // Keep one bounded particle pool: smoother longer trails, not unlimited
+    // particles/frame that would drain battery on Android WebView.
+    const cap = this.kind === 2 ? Math.max(this.particleTarget, 680) : Math.min(480, this.particleTarget);
     let born = 0;
     const bornCap = 110;
     while (this.particles.length < cap && born < bornCap) {
@@ -1240,10 +1242,10 @@ export class FieldEngine {
     }
     const head = this.local(p.lat, p.lon);
     const prev = head ? this.local(last.lat, last.lon) : null;
-    if (!head || !prev || Math.hypot(head.x - prev.x, head.y - prev.y) >= 2.2) {
+    if (!head || !prev || Math.hypot(head.x - prev.x, head.y - prev.y) >= 1.6) {
       p.trail.push({ lat: p.lat, lon: p.lon });
     }
-    this.trimTrail(p, 14);
+    this.trimTrail(p, 32);
   }
 
   /** الأثر لا يطول عن شرطة قصيرة، حتى لا يصبح مشطاً على الشاشة. */
@@ -1251,7 +1253,7 @@ export class FieldEngine {
     while (p.trail.length > 2) {
       const tail = this.local(p.trail[0]!.lat, p.trail[0]!.lon);
       const head = this.local(p.trail[p.trail.length - 1]!.lat, p.trail[p.trail.length - 1]!.lon);
-      const long = p.trail.length > 7 || (!!tail && !!head && Math.hypot(head.x - tail.x, head.y - tail.y) > maxPx);
+      const long = p.trail.length > 11 || (!!tail && !!head && Math.hypot(head.x - tail.x, head.y - tail.y) > maxPx);
       if (!long) break;
       p.trail.shift();
     }
@@ -1280,24 +1282,34 @@ export class FieldEngine {
     if (xy.length >= 2) this.paintThread(ctx, xy, sample, fade);
   }
 
-  /** شرطة قصيرة فاتحة فوق طبقة اللون، كجزيئات ويندي لا كخيوط تغطي الخريطة. */
+  /** Feathered continuous streamlets. One antialiased stroke per particle,
+   * no new gradients, no additional animation loop and bounded 32px trails.
+   * Curves follow sampled wind vectors rather than drawing rigid straight dashes.
+   */
   private paintThread(
     ctx: CanvasRenderingContext2D,
     xy: { x: number; y: number }[],
     _sample: FieldSample,
     fade: number,
   ) {
+    const first = xy[0];
+    const last = xy[xy.length - 1];
+    if (!first || !last) return;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 1.15;
+    ctx.lineWidth = 1.0;
     ctx.beginPath();
-    const p0 = xy[0]!;
-    ctx.moveTo(p0.x, p0.y);
-    for (let i = 1; i < xy.length; i++) {
-      const pt = xy[i]!;
-      ctx.lineTo(pt.x, pt.y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < xy.length - 1; i++) {
+      const next = xy[i + 1]!;
+      const point = xy[i]!;
+      // Quadratic midpoint interpolation makes the tip turn naturally
+      // through a changing wind vector without introducing zigzag segments.
+      ctx.quadraticCurveTo(point.x, point.y,
+        (point.x + next.x) * 0.5, (point.y + next.y) * 0.5);
     }
-    ctx.strokeStyle = `rgba(255,255,255,${(0.72 * fade).toFixed(3)})`;
+    ctx.lineTo(last.x, last.y);
+    ctx.strokeStyle = `rgba(242,249,255,${(0.67 * fade).toFixed(3)})`;
     ctx.stroke();
   }
 
@@ -1367,8 +1379,8 @@ export class FieldEngine {
     let cur = sample;
     const zoom = map.getZoom();
     const pxPerDeg = (256 * 2 ** zoom) / 360;
-    const deg = 2.4 / Math.max(8, pxPerDeg);
-    for (let i = 0; i < 5; i++) {
+    const deg = 2.7 / Math.max(8, pxPerDeg);
+    for (let i = 0; i < 8; i++) {
       const mag = Math.hypot(cur.u, cur.v);
       if (mag < 0.3) break;
       const cos = Math.max(0.22, Math.cos((la * Math.PI) / 180));

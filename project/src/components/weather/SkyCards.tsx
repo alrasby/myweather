@@ -1,4 +1,4 @@
-import { Droplets, Eye, Gauge, Leaf, SunMedium, Sunrise, Sunset } from "lucide-react";
+import { Droplets, Eye, Gauge, Leaf, RefreshCw, SunMedium, Sunrise, Sunset } from "lucide-react";
 import type { ReactNode } from "react";
 import { MoonDisc } from "@/components/weather/SkyBackdrop";
 import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress, tideForecast } from "@/weather/astro";
@@ -249,9 +249,15 @@ export function QiblaCard({
           <span className="text-accent">{ar ? "القبلة" : "Qibla"}</span>
           <span className="ms-1" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</span>
         </p>
-        <button type="button" className="mt-1.5 rounded-full border border-line px-2 py-1 text-[0.7rem] text-accent"
-          onClick={onLocate} disabled={locating}>
-          {ar ? "تحديث موقعي الجغرافي" : "Update my location"}
+        <button
+          type="button"
+          className="mt-2 inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-accent/25 bg-accent/10 px-3 py-1.5 text-[0.72rem] font-semibold text-accent shadow-sm transition-colors hover:bg-accent/15 active:bg-accent/20 disabled:cursor-progress disabled:opacity-70"
+          onClick={onLocate}
+          disabled={locating}
+          aria-busy={locating}
+        >
+          <RefreshCw className={`size-3.5 shrink-0 ${locating ? "animate-spin motion-reduce:animate-none" : ""}`} aria-hidden="true" />
+          {ar ? "تحديث موقعي للقبلة" : "Update my Qibla location"}
         </button>
       </div>
     </article>
