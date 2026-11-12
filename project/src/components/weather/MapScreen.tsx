@@ -320,6 +320,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       window.clearTimeout(clickTimer.current);
       popupAbort.current?.abort();
       document.removeEventListener("visibilitychange", onVis);
+      modelRef.current?.destroy();
+      modelRef.current = null;
       engine.destroy();
       map?.remove();
       engineRef.current = null;
