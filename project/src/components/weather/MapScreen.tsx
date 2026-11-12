@@ -794,7 +794,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const consider = () => {
       if (dead) return;
       window.clearTimeout(timer);
-      timer = window.setTimeout(pullView, 280);
+      // A short debounce suppresses intermediate fling requests but starts
+      // a settled regional rain fetch sooner. Existing generation tokens,
+      // AbortControllers and cached-coverage checks remain unchanged.
+      timer = window.setTimeout(pullView, 220);
     };
     map.on("moveend", consider);
     map.on("zoomend", consider);
