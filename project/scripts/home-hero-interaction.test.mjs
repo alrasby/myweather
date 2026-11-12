@@ -72,14 +72,21 @@ test("city navigation and settings controls retain UX without redesign", () => {
   assert.ok(settings.includes('aria-label={title}'), "switches need accessible names");
 });
 
-test("global fixed cloud canvas is absent while the weather hero remains scroll-bound", () => {
+test("both interactive cloud layers fade away before hourly cards scroll beneath them", () => {
   const app = read("project/src/components/weather/WeatherApp.tsx");
   const sky = read("project/src/components/weather/SkyBackdrop.tsx");
   const home = read("project/src/components/weather/HomeScreen.tsx");
-  assert.ok(app.includes("showClouds={false}"), "remove fixed cloud plane behind forecast cards");
-  assert.ok(sky.includes("showClouds ? <CloudField"), "cloud layer is conditionally mounted");
-  assert.ok(home.includes("<HeroClouds"), "keep procedural weather only inside scrollable hero");
-  assert.ok(!home.includes("onScroll={syncSkyScroll}"), "remove ineffective DOM opacity updates");
+  const css = read("project/src/styles.css");
+  assert.ok(!app.includes("showClouds={false}"), "restore dynamic weather-driven sky clouds");
+  assert.ok(app.includes("<SkyBackdrop"), "preserve responsive sky, sun and moon");
+  assert.ok(sky.includes("showClouds ? <CloudField"), "restore original CloudField lifecycle");
+  assert.ok(home.includes("<HeroClouds"), "retain localized animated clouds and precipitation");
+  assert.ok(home.includes("onScroll={syncCloudsWithScroll}"), "tie both cloud layers to the real Home scroller");
+  assert.ok(home.includes("top / 96"), "fully fade the clouds before cards reach the sky band");
+  assert.ok(home.includes("t * t * (3 - 2 * t)"), "use smoothstep, avoiding abrupt opacity cuts");
+  assert.ok(home.includes('style.removeProperty("--wx-cloud-scroll-opacity")'), "reset cloud visibility on leaving Home");
+  assert.match(css, /\\.sky-clouds \\{[^}]*opacity: var\\(--wx-cloud-scroll-opacity, 1\\)/);
+  assert.match(css, /\\.wx-hero-atmosphere \\{[^}]*opacity: var\\(--wx-cloud-scroll-opacity, 1\\)/);
 });
 
 test("15-day card receives subtle polish without changing its structure or baseline palette", () => {
