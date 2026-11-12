@@ -696,3 +696,53 @@ html:not(.light) .pop-chance {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Consistent color-adaptive settings: reuse the live day/night tokens, with
+   inexpensive gradients rather than additional animated/filtered layers. */
+.wx-settings-card {
+  border-color: color-mix(in srgb, var(--color-accent) 18%, white 56%);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--color-accent) 5%, #eff5fa 95%),
+    color-mix(in srgb, #e4edf6 91%, transparent));
+}
+html:not(.light) .wx-settings-card {
+  border-color: color-mix(in srgb, var(--color-accent) 22%, #8ca3b2 16%);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--color-accent) 7%, #132d42 93%),
+    color-mix(in srgb, #0d263c 92%, transparent));
+}
+.wx-settings-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.wx-settings-chips {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 13%, transparent);
+}
+.wx-settings-chips button:not(:disabled):focus-visible,
+.wx-settings-action:focus-visible,
+.wx-qibla-refresh:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.wx-settings-action {
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  transition: background-color 140ms ease;
+}
+.wx-settings-action:active {
+  background: color-mix(in srgb, var(--color-accent) 17%, transparent);
+}
+.wx-qibla-refresh {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 34%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
+}
+.wx-qibla-refresh:active {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wx-qibla-refresh .animate-spin { animation-duration: 2.4s; }
+}
