@@ -95,6 +95,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const place = activePlace({ places, activeId, peek });
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
+  const basemapTilesRef = useRef({ loaded: 0, errors: 0, pending: 0, aborted: 0 });
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
@@ -325,6 +326,23 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
+        // Distinguish Esri imagery gaps from ECMWF .om tile failures in the
+        // existing hidden diagnostic panel. No extra network call, timer,
+        // location data, React state updates or stored telemetry.
+        basemapTilesRef.current = { loaded: 0, errors: 0, pending: 0, aborted: 0 };
+        imagery.on("tileloadstart", () => { basemapTilesRef.current.pending++; });
+        imagery.on("tileload", () => {
+          basemapTilesRef.current.loaded++;
+          basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1);
+        });
+        imagery.on("tileerror", () => {
+          basemapTilesRef.current.errors++;
+          basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1);
+        });
+        imagery.on("tileabort", () => {
+          basemapTilesRef.current.aborted++;
+          basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1);
+        });
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
@@ -1128,6 +1146,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 layer: "ECMWF rain/cloud/snow",
                 dataSaver: prefs.dataSaver,
                 ...report,
+                satelliteTiles: basemapTilesRef.current,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
                 () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
@@ -1136,6 +1155,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             {lang === "ar" ? "نسخ تقرير الأداء الفعلي" : "Copy actual performance report"}
           </button>
           {copyStatus ? <p role="status">{copyStatus}</p> : null}
+          <p>{lang === "ar" ? "بلاطات القمر الصناعي" : "Satellite tiles"}:
+            {" "}{lang === "ar" ? "محمّلة" : "loaded"} {basemapTilesRef.current.loaded}
+            {" · "}{lang === "ar" ? "بانتظار الجلب" : "pending"} {basemapTilesRef.current.pending}
+            {" · "}{lang === "ar" ? "أخطاء" : "errors"} {basemapTilesRef.current.errors}
+            {" · "}{lang === "ar" ? "ألغيت" : "aborted"} {basemapTilesRef.current.aborted}
+          </p>
           <p>{lang === "ar" ? "استعلامات حجم الملف المشتركة" : "Shared size probes"}: {weatherDiagnostics?.sharedFileProbes ?? 0}
             {" · "}{lang === "ar" ? "استعلامات نشطة" : "active"}: {weatherDiagnostics?.activeFileProbes ?? 0}
           </p>
