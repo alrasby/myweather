@@ -1436,14 +1436,15 @@ export class FieldEngine {
     let lo = lon;
     let cur = sample;
     const zoom = map.getZoom();
-    const pxPerDeg = (256 * 2 ** zoom) / 360;
-    const deg = 2.4 / Math.max(8, pxPerDeg);
     for (let i = 0; i < 8; i++) {
       const mag = Math.hypot(cur.u, cur.v);
       if (mag < 0.3) break;
-      const cos = Math.max(0.22, Math.cos((la * Math.PI) / 180));
-      la -= (cur.v / mag) * deg;
-      lo -= ((cur.u / mag) * deg) / cos;
+      // Seed paths must use the SAME Mercator projection as subsequent
+      // wind advection. The older 1/cos longitude adjustment created
+      // stretched initial trails near Scandinavia and northern Russia.
+      const delta = windScreenStepDegrees(la, zoom, 2.4, 1);
+      la -= (cur.v / mag) * delta.latitude;
+      lo -= (cur.u / mag) * delta.longitude;
       if (lo > 180) lo -= 360;
       if (lo < -180) lo += 360;
       if (la > 84 || la < -78) break;
