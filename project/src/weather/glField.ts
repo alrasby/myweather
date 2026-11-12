@@ -1,4 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
+import { nearestWorldLongitude } from "@/weather/windProjection";
 import type { LiveCyclone } from "@/weather/cyclones";
 import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid";
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
@@ -306,8 +307,17 @@ export class FieldEngine {
   private last = 0;
   private zoomSeen = -1;
   private dpr = 1;
+  private onMoveStart = () => {
+    if (this.kind !== 0) return;
+    // A screen-projected wind trail cannot survive a Leaflet pan/zoom:
+    // its historical points refer to a different map transform. Keep
+    // particle positions and original wind speed, discard only old paths.
+    for (const p of this.particles) p.trail.length = 0;
+    this.partCtx?.clearRect(0, 0, this.partCanvas.width, this.partCanvas.height);
+  };
   private onMove = () => {
     this.drawField();
+    if (this.kind === 0) this.drawParticles(0);
   };
   private onZoom = () => {
     // Wind traces are screen-projected from geographic coordinates; a zoom
@@ -362,6 +372,8 @@ export class FieldEngine {
     }
     // requestAnimationFrame already redraws during gestures. Avoid redundant
     // synchronous WebGL draws on every Leaflet move/zoom event.
+    map.on("movestart", this.onMoveStart);
+    map.on("zoomstart", this.onMoveStart);
     map.on("moveend", this.onMove);
     map.on("zoomend", this.onZoom);
     map.on("viewreset", this.onMove);
@@ -529,6 +541,8 @@ export class FieldEngine {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.map?.off("movestart", this.onMoveStart);
+    this.map?.off("zoomstart", this.onMoveStart);
     this.map?.off("moveend", this.onMove);
     this.map?.off("zoomend", this.onZoom);
     this.map?.off("viewreset", this.onMove);
@@ -756,7 +770,7 @@ export class FieldEngine {
   private local(lat: number, lon: number): { x: number; y: number } | null {
     const map = this.map;
     if (!map) return null;
-    const p = map.latLngToContainerPoint([lat, lon]);
+    const p = map.latLngToContainerPoint([lat, nearestWorldLongitude(lon, map.getCenter().lng)]);
     return { x: p.x, y: p.y };
   }
 
