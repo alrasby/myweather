@@ -8,28 +8,23 @@ function nativeApp(): boolean {
 
 function raceTimeout<T>(work: Promise<T>, ms: number, signal?: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("proxy-timeout")), ms);
-    const onAbort = () => {
+    let settled = false;
+    const cleanup = () => {
       clearTimeout(timer);
-      reject(new DOMException("aborted", "AbortError"));
+      signal?.removeEventListener("abort", onAbort);
     };
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
+    const finish = (error: unknown, value?: T) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(value as T);
+    };
+    const onAbort = () => finish(new DOMException("aborted", "AbortError"));
+    const timer = setTimeout(() => finish(new Error("proxy-timeout")), ms);
+    if (signal?.aborted) { onAbort(); return; }
     signal?.addEventListener("abort", onAbort, { once: true });
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        reject(err);
-      },
-    );
+    work.then(value => finish(null, value), error => finish(error));
   });
 }
 
@@ -40,26 +35,50 @@ function htmlPage(body: string): boolean {
 
 /** ويب فيو أندرويد يعلّق الطلب إلى الأبد إن لم يُقطع، فيقف الجلب كله. */
 const MAX_IN_FLIGHT = 5;
+const MAX_WAITERS = 64;
 let inFlight = 0;
-const waiters: Array<() => void> = [];
+type Waiter = { grant: () => void };
+const waiters: Waiter[] = [];
 
-function takeSlot(): Promise<void> {
+/** Cancelable backpressure: aborted map/city requests leave the queue
+ * immediately instead of lingering and consuming network slots later.
+ */
+function takeSlot(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("aborted", "AbortError"));
   if (inFlight < MAX_IN_FLIGHT) {
     inFlight += 1;
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
-    waiters.push(() => {
+  if (waiters.length >= MAX_WAITERS) return Promise.reject(new Error("proxy-queue-full"));
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const waiter: Waiter = { grant: () => {
+      cleanup();
       inFlight += 1;
       resolve();
-    });
+    } };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const rejectWait = (error: Error) => {
+      const index = waiters.indexOf(waiter);
+      if (index < 0) return; // already granted
+      waiters.splice(index, 1);
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () => rejectWait(new DOMException("aborted", "AbortError"));
+    timer = setTimeout(() => rejectWait(new Error("proxy-queue-timeout")), 16000);
+    waiters.push(waiter);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
 function releaseSlot(): void {
   inFlight = Math.max(0, inFlight - 1);
-  const next = waiters.shift();
-  if (next) next();
+  waiters.shift()?.grant();
 }
 
 const headers = {
@@ -73,8 +92,9 @@ async function nativePluginFetch(
   hdrs: Record<string, string>,
 ): Promise<Response> {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-  await takeSlot();
+  await takeSlot(signal);
   try {
+    if (signal?.aborted) throw new DOMException("aborted", "AbortError");
     const result = await raceTimeout(
       CapacitorHttp.request({
         url,
@@ -101,7 +121,7 @@ async function timedFetch(
   ms: number,
   hdrs: Record<string, string>,
 ): Promise<Response> {
-  await takeSlot();
+  await takeSlot(signal);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   const onAbort = () => ctrl.abort();
