@@ -36,20 +36,33 @@ test("mobile map no longer expands raster to 257px or adds bleed class", () => {
  assert.ok(!map.includes('el.classList.add("wx-android-raster-bleed")'));
 });
 
-test("widget offers automatic OS palette and readable monochrome glass presets", () => {
+test("adaptive widget text is independent of glass tint and semantic weather icons", () => {
  const java = read("project/android/app/src/main/java/net/nabdhserv/myweather/WeatherWidget.java");
+ const glyphs = read("project/android/app/src/main/java/net/nabdhserv/myweather/WeatherGlyphs.java");
  const config = read("project/android/app/src/main/java/net/nabdhserv/myweather/WidgetSettingsActivity.java");
  const xml = read("project/android/app/src/main/res/layout/activity_widget_settings.xml");
- const manifest = read("project/android/app/src/main/AndroidManifest.xml");
- assert.ok(java.includes('"white".equals(choice)'), "white preset");
- assert.ok(java.includes('"black".equals(choice)'), "black preset");
- assert.ok(java.includes('system_accent1_500'), "system Material You palette");
- assert.ok(java.includes('Intent.ACTION_WALLPAPER_CHANGED'), "update when wallpaper changes");
- assert.ok(manifest.includes('android.intent.action.WALLPAPER_CHANGED'));
- for (const id of ["tintAdaptive", "tintWhite", "tintBlack"]) {
+ for (const id of ["textAdaptive", "textWhite", "textBlack"]) {
    assert.ok(xml.includes("@+id/" + id), id);
    assert.ok(config.includes("R.id." + id), id);
  }
+ assert.ok(!xml.includes("@+id/tintAdaptive"), "adaptive is text, not glass");
+ assert.ok(java.includes("KEY_TEXT_TINT"), "persist text independently");
+ assert.ok(java.includes("textColors(context, textTint"), "draw contrast text");
+ assert.ok(glyphs.includes('if ("partly".equals(kind)'), "icons follow weather condition");
+ assert.ok(java.includes("WeatherGlyphs.frame(name, px, false, 0)"), "no discarded animated bitmaps");
+ assert.ok(java.includes("maxPixels = 220_000L"), "bound widget bitmap memory");
+});
+test("compass/GPS and Android lifecycle/security wiring", () => {
+ const qibla = read("project/src/components/weather/SkyCards.tsx");
+ const native = read("project/android/app/src/main/java/net/nabdhserv/myweather/MainActivity.java");
+ const manifest = read("project/android/app/src/main/AndroidManifest.xml");
+ assert.ok(qibla.includes("تحديث موقعي للقبلة"), "Qibla-specific update label");
+ assert.ok(qibla.includes("animate-spin"), "show progress on location update");
+ assert.ok(native.includes("protected void onDestroy()"), "release native bridges");
+ assert.ok(native.includes('removeJavascriptInterface("AndroidCompass")'));
+ assert.ok(native.includes("main.removeCallbacksAndMessages(null)"), "clear pending compass callbacks");
+ assert.ok(manifest.includes('android:allowBackup="false"'), "prevent location backup");
+ assert.ok(manifest.includes('android:usesCleartextTraffic="false"'));
 });
 test("public map omits the information icon but preserves hidden diagnostics", () => {
  const map = read("project/src/components/weather/MapScreen.tsx");
