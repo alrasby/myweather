@@ -49,22 +49,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   // Declination must use the phone's measured position, not an unrelated selected city.
   const reading = useDeviceCompass(qiblaFix?.lat ?? Number.NaN, qiblaFix?.lon ?? Number.NaN);
   const scroller = useRef<HTMLDivElement>(null);
-  // The global sky sits outside this scroll container. Fade its cloud layer
-  // smoothly as the forecast cards approach the top of the viewport.
-  // Direct style updates avoid React renders and extra animation frames.
-  const syncSkyScroll = () => {
-    const top = scroller.current?.scrollTop ?? 0;
-    const t = Math.min(1, Math.max(0, top / 155));
-    const eased = t * t * (3 - 2 * t);
-    document.documentElement.style.setProperty("--wx-sky-cloud-opacity", String(1 - eased));
-  };
-  useEffect(() => {
-    syncSkyScroll();
-    return () => { document.documentElement.style.removeProperty("--wx-sky-cloud-opacity"); };
-    // The scroll node remains stable throughout a HomeScreen mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const pull = useRef(0);
   const swipeStart = useRef<{ x: number; y: number; eligible: boolean } | null>(null);
   const [pulling, setPulling] = useState(0);
@@ -176,7 +160,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   return (
     <div
       ref={scroller}
-      onScroll={syncSkyScroll}
       className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
       onTouchStart={(e) => {
         if (e.touches.length !== 1) {
@@ -321,7 +304,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
             <HourRibbon bundle={bundle} lang={lang} />
           </section>
 
-          <section className="wx-card mt-3 overflow-hidden px-2.5 py-3">
+          <section className="wx-card wx-daily-card mt-3 overflow-hidden px-2.5 py-3">
             <div className="mb-1 px-1">
               <h2 className="text-base font-semibold text-fg">{t(lang, "daily")}</h2>
             </div>
@@ -329,7 +312,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
               {bundle.daily.slice(0, 15).map((d) => {
                 const open = openDay === d.t;
                 return (
-                  <div key={d.t} className="border-b border-line last:border-b-0">
+                  <div key={d.t} className="wx-daily-row border-b border-line last:border-b-0">
                     <button
                       type="button"
                       className="grid min-h-[3.15rem] w-full min-w-0 items-center gap-x-1 py-1.5 text-start"
@@ -355,7 +338,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
                       </bdi>
                       <ChevronDown className={`size-4 justify-self-center text-muted transition-transform ${open ? "rotate-180" : ""}`} />
                     </button>
-                    {open ? <DayPanel bundle={bundle} day={d} lang={lang} /> : null}
+                    {open ? <div className="wx-daily-reveal"><DayPanel bundle={bundle} day={d} lang={lang} /></div> : null}
                   </div>
                 );
               })}
