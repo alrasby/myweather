@@ -15,3 +15,12 @@ export function needsSatelliteUnderlay(zoom: number, nativeZoom = 5): boolean {
 export function needsRasterSeamGuard(agent: string, dpr: number): boolean {
   return /Android/i.test(agent) && Number.isFinite(dpr) && dpr >= 1.5;
 }
+
+/** The native Android WebView has a single compositor for the Leaflet base
+ * tiles, labels and the weather canvas. Streaming base tiles while a fling or
+ * pinch is still changing transforms caused vacant raster rectangles.
+ * Defer only BASE imagery updates on Android until the map settles; ECMWF
+ * tile policy and forecast fidelity remain untouched. */
+export function idleBaseTilesOnAndroid(userAgent: string): boolean {
+  return /Android/i.test(userAgent);
+}

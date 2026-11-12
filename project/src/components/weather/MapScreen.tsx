@@ -9,7 +9,7 @@ import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { needsSatelliteUnderlay, idleBaseTilesOnAndroid } from "@/weather/satelliteBasemap";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -95,6 +95,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const place = activePlace({ places, activeId, peek });
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
+  const basemapTilesRef = useRef({ loaded: 0, errors: 0, pending: 0, aborted: 0 });
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
@@ -287,6 +288,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const here = placeRef.current;
         map.setView([here.lat, here.lon], 5);
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+        // Android/Chromium can omit or misplace Esri tiles when a pinch or
+        // fling keeps changing transforms as new images are composited.
+        // Schedule base imagery ONLY on settled views (Leaflet-supported
+        // option). Reuse the normal tile cache; no extra service requests.
+        const baseIdle = idleBaseTilesOnAndroid(navigator.userAgent);
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
         // At world zoom (<=5) the underlay and detailed imagery requested the
@@ -298,7 +304,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           maxNativeZoom: 5,
           maxZoom: 16,
           zIndex: 0,
-          updateWhenIdle: false,
+          updateWhenIdle: baseIdle,
+          updateWhenZooming: false,
           updateInterval: 200,
           keepBuffer: 2,
         });
@@ -313,17 +320,35 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const imagery = L.tileLayer(imageryUrl, {
           maxZoom: 16,
           zIndex: 1,
-          updateWhenIdle: false,
+          updateWhenIdle: baseIdle,
+          updateWhenZooming: false,
           updateInterval: 150,
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
+        // Distinguish Esri imagery gaps from ECMWF .om tile failures in the
+        // existing hidden diagnostic panel. No extra network call, timer,
+        // location data, React state updates or stored telemetry.
+        basemapTilesRef.current = { loaded: 0, errors: 0, pending: 0, aborted: 0 };
+        imagery.on("tileloadstart", () => { basemapTilesRef.current.pending++; });
+        imagery.on("tileload", () => {
+          basemapTilesRef.current.loaded++;
+          basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1);
+        });
+        imagery.on("tileerror", () => {
+          basemapTilesRef.current.errors++;
+          basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1);
+        });
+        imagery.on("tileabort", () => {
+          basemapTilesRef.current.aborted++;
+          basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1);
+        });
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
         L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
+          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: baseIdle, updateWhenZooming: false, updateInterval: 150, keepBuffer: 3 },
         ).addTo(map);
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
@@ -1121,6 +1146,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 layer: "ECMWF rain/cloud/snow",
                 dataSaver: prefs.dataSaver,
                 ...report,
+                satelliteTiles: basemapTilesRef.current,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
                 () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
@@ -1129,6 +1155,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             {lang === "ar" ? "نسخ تقرير الأداء الفعلي" : "Copy actual performance report"}
           </button>
           {copyStatus ? <p role="status">{copyStatus}</p> : null}
+          <p>{lang === "ar" ? "بلاطات القمر الصناعي" : "Satellite tiles"}:
+            {" "}{lang === "ar" ? "محمّلة" : "loaded"} {basemapTilesRef.current.loaded}
+            {" · "}{lang === "ar" ? "بانتظار الجلب" : "pending"} {basemapTilesRef.current.pending}
+            {" · "}{lang === "ar" ? "أخطاء" : "errors"} {basemapTilesRef.current.errors}
+            {" · "}{lang === "ar" ? "ألغيت" : "aborted"} {basemapTilesRef.current.aborted}
+          </p>
           <p>{lang === "ar" ? "استعلامات حجم الملف المشتركة" : "Shared size probes"}: {weatherDiagnostics?.sharedFileProbes ?? 0}
             {" · "}{lang === "ar" ? "استعلامات نشطة" : "active"}: {weatherDiagnostics?.activeFileProbes ?? 0}
           </p>

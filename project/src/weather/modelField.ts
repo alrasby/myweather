@@ -999,8 +999,12 @@ export class ModelField {
     // While real rain/snow fallback is active, never show partial ECMWF
     // precipitation simultaneously. During playback, require full 3-layer
     // frames to avoid jumping between incompatible source products.
-    const coldCloudPreview = !this.playbackActive && this.firstCompleteReadyMs === null && this.lastDisplayedStep === null;
-    const preview = (!fallbackForHour || coldCloudPreview) && !cooldown && plan.goals.size === 0 && requested &&
+    // A cloud preview and a real precipitation fallback are BOTH actual
+    // weather data but are from different models/resolutions. Compositing
+    // their separate tile grids caused the large moving rectangular clouds
+    // shown in the recording. Never mix them. Still show the early ECMWF
+    // cloud preview when NO genuine fallback is being displayed.
+    const preview = !fallbackForHour && !cooldown && plan.goals.size === 0 && requested &&
       !requested.ready && requested.previewReady ? requested : null;
     this.holdingPreviousFrame = plan.holding && plan.anchor !== null && !preview;
     for (const [step, frame] of this.frames) {
@@ -1013,7 +1017,7 @@ export class ModelField {
       preview.opacity = 1;
       // Leaflet.setOpacity() traverses tile elements. Do it only when a
       // particular source finishes or diagnostic mode changes, NOT at 20Hz.
-      const opacityKey = `${this.diagnosticMode}:${preview.previewMask}:${preview.previewReady}:${fallbackForHour}`;
+      const opacityKey = `${this.diagnosticMode}:${preview.previewMask}:${preview.previewReady}`;
       if (preview.previewOpacityKey !== opacityKey) {
         preview.previewOpacityKey = opacityKey;
         preview.layers.forEach((layer, idx) => {
@@ -1024,7 +1028,7 @@ export class ModelField {
         const mode = this.diagnosticMode;
         const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
           (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
-        layer.setOpacity?.(complete && allowed && (!fallbackForHour || idx === 0) ? 1 : 0);
+        layer.setOpacity?.(complete && allowed ? 1 : 0);
         });
       }
     }
