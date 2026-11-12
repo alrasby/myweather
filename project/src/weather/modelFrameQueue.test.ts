@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planSpatialRequests, canAdvanceSpatialTime, SPATIAL_PREFETCH_GRACE_MS } from "./modelFrameQueue.ts";
+import { planSpatialRequests, canAdvanceSpatialTime, SPATIAL_PREFETCH_GRACE_MS, SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS } from "./modelFrameQueue.ts";
 
 test("only one current ECMWF frame loads; next is prefetched after it becomes ready", () => {
   assert.deepEqual(planSpatialRequests(6, 30, new Set(), new Set(), new Set()), { cancel: [], start: 6 });
@@ -43,10 +43,16 @@ test("continuous panning cannot starve the next forecast after 2.5 seconds", () 
   assert.deepEqual(plan, { cancel: [], start: 9 });
 });
 
-test("an in-flight next hour is preserved when the map starts refreshing", () => {
+test("visible viewport interrupts stale future-hour prefetch exactly once", () => {
   const ready = new Set([8]);
   const plan = planSpatialRequests(8, 32, ready, new Set([9]), new Set(), true, 100);
-  assert.deepEqual(plan, { cancel: [], start: null });
+  assert.deepEqual(plan, { cancel: [9], start: null });
+  // A caller removes the cancelled frame; do not remount it in the grace.
+  assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), true, 101),
+    { cancel: [], start: null });
+  // Once the region is complete, prefetch can resume.
+  assert.deepEqual(planSpatialRequests(8, 32, ready, new Set(), new Set(), false),
+    { cancel: [], start: 9 });
 });
 
 
@@ -90,16 +96,23 @@ test("two-hour prefetch is bounded to existing forecast horizon", () => {
   );
 });
 
-test("continuous viewport refresh does not cancel active second-hour prefetch", () => {
+test("continuous viewport refresh prioritizes current tiles over second-hour prefetch", () => {
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8, 9]), new Set([10]), new Set(), true, 200, true),
-    { cancel: [], start: null },
+    { cancel: [10], start: null },
   );
 });
 
-test("active playback bypasses pan-prefetch grace and prepares the next ECMWF time", () => {
-  const plan = planSpatialRequests(8, 32, new Set([8]), new Set(), new Set(), true, 100, true);
-  assert.deepEqual(plan, { cancel: [], start: 9 });
+test("active playback briefly favors the visible viewport but resumes future hours promptly", () => {
+  const ready = new Set([8]);
+  assert.deepEqual(
+    planSpatialRequests(8, 32, ready, new Set([9]), new Set(), true, 100, true),
+    { cancel: [9], start: null },
+  );
+  assert.deepEqual(
+    planSpatialRequests(8, 32, ready, new Set(), new Set(), true, SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS, true),
+    { cancel: [], start: 9 },
+  );
 });
 
 test("a still map does not decode a second unused future hour", () => {

@@ -454,7 +454,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[] }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -474,6 +474,10 @@ export class ModelField {
   // time Leaflet emits another 'loading' for the same requested hour.
   private refreshBase: number | null = null;
   private refreshSince = 0;
+  // A new visible viewport temporarily outranks speculative forecast hours.
+  // Both flags are reset when the rain map is hidden/disposed.
+  private viewportMoving = false;
+  private viewportHoldUntil = 0;
   private ready: Promise<void> = Promise.resolve();
   private metadataAbort: AbortController | null = null;
   // First-session readiness timings are read-only and measured on device.
@@ -483,6 +487,8 @@ export class ModelField {
   private firstCloudReadyMs: number | null = null;
   private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
+  private moveStartListener: (() => void) | null = null;
+  private moveEndListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
     this.attachedAt = performance.now();
@@ -492,6 +498,10 @@ export class ModelField {
     installSpatialFetch();
     this.metadataAbort?.abort();
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
+    if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
+    this.viewportMoving = false;
+    this.viewportHoldUntil = 0;
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -521,6 +531,34 @@ export class ModelField {
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
     this.updateBoundsListener = updateBounds;
+    const onMoveStart = () => {
+      if (!this.visible || this.viewportMoving) return;
+      this.viewportMoving = true;
+      // Abort ONLY speculative frames. The requested forecast and its
+      // already-rendered tiles remain intact while Leaflet pans the map.
+      // Aborted queued Range reads leave the native queue immediately;
+      // in-flight Capacitor HTTP is non-abortable, but its result is ignored.
+      if (this.frames.get(this.base)?.ready) {
+        for (const step of [...this.loading]) {
+          if (step !== this.base) this.discardFrame(step);
+        }
+      }
+    };
+    const onMoveEnd = () => {
+      this.viewportMoving = false;
+      if (!this.visible || !this.frames.get(this.base)?.ready) return;
+      // GridLayer's 'loading' may be emitted after this moveend callback.
+      // Give it time to request the newly visible viewport before prefetch
+      // can start again, without adding a periodic timer or another redraw.
+      this.viewportHoldUntil = Date.now() + 450;
+      this.refreshBase = this.base;
+      this.refreshSince = Date.now();
+      this.pump();
+    };
+    map.on("movestart", onMoveStart);
+    map.on("moveend", onMoveEnd);
+    this.moveStartListener = onMoveStart;
+    this.moveEndListener = onMoveEnd;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
@@ -676,6 +714,8 @@ export class ModelField {
       this.holdingPreviousFrame = false;
       this.refreshBase = null;
       this.refreshSince = 0;
+      this.viewportMoving = false;
+      this.viewportHoldUntil = 0;
       this.playbackActive = false;
       this.lastScheduledAt = 0;
       this.fallbackForMissingHour = false;
@@ -733,8 +773,11 @@ export class ModelField {
     // on each Leaflet pan/loading event. This guarantees that the next forecast
     // can begin within the configured grace period during continuous panning.
     const current = this.frames.get(this.base);
-    const viewportRefreshing = !!current?.ready && current.loaded.some((complete) => !complete);
     const now = Date.now();
+    const viewportRefreshing = !!current?.ready && (
+      this.viewportMoving || now < this.viewportHoldUntil ||
+      current.loaded.some((complete) => !complete)
+    );
     if (!viewportRefreshing) {
       this.refreshBase = null;
       this.refreshSince = 0;
@@ -762,6 +805,7 @@ export class ModelField {
     if (timer !== undefined) window.clearTimeout(timer);
     this.pendingTimers.delete(step);
     const frame = this.frames.get(step);
+    if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
     this.frames.delete(step);
     this.loading.delete(step);
     // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
@@ -820,6 +864,7 @@ export class ModelField {
       layerFirstTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       layerLastTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       layerFinishedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      snowStartTimer: undefined as number | undefined,
     };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
@@ -970,8 +1015,23 @@ export class ModelField {
           giveUp();
         }
       });
-      layer.addTo(map);
+      // Prioritize first real cloud/rain coverage. A bounded 650-ms delay
+      // in mounting snowfall avoids starting all three costly OM worker
+      // decoders at once; snow is never skipped or fabricated.
+      if (index < 2) layer.addTo(map);
     }
+    let snowStarted = false;
+    const mountSnow = () => {
+      if (!alive() || snowStarted) return;
+      snowStarted = true;
+      if (frame.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
+      frame.snowStartTimer = undefined;
+      made[2]!.addTo(map);
+    };
+    // If cloud tiles arrive sooner, start snowfall immediately. Otherwise
+    // the bounded deadline guarantees snow is requested even on a slow link.
+    made[0]!.on("tileload", mountSnow);
+    frame.snowStartTimer = window.setTimeout(mountSnow, 650);
   }
 
   /** الساعة الأقدم تخفت بينما الساعة الأحدث تظهر، فتنساب الكتل بدل القفزة. */
@@ -1093,7 +1153,13 @@ export class ModelField {
     this.metadataAbort?.abort();
     this.metadataAbort = null;
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
+    if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
     this.updateBoundsListener = null;
+    this.moveStartListener = null;
+    this.moveEndListener = null;
+    this.viewportMoving = false;
+    this.viewportHoldUntil = 0;
     this.visible = false;
     this.playbackActive = false;
     this.seq += 1; // invalidate asynchronous frame and metadata callbacks

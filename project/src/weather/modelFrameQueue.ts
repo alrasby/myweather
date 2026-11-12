@@ -1,6 +1,7 @@
 /** Maximum time a refreshed visible viewport can defer *starting* the
  * next forecast. Continuous panning must not starve animation forever. */
 export const SPATIAL_PREFETCH_GRACE_MS = 2500;
+export const SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS = 1200;
 
 /** Limit ECMWF decoding to one incomplete forecast hour at a time.
  * Prioritize the requested frame and visible tiles, but give the following
@@ -25,17 +26,14 @@ export function planSpatialRequests(
   const candidates = [requested, requested + 1, lookahead].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
-  // Existing in-flight prefetch is not cancelled just because Leaflet
-  // briefly restarts a viewport tile queue. Doing that on every pan caused
-  // expensive native HTTP churn. Defer only NEW prefetch during the grace
-  // interval; after the deadline allow it even if map movement never stops.
-  // A missing requested frame is always more important than prefetch.
-  const prefetch = requested + 1;
-  // During playback the next time step matters more than a background
-  // pan refresh; do not stall prefetch for an extra 2.5 seconds.
-  const deferred = !playbackActive && currentViewportRefreshing && ready.has(requested) &&
-    visibleRefreshAgeMs < SPATIAL_PREFETCH_GRACE_MS &&
-    loading.size === 0;
+  // The visible viewport has precedence over future forecast hours, even
+  // when prefetch was already in flight. A real new pan cancels speculation
+  // once via ModelField.movestart, while this deterministic policy prevents
+  // the cancelled frame from immediately restarting on a tile event.
+  // Playback gets a shorter bound so its next hour cannot starve.
+  const grace = playbackActive ? SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS : SPATIAL_PREFETCH_GRACE_MS;
+  const deferred = currentViewportRefreshing && ready.has(requested) &&
+    visibleRefreshAgeMs < grace;
   const desired = deferred ? null : candidates[0] ?? null;
   const cancel = [...loading].filter((step) => step !== desired);
   return {

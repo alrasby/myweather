@@ -312,6 +312,25 @@ test("weather hero uses one atmospheric cloud generator, with precipitation-only
   assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
 });
 
+test("visible ECMWF viewport interrupts obsolete prefetch and stages nonblocking snowfall", () => {
+  const src = read("project/src/weather/modelField.ts");
+  const scheduler = read("project/src/weather/modelFrameQueue.ts");
+  assert.ok(src.includes('map.on("movestart", onMoveStart)'));
+  assert.ok(src.includes('map.on("moveend", onMoveEnd)'));
+  assert.ok(src.includes('if (step !== this.base) this.discardFrame(step)'));
+  assert.ok(src.includes('this.viewportMoving || now < this.viewportHoldUntil'));
+  assert.ok(src.includes('this.map.off("movestart", this.moveStartListener)'));
+  assert.ok(src.includes('if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer)'));
+  assert.ok(src.includes('if (index < 2) layer.addTo(map)'));
+  assert.ok(src.includes('frame.snowStartTimer = window.setTimeout(mountSnow, 650)'));
+  assert.ok(src.includes('made[0]!.on("tileload", mountSnow)'));
+  assert.ok(scheduler.includes("visibleRefreshAgeMs < grace"));
+  assert.ok(src.includes("const ready = spatialFrameReadyDuringRefresh("),
+    "keep previously rendered ECMWF field while only a viewport refresh is pending");
+  assert.ok(src.includes("const preview = !fallbackForHour && !cooldown"),
+    "never overlay an incompatible fallback beneath partial ECMWF weather");
+});
+
 test("cloud field uses seamless single-pass pattern and moon respects the city's horizon", () => {
   const sky = read("project/src/components/weather/SkyBackdrop.tsx");
   const app = read("project/src/components/weather/WeatherApp.tsx");
