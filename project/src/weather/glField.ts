@@ -705,13 +705,17 @@ export class FieldEngine {
     if (this.kind === 2) {
       const usable = (grid: GridField | null): grid is GridField =>
         !!grid && !grid.id.startsWith("est|") &&
-        usablePrecipitationGrid(grid.lonSpan, grid.cols, this.map?.getZoom() ?? 0);
+        usablePrecipitationGrid(
+          grid.lonSpan, grid.cols, this.map?.getZoom() ?? 0, 72,
+          (grid.north - grid.south) / Math.max(1, grid.rows),
+          this.map?.getCenter().lat ?? 0,
+        );
       const world = this.rainWorld;
       const view = this.rainView;
       if (usable(view) && this.detailFillsView(view)) {
         const viewCell = view.lonSpan / Math.max(1, view.cols);
         const worldCell = world ? world.lonSpan / Math.max(1, world.cols) : 99;
-        if ((!world || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
+        if ((!usable(world) || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
       }
       if (usable(world)) return world;
       // The initial global grid may be estimateGrid(). Never sample it as
