@@ -250,3 +250,11 @@ test("fallback rain grid cells must not become large blurry polygons after zoom"
   assert.ok(quality.includes("pixelsPerCell <= maxCellPixels"));
   assert.ok(field.includes('!grid.id.startsWith("est|")'), "no estimated rain tiles");
 });
+
+test("wind streamline seeds and per-frame advection share one Mercator-correct projection", () => {
+  const engine = read("project/src/weather/glField.ts");
+  const seed = engine.split("private seedWindTrail(")[1]?.split("private spawnRain(")[0];
+  assert.ok(seed?.includes("windScreenStepDegrees(la, zoom, 2.4, 1)"));
+  assert.ok(engine.includes("windScreenStepDegrees(lat, zoom, pxPerSec, dt)"));
+  assert.ok(!seed?.includes("lo -= ((cur.u / mag) * deg) / cos"));
+});
