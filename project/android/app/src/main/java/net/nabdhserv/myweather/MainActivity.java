@@ -85,6 +85,25 @@ public class MainActivity extends BridgeActivity {
         super.onPause();
     }
 
+    @Override
+    protected void onDestroy() {
+        // The WebView's JavascriptInterfaces retain their Java bridge objects;
+        // the compass bridge in turn retains this Activity. Release both before
+        // Capacitor tears down its WebView to avoid a stale Activity/sensor leak.
+        if (compass != null) {
+            compass.dispose();
+            compass = null;
+        }
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            WebView web = getBridge().getWebView();
+            if (compassBound) web.removeJavascriptInterface("AndroidCompass");
+            if (widgetBound) web.removeJavascriptInterface("AndroidWidget");
+        }
+        compassBound = false;
+        widgetBound = false;
+        super.onDestroy();
+    }
+
     private void ensureWidget() {
         if (widgetBound || getBridge() == null || getBridge().getWebView() == null) return;
         getBridge().getWebView().addJavascriptInterface(new WeatherWidget.Bridge(this), "AndroidWidget");
@@ -179,6 +198,17 @@ public class MainActivity extends BridgeActivity {
         void onHostResume() {
             foreground = true;
             if (requested) listen();
+        }
+
+        void dispose() {
+            requested = false;
+            foreground = false;
+            halt();
+            // Our Handler owns only compass callbacks; do not clear another
+            // component's posted tasks or the main thread globally.
+            main.removeCallbacksAndMessages(null);
+            web = null;
+            sensors = null;
         }
 
         private void listen() {
