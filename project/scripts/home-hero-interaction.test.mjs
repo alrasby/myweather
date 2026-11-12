@@ -37,3 +37,18 @@ test("saved-city gestures ignore nested horizontal scrollers and preserve vertic
   assert.ok(home.includes("setActive(target)"));
   assert.ok(home.includes("onTouchCancel"));
 });
+
+test("home cloud atmosphere blends out gradually without a rounded or opaque card-edge shelf", () => {
+  const css = read("project/src/styles.css");
+  const sky = css.split(".sky-clouds.is-deck {")[1]?.split("}")[0];
+  const hero = css.split(".wx-hero-atmosphere {")[1]?.split("}")[0];
+  assert.ok(sky && hero, "global cloud deck and localized hero must exist");
+  assert.ok(!sky.includes("#000 0 88%"), "no late sudden deck cutoff");
+  assert.ok(sky.includes("0.82") && sky.includes("0.45") && sky.includes("0.12"),
+    "cloud deck must have intermediate alpha levels before cards");
+  assert.ok(hero.includes("border-radius: 0"), "rounded atmospheric corners exposed a rectangular edge");
+  assert.ok(hero.includes("inset: -0.55rem -1rem -1.6rem"), "scene should bleed into gap above hourly card");
+  assert.ok(hero.includes("0.85") && hero.includes("0.46") && hero.includes("0.13"),
+    "hero alpha must fade progressively, not stop at the element boundary");
+  assert.ok(hero.includes("transparent 100%"), "scene must reach fully transparent before the next card");
+});
