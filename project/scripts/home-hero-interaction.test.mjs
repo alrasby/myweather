@@ -185,3 +185,12 @@ test("source-backed rain fallback can play while full ECMWF decodes; no fake or 
   assert.ok(map.includes("engine.hasSourceRain()"));
   assert.ok(map.includes("info.playbackWaitingMs >= 1800"));
 });
+
+test("a missing rain grid uses a stable forecast time reference, never Date.now per tick", () => {
+  const engine = read("project/src/weather/glField.ts");
+  const helper = read("project/src/weather/weatherPlayback.ts");
+  assert.ok(engine.includes("this.rainForecastTime(grid, candidate)"));
+  assert.ok(engine.includes("this.rainForecastTime(grid, this.hour)"));
+  assert.ok(helper.includes("rainClockWithoutGrid(startMs: number, hour: number)"));
+  assert.ok(engine.includes('this.global && !this.global.id.startsWith("est|")'));
+});
