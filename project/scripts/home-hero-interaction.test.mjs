@@ -312,6 +312,21 @@ test("weather hero uses one atmospheric cloud generator, with precipitation-only
   assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
 });
 
+test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite floor", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const src = read("project/src/weather/modelField.ts");
+  const queue = read("project/src/weather/modelFrameQueue.ts");
+  const satellite = read("project/src/weather/satelliteBasemap.ts");
+  assert.ok(src.includes('tileGate.hold(event.tile as SpatialTileNode)'));
+  assert.ok(src.includes('layer.on("load", () => {') && src.includes('tileGate.release()'));
+  assert.ok(src.includes('layer.on("tileunload", (event)'));
+  assert.ok(src.includes('map.on("move", onMove)'));
+  assert.ok(src.includes('significantSpatialMove(origin,'));
+  assert.ok(queue.includes("const cancel = deferred ? []"));
+  assert.ok(satellite.includes("SATELLITE_UNDERLAY_NATIVE_ZOOM = 4"));
+  assert.ok(map.includes("maxNativeZoom: SATELLITE_UNDERLAY_NATIVE_ZOOM"));
+});
+
 test("visible ECMWF viewport interrupts obsolete prefetch and stages nonblocking snowfall", () => {
   const src = read("project/src/weather/modelField.ts");
   const scheduler = read("project/src/weather/modelFrameQueue.ts");

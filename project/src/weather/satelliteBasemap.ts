@@ -4,7 +4,11 @@
  * This reduces duplicate GPU compositing on Chrome/Android, where tile seams
  * may appear at the boundaries between separately transformed images.
  */
-export function needsSatelliteUnderlay(zoom: number, nativeZoom = 5): boolean {
+export const SATELLITE_UNDERLAY_NATIVE_ZOOM = 4;
+export function needsSatelliteUnderlay(
+  zoom: number,
+  nativeZoom = SATELLITE_UNDERLAY_NATIVE_ZOOM,
+): boolean {
   return Number.isFinite(zoom) && zoom > nativeZoom;
 }
 

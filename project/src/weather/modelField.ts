@@ -2,7 +2,8 @@ import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
-import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
+import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
+import { SpatialTileReveal, type SpatialTileNode } from "@/weather/spatialTileReveal";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
@@ -454,7 +455,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[] }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -489,6 +490,7 @@ export class ModelField {
   private updateBoundsListener: (() => void) | null = null;
   private moveStartListener: (() => void) | null = null;
   private moveEndListener: (() => void) | null = null;
+  private moveListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
     this.attachedAt = performance.now();
@@ -500,6 +502,7 @@ export class ModelField {
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
     if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
     if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
+    if (this.map && this.moveListener) this.map.off("move", this.moveListener);
     this.viewportMoving = false;
     this.viewportHoldUntil = 0;
     this.map = map;
@@ -531,21 +534,42 @@ export class ModelField {
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
     this.updateBoundsListener = updateBounds;
+    let origin: { lat: number; lng: number; zoom: number } | null = null;
+    let latSpan = 0;
+    let lonSpan = 0;
+    let cancelledSpeculation = false;
+    let lastSampleAt = 0;
     const onMoveStart = () => {
       if (!this.visible || this.viewportMoving) return;
+      const b = map.getBounds();
+      const center = map.getCenter();
+      origin = { lat: center.lat, lng: center.lng, zoom: map.getZoom() };
+      latSpan = Math.max(0.01, b.getNorth() - b.getSouth());
+      lonSpan = Math.max(0.01, b.getEast() - b.getWest());
+      cancelledSpeculation = false;
+      lastSampleAt = 0;
       this.viewportMoving = true;
-      // Abort ONLY speculative frames. The requested forecast and its
-      // already-rendered tiles remain intact while Leaflet pans the map.
-      // Aborted queued Range reads leave the native queue immediately;
-      // in-flight Capacitor HTTP is non-abortable, but its result is ignored.
-      if (this.frames.get(this.base)?.ready) {
-        for (const step of [...this.loading]) {
-          if (step !== this.base) this.discardFrame(step);
-        }
+    };
+    const onMove = () => {
+      if (!this.visible || !this.viewportMoving || !origin || cancelledSpeculation ||
+          !this.frames.get(this.base)?.ready) return;
+      const now = performance.now();
+      if (now - lastSampleAt < 90) return;
+      lastSampleAt = now;
+      const center = map.getCenter();
+      if (!significantSpatialMove(origin,
+          { lat: center.lat, lng: center.lng, zoom: map.getZoom() }, latSpan, lonSpan)) return;
+      cancelledSpeculation = true;
+      // Cancel speculative *model hours* only on significant region changes.
+      // Already rendered requested-hour tiles stay onscreen during movement.
+      for (const step of [...this.loading]) {
+        if (step !== this.base) this.discardFrame(step);
       }
     };
     const onMoveEnd = () => {
+      onMove();
       this.viewportMoving = false;
+      origin = null;
       if (!this.visible || !this.frames.get(this.base)?.ready) return;
       // GridLayer's 'loading' may be emitted after this moveend callback.
       // Give it time to request the newly visible viewport before prefetch
@@ -556,8 +580,10 @@ export class ModelField {
       this.pump();
     };
     map.on("movestart", onMoveStart);
+    map.on("move", onMove);
     map.on("moveend", onMoveEnd);
     this.moveStartListener = onMoveStart;
+    this.moveListener = onMove;
     this.moveEndListener = onMoveEnd;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
@@ -787,7 +813,7 @@ export class ModelField {
     }
     const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
     const plan = planSpatialRequests(
-      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive,
+      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive, this.viewportMoving,
     );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
@@ -806,6 +832,7 @@ export class ModelField {
     this.pendingTimers.delete(step);
     const frame = this.frames.get(step);
     if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
+    frame?.tileGates.forEach((gate) => gate.release());
     this.frames.delete(step);
     this.loading.delete(step);
     // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
@@ -865,6 +892,7 @@ export class ModelField {
       layerLastTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       layerFinishedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       snowStartTimer: undefined as number | undefined,
+      tileGates: Array.from({ length: SPATIAL_LAYER_COUNT }, () => new SpatialTileReveal()),
     };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
@@ -959,14 +987,24 @@ export class ModelField {
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     for (const [index, layer] of made.entries()) {
       const tileStart = new WeakMap<object, number>();
+      const tileGate = frame.tileGates[index]!;
+      let refreshBatch = false;
       layer.on("tileloadstart", (event) => {
         if (!alive() || !event?.tile) return;
         tileStart.set(event.tile, performance.now());
+        // During a viewport refresh, Leaflet independently inserts rendered
+        // images. Stage only new tiles until this layer's 'load', so hard
+        // rectangular fragments do not appear over the previous coverage.
+        if (refreshBatch) tileGate.hold(event.tile as SpatialTileNode);
+      });
+      layer.on("tileunload", (event) => {
+        tileGate.discard(event?.tile as SpatialTileNode | undefined);
       });
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
       layer.on("loading", () => {
         if (!alive()) return;
+        refreshBatch = frame.ready || frame.previewReady;
         frame.loaded[index] = false;
         frame.layerStartedAt[index] = Date.now();
         frame.layerFirstTileAt[index] = 0;
@@ -979,6 +1017,10 @@ export class ModelField {
       });
       layer.on("load", () => {
         if (!alive()) return;
+        // Flush the complete set in the same JS task; never animate opacity
+        // per tile or switch to an incompatible coarse model mid-refresh.
+        tileGate.release();
+        refreshBatch = false;
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
         refresh();
@@ -1155,9 +1197,11 @@ export class ModelField {
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
     if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
     if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
+    if (this.map && this.moveListener) this.map.off("move", this.moveListener);
     this.updateBoundsListener = null;
     this.moveStartListener = null;
     this.moveEndListener = null;
+    this.moveListener = null;
     this.viewportMoving = false;
     this.viewportHoldUntil = 0;
     this.visible = false;

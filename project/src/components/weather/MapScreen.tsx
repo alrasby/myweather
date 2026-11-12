@@ -9,7 +9,7 @@ import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { needsSatelliteUnderlay, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -290,13 +290,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
-        // At world zoom (<=5) the underlay and detailed imagery requested the
-        // *same* Esri raster tiles and composited two full-size tile grids.
-        // Avoid that duplicate GPU surface and its possible horizontal seams.
-        // At closer zoom, the low-resolution underlay is useful while high-res
-        // images arrive after a pan. Mount it only in that case.
+        // The prior z5 underlay was removed at the initial z5 map view,
+        // exposing dark areas while the first satellite tiles arrived.
+        // Keep a coarser z4 parent behind z5+ imagery (distinct Esri URLs,
+        // not two copies of the same z5 tiles), without affecting ECMWF.
         const underlay = L.tileLayer(imageryUrl, {
-          maxNativeZoom: 5,
+          maxNativeZoom: SATELLITE_UNDERLAY_NATIVE_ZOOM,
           maxZoom: 16,
           zIndex: 0,
           updateWhenIdle: false,

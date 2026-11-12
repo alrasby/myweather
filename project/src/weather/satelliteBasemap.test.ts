@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { needsSatelliteUnderlay, needsRasterSeamGuard } from "./satelliteBasemap.ts";
+import { needsSatelliteUnderlay, needsRasterSeamGuard, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "./satelliteBasemap.ts";
 
 test("the world map never renders duplicate Esri raster grids", () => {
-  for (const zoom of [3, 4, 5]) assert.equal(needsSatelliteUnderlay(zoom), false);
+  for (const zoom of [3, 4]) assert.equal(needsSatelliteUnderlay(zoom), false);
+  assert.equal(SATELLITE_UNDERLAY_NATIVE_ZOOM, 4);
 });
 test("the low-resolution safety underlay remains at closer zoom levels", () => {
-  for (const zoom of [6, 7, 12, 16]) assert.equal(needsSatelliteUnderlay(zoom), true);
+  for (const zoom of [5, 6, 7, 12, 16]) assert.equal(needsSatelliteUnderlay(zoom), true);
   assert.equal(needsSatelliteUnderlay(Number.NaN), false);
 });
 
