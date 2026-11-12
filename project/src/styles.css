@@ -294,6 +294,9 @@ html.light {
 }
 
 .sky-clouds {
+  /* Clouds belong to the sky, not to the scrolling forecast cards.
+     As cards advance they blend into the static sky naturally. */
+  opacity: var(--wx-sky-cloud-opacity, 1);
   position: absolute;
   top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 4.45rem + 2mm);
   right: 0;
