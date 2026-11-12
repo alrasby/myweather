@@ -86,7 +86,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         // The JavascriptInterface holds this Activity while WebView exists.
         // Unregister the sensor and pending Handler callbacks before teardown
         // so neither a delayed location update nor a rotation callback retains it.
