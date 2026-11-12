@@ -21,7 +21,6 @@ test("clouds and precipitation share identical viewport policy", () => {
   const rain = spatialTileOptions("wx-model");
   assert.deepEqual({ ...clouds, pane: "wx-model" }, rain);
 });
-\n
 test("Android without shared workers cuts ECMWF worker jobs without raster stretching", () => {
   assert.equal(useCompactSpatialTiles(true, false), true);
   assert.equal(useCompactSpatialTiles(true, true), false);
