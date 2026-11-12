@@ -320,6 +320,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       window.clearTimeout(clickTimer.current);
       popupAbort.current?.abort();
       document.removeEventListener("visibilitychange", onVis);
+      // Weather model also owns Leaflet tile layers, metadata requests and
+      // per-frame retry timers; release it before map and GL contexts.
+      modelRef.current?.dispose();
       engine.destroy();
       map?.remove();
       engineRef.current = null;
