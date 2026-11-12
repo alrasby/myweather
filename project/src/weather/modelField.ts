@@ -62,6 +62,9 @@ export type WeatherModelDiagnostics = {
   performance: SpatialPerformanceSnapshot;
   rateLimitedResponses: number;
   rateLimitRemainingMs: number;
+  spatialWindowUpdates: number;
+  spatialWindowReuses: number;
+  gestureActive: boolean;
   startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
 };
 
@@ -482,6 +485,8 @@ export class ModelField {
   private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
   private decodeWindow: SpatialBounds | null = null;
+  private spatialWindowUpdates = 0;
+  private spatialWindowReuses = 0;
   // Leaflet emits paired move/zoom start/end events. While the gesture or
   // inertia is active keep existing forecast tiles and decode work alive,
   // but do not schedule obsolete new timeframes on every playback tick.
@@ -511,6 +516,8 @@ export class ModelField {
     }
     this.mapInteractions = 0;
     this.decodeWindow = null;
+    this.spatialWindowUpdates = 0;
+    this.spatialWindowReuses = 0;
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -536,8 +543,12 @@ export class ModelField {
       });
       // Cropping a .om file repeatedly on a tiny pan evicts working tiles
       // and delays the next hour. Skip only when FULL padded coverage fits.
-      if (canReuseSpatialWindow(this.decodeWindow, requested)) return;
+      if (canReuseSpatialWindow(this.decodeWindow, requested)) {
+        this.spatialWindowReuses++;
+        return;
+      }
       updateCurrentBounds(requested);
+      this.spatialWindowUpdates++;
       this.decodeWindow = requested;
     };
     updateBounds();
@@ -671,6 +682,9 @@ export class ModelField {
       ),
       rateLimitedResponses: spatialRateLimit.incidents,
       rateLimitRemainingMs: spatialRateLimit.remainingMs(),
+      spatialWindowUpdates: this.spatialWindowUpdates,
+      spatialWindowReuses: this.spatialWindowReuses,
+      gestureActive: this.mapInteractions > 0,
       startupMs: {
         metadata: this.metadataReadyMs,
         firstCloudReady: this.firstCloudReadyMs,
