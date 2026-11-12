@@ -354,7 +354,9 @@ function bakeAtmo(kind: VeilKind) {
   for (let y = 0; y < h; y++) {
     const ny = y / (h - 1);
     for (let x = 0; x < w; x++) {
-      const s = sampleAtmo(kind, x / w, ny);
+      // Both horizontal border pixels sample the same periodic longitude,
+      // so a repeated field cannot expose a texture boundary.
+      const s = sampleAtmo(kind, x / (w - 1), ny);
       const i = (y * w + x) * 4;
       d[i] = s.r;
       d[i + 1] = s.g;
@@ -436,6 +438,7 @@ function CloudField({ day, code, cover, animate }: {
     const mode = veilKind(day, code);
     const field = mode ? atmoOf(mode) : null;
     const clouds = mode ? [] : makeSprites(day, code);
+    const pattern = field ? ctx.createPattern(field.canvas, "repeat") : null;
     const paint = (now: number) => {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const w = canvas.clientWidth;
@@ -456,26 +459,25 @@ function CloudField({ day, code, cover, animate }: {
         /* بعض متصفحات الجوال */
       }
       const t = reduce ? 0 : now / 1000;
-      if (mode && field) {
+      if (mode && field && pattern) {
         const dw = w * 1.42;
         const sceneH = canvas.parentElement?.clientHeight || h;
         const deckDraw = mode.endsWith("cloud") || mode.endsWith("storm");
         const dh = mode.endsWith("partly") ? h / 0.4 : deckDraw ? h : Math.max(sceneH, h);
         const v = w * (mode === "day-partly" ? 0.016 : mode.endsWith("cloud") || mode === "day-storm" ? 0.007 : 0.011);
-        const span = dw;
-        const x0 = -((((t * v) % span) + span) % span);
-        // One weather-dependent sky bank, rather than a second fixed cloud
-        // sprite floating above the temperature. Respect each city's WMO
-        // state and reported cloud-cover fraction without inventing weather.
+        const offset = (((t * v) % dw) + dw) % dw;
+        // Paint one continuous repeating texture, not two translucent
+        // drawImages that can leave a vertical gap or a brighter overlap.
+        // Scale and scroll the same cached field without new raster work.
         const density = heroAtmosphere(code, cover, 0).coverage;
+        ctx.save();
         ctx.globalAlpha = 0.67 + density * 0.33;
-        // Neighboring copies shared a fractional-pixel gap on high-DPR
-        // Chromium WebViews, visible as a moving vertical light line.
-        // Overlap only the rasterized cloud texture by one device pixel;
-        // keep its period, motion and weather-specific generation unchanged.
-        const overlap = 1 / dpr;
-        ctx.drawImage(field.canvas, x0, 0, dw + overlap, dh);
-        ctx.drawImage(field.canvas, x0 + span, 0, dw + overlap, dh);
+        const sx = dw / field.canvas.width;
+        ctx.translate(-offset, 0);
+        ctx.scale(sx, dh / field.canvas.height);
+        ctx.fillStyle = pattern;
+        ctx.fillRect(offset / sx, 0, w / sx, field.canvas.height);
+        ctx.restore();
         return;
       }
       const scale = w / 390;
@@ -664,8 +666,8 @@ export function HeroPrecipitation({ code, cover, wind, direction }: {
   );
 }
 
-export function SkyBackdrop({ day, code, phase, cover, wind = 0, direction = 0, heroWeather = false, animateClouds = true, showClouds = true }: {
-  day: boolean; code: number; phase: number; cover: number;
+export function SkyBackdrop({ day, code, phase, moonVisible, cover, wind = 0, direction = 0, heroWeather = false, animateClouds = true, showClouds = true }: {
+  day: boolean; code: number; phase: number; moonVisible: boolean; cover: number;
   wind?: number; direction?: number; heroWeather?: boolean; animateClouds?: boolean; showClouds?: boolean;
 }) {
   const kind = skyKind(code);
@@ -700,7 +702,7 @@ export function SkyBackdrop({ day, code, phase, cover, wind = 0, direction = 0, 
       <div className="sky-column">
         {day && kind !== "cloud" && kind !== "storm" ? (
           <div className="sky-sun" />
-        ) : !day ? (
+        ) : !day && moonVisible ? (
           <MoonDisc phase={phase} sizeClass="sky-moon" shadeId="sky" />
         ) : null}
       </div>
