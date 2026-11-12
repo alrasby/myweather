@@ -197,7 +197,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           : null;
         if (target) {
           setActive(target); // Saves last-viewed location; never adds cities.
-          if (scroller.current) scroller.current.scrollTop = 0;
         } else if (pull.current > 0 && dy > 64 && Math.abs(dy) > Math.abs(dx) * 1.2) {
           hideAlertsAfterPull();
           refresh();
