@@ -463,6 +463,7 @@ export class ModelField {
   private visible = false;
   private playbackActive = false;
   private sourceBackedFallback = false;
+  private fallbackForMissingHour = false;
   private lastSyncAt = 0;
   // Do not re-evaluate the same ECMWF tile scheduler every 50 ms while only
   // the forecast blend opacity changes. Tile load/error events and hour
@@ -676,6 +677,7 @@ export class ModelField {
       this.refreshSince = 0;
       this.playbackActive = false;
       this.lastScheduledAt = 0;
+      this.fallbackForMissingHour = false;
       this.clear();
     }
   }
@@ -978,14 +980,20 @@ export class ModelField {
     const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
     // An actual fallback has its own time-aligned precipitation field.
     // Never hold an obsolete ECMWF hour over a new fallback forecast hour.
-    const plan = this.sourceBackedFallback && !readySteps.has(this.base)
+    // A real Open-Meteo fallback and ECMWF are separate forecast products.
+    // Do not cross-fade their coarse/fine raster imagery: the overlap is seen
+    // as rectangular cloud/rain patches during fast pans and time playback.
+    const fallbackForHour = this.sourceBackedFallback && !readySteps.has(this.base);
+    const returningToReadyModel = this.fallbackForMissingHour && !fallbackForHour && readySteps.has(this.base);
+    this.fallbackForMissingHour = fallbackForHour;
+    const plan = fallbackForHour
       ? { goals: new Map<number, number>(), anchor: null, holding: false }
       : selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
     // A first completed cloud viewport should not be held hostage by slow
     // precipitation/snowfall .om decoding. Only source-backed, fully loaded
     // individual layers are shown; partially loaded image tiles remain hidden.
     const requested = this.frames.get(this.base);
-    const preview = !cooldown && plan.goals.size === 0 && requested &&
+    const preview = !fallbackForHour && !cooldown && plan.goals.size === 0 && requested &&
       !requested.ready && requested.previewReady ? requested : null;
     this.holdingPreviousFrame = plan.holding && plan.anchor !== null && !preview;
     for (const [step, frame] of this.frames) {
@@ -1036,7 +1044,11 @@ export class ModelField {
       // On a failed model hour the forecast clock is allowed to continue
       // using the matching global field. Hide stale ECMWF imagery immediately
       // instead of letting it linger as a seemingly current cloud pattern.
-      const shown = cooldown && goal === 0 ? 0 : cur + (goal - cur) * 0.28;
+      // Switching between unrelated data products must be atomic, not
+      // intermediate alpha=0.5 ECMWF atop alpha=1 fallback. Keep normal
+      // temporal interpolation between fully ready ECMWF forecast hours.
+      const shown = fallbackForHour || returningToReadyModel ? goal :
+        cooldown && goal === 0 ? 0 : cur + (goal - cur) * 0.28;
       const value = Math.abs(goal - shown) < 0.02 ? goal : shown;
       if (Math.abs(frame.opacity - value) < 0.01) continue;
       frame.opacity = value;
@@ -1052,7 +1064,7 @@ export class ModelField {
     const completedOpacity = Array.from(this.frames.values()).reduce(
       (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0), 0,
     );
-    const nextVisible = this.diagnosticMode !== "fallback" && completedOpacity >= 0.88;
+    const nextVisible = !fallbackForHour && this.diagnosticMode !== "fallback" && completedOpacity >= 0.88;
     if (spatialCoverageChanged(this.spatialVisible, nextVisible)) {
       this.spatialVisible = nextVisible;
       // Visibility changes require switching the fallback renderer. Repeated
@@ -1081,6 +1093,7 @@ export class ModelField {
     this.spatialVisible = false;
     this.lastDisplayedStep = null;
     this.holdingPreviousFrame = false;
+    this.fallbackForMissingHour = false;
     this.times = [];
     this.pinnedRun = null;
     this.adapter = null;
