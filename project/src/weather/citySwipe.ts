@@ -25,8 +25,11 @@ export function citySwipeOrder(
   activePreviewId?: string | null,
 ): string[] {
   const ids: string[] = [];
-  for (const id of [activePreviewId, gpsPreviewId, ...savedIds]) {
-    if (id && !ids.includes(id)) ids.push(id);
+  // A saved city must keep its original order even if it is also the GPS
+  // fix (or the previously previewed place). Only UNSAVED previews lead.
+  for (const id of [activePreviewId, gpsPreviewId]) {
+    if (id && !savedIds.includes(id) && !ids.includes(id)) ids.push(id);
   }
+  for (const id of savedIds) if (id && !ids.includes(id)) ids.push(id);
   return ids;
 }
