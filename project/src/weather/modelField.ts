@@ -52,6 +52,8 @@ export type WeatherModelDiagnostics = {
   nativeReads: number;
   sharedRangeReads: number;
   activeSharedRanges: number;
+  activeFileProbes: number;
+  sharedFileProbes: number;
   layerTimings: SpatialLayerTiming[];
   loadingFrames: number[];
   cacheEligible: number;
@@ -207,6 +209,7 @@ const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
 const spatialRangeFlights = new SpatialRangeFlights<Response>();
+const spatialLengthFlights = new SpatialRangeFlights<string | null>();
 const spatialRateLimit = new SpatialRateLimit();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
@@ -324,6 +327,13 @@ async function probeLength(url: string, headers: Headers, signal?: AbortSignal):
   }
   const cached = spatialFileLengths.get(url);
   if (cached) return cached.value;
+  // The reader may query the same .om file length from several tiles
+  // concurrently. Coalesce the native 0-0 probe, keeping callers abortable.
+  return spatialLengthFlights.run(`length|${url}`, signal,
+    (sharedSignal) => probeLengthUnshared(url, headers, sharedSignal));
+}
+
+async function probeLengthUnshared(url: string, headers: Headers, signal?: AbortSignal): Promise<string | null> {
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key) && key.toLowerCase() !== "range") bag[key] = value;
@@ -601,6 +611,8 @@ export class ModelField {
       nativeReads: spatialNativeReads,
       sharedRangeReads: spatialRangeFlights.joined,
       activeSharedRanges: spatialRangeFlights.active,
+      activeFileProbes: spatialLengthFlights.active,
+      sharedFileProbes: spatialLengthFlights.joined,
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
