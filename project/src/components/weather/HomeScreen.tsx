@@ -69,7 +69,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   // React state changes, timers or additional canvas draw calls.
   const syncCloudsWithScroll = () => {
     const top = Math.max(0, scroller.current?.scrollTop ?? 0);
-    const t = Math.min(1, top / 96);
+    const t = Math.min(1, top / 200);
     const opacity = 1 - t * t * (3 - 2 * t);
     document.documentElement.style.setProperty("--wx-cloud-scroll-opacity", opacity.toFixed(4));
   };
