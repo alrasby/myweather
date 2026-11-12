@@ -60,7 +60,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   };
   useEffect(() => {
     syncSkyScroll();
-    return () => document.documentElement.style.removeProperty("--wx-sky-cloud-opacity");
+    return () => { document.documentElement.style.removeProperty("--wx-sky-cloud-opacity"); };
     // The scroll node remains stable throughout a HomeScreen mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
