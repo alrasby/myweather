@@ -664,7 +664,7 @@ export function HeroClouds({ day, code, cover, wind, direction }: {
   );
 }
 
-export function SkyBackdrop({ day, code, phase, cover }: { day: boolean; code: number; phase: number; cover: number }) {
+export function SkyBackdrop({ day, code, phase, cover, showClouds = true }: { day: boolean; code: number; phase: number; cover: number; showClouds?: boolean }) {
   const kind = skyKind(code);
   return (
     <div className={`sky-scene sky-${kind} ${day ? "is-day" : "is-night-sky"}`} aria-hidden="true">
@@ -692,7 +692,7 @@ export function SkyBackdrop({ day, code, phase, cover }: { day: boolean; code: n
           ))}
         </div>
       ) : null}
-      <CloudField day={day} code={code} cover={cover} />
+      {showClouds ? <CloudField day={day} code={code} cover={cover} /> : null}
       <div className="sky-column">
         {day && kind !== "cloud" && kind !== "storm" ? (
           <div className="sky-sun" />
