@@ -24,6 +24,7 @@ public class WidgetSettingsActivity extends AppCompatActivity {
     private boolean configuring;
     private int alpha = 60;
     private String tint = "ocean";
+    private String textTint = "adaptive";
     private int tone = 50;
     private int strength = 75;
     private long previewAt;
@@ -46,6 +47,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         SharedPreferences sp = WeatherWidget.prefs(this);
         alpha = sp.getInt(WeatherWidget.KEY_ALPHA, 60);
         tint = sp.getString(WeatherWidget.KEY_TINT, "ocean");
+        textTint = sp.getString(WeatherWidget.KEY_TEXT_TINT, "adaptive");
+        if ("adaptive".equals(tint)) tint = "ocean"; // migrate old glass-adaptive selection
         tone = Math.max(0, Math.min(100, sp.getInt(WeatherWidget.KEY_TONE, 50)));
         strength = Math.max(0, Math.min(100, sp.getInt(WeatherWidget.KEY_STRENGTH, 75)));
         dark = sp.getBoolean(WeatherWidget.KEY_DARK, false);
@@ -58,7 +61,10 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         ((TextView) findViewById(R.id.labelTheme)).setText(getString(R.string.widget_theme));
         ((TextView) findViewById(R.id.labelTint)).setText(getString(R.string.widget_tint));
         ((TextView) findViewById(R.id.tintOcean)).setText(getString(R.string.widget_tint_ocean));
-        ((TextView) findViewById(R.id.tintAdaptive)).setText(getString(R.string.widget_tint_adaptive));
+        ((TextView) findViewById(R.id.labelTextTint)).setText(getString(R.string.widget_text_tint));
+        ((TextView) findViewById(R.id.textAdaptive)).setText(getString(R.string.widget_tint_adaptive));
+        ((TextView) findViewById(R.id.textWhite)).setText(getString(R.string.widget_tint_white));
+        ((TextView) findViewById(R.id.textBlack)).setText(getString(R.string.widget_tint_black));
         ((TextView) findViewById(R.id.tintWhite)).setText(getString(R.string.widget_tint_white));
         ((TextView) findViewById(R.id.tintBlack)).setText(getString(R.string.widget_tint_black));
         ((TextView) findViewById(R.id.tintBlue)).setText(getString(R.string.widget_tint_blue));
@@ -94,16 +100,16 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         });
         findViewById(R.id.light).setOnClickListener(v -> {
             dark = false;
-            if ("adaptive".equals(tint)) tint = "white";
             save();
         });
         findViewById(R.id.dark).setOnClickListener(v -> {
             dark = true;
-            if ("adaptive".equals(tint)) tint = "black";
             save();
         });
         bindTint(R.id.tintOcean, "ocean");
-        bindTint(R.id.tintAdaptive, "adaptive");
+        bindTextTint(R.id.textAdaptive, "adaptive");
+        bindTextTint(R.id.textWhite, "white");
+        bindTextTint(R.id.textBlack, "black");
         bindTint(R.id.tintWhite, "white");
         bindTint(R.id.tintBlack, "black");
         bindTint(R.id.tintBlue, "blue");
@@ -185,7 +191,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         }
         TextView sample = findViewById(R.id.previewLabel);
         if (sample != null) sample.setTextColor(
-            WeatherWidget.isDarkGlass(this, tint, dark) ? Color.WHITE : 0xFF182C44);
+            WeatherWidget.textColors(this, textTint,
+                WeatherWidget.isDarkGlass(this, tint, dark), tint, tone, strength)[0]);
     }
 
     private void paintChips() {
@@ -193,15 +200,17 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         chip(R.id.dark, dark);
         chip(R.id.styleWeather, !clock);
         chip(R.id.styleClock, clock);
-        tintChip(R.id.tintAdaptive, "adaptive");
+        chip(R.id.textAdaptive, "adaptive".equals(textTint));
+        chip(R.id.textWhite, "white".equals(textTint));
+        chip(R.id.textBlack, "black".equals(textTint));
         tintChip(R.id.tintWhite, "white");
         tintChip(R.id.tintBlack, "black");
         tintChip(R.id.tintOcean, "ocean");
         tintChip(R.id.tintBlue, "blue");
-        updatePreview(true);
         tintChip(R.id.tintTeal, "teal");
         tintChip(R.id.tintViolet, "violet");
         tintChip(R.id.tintRose, "rose");
+        updatePreview(true);
     }
 
     private void chip(int id, boolean on) {
@@ -215,6 +224,13 @@ public class WidgetSettingsActivity extends AppCompatActivity {
             tint = name;
             if ("white".equals(name)) dark = false;
             if ("black".equals(name)) dark = true;
+            save();
+        });
+    }
+
+    private void bindTextTint(int id, String value) {
+        findViewById(id).setOnClickListener(v -> {
+            textTint = value;
             save();
         });
     }
@@ -237,6 +253,7 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         WeatherWidget.prefs(this).edit()
             .putInt(WeatherWidget.KEY_ALPHA, alpha)
             .putString(WeatherWidget.KEY_TINT, tint)
+            .putString(WeatherWidget.KEY_TEXT_TINT, textTint)
             .putInt(WeatherWidget.KEY_TONE, tone)
             .putInt(WeatherWidget.KEY_STRENGTH, strength)
             .putBoolean(WeatherWidget.KEY_DARK, dark)
