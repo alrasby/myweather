@@ -320,6 +320,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       window.clearTimeout(clickTimer.current);
       popupAbort.current?.abort();
       document.removeEventListener("visibilitychange", onVis);
+      // Weather model also owns Leaflet tile layers, metadata requests and
+      // per-frame retry timers; release it before map and GL contexts.
+      modelRef.current?.dispose();
       engine.destroy();
       map?.remove();
       engineRef.current = null;
@@ -367,7 +370,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine || !ready) return;
-    const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
+    const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : prefs.particles === "med" ? 300 : 240;
     engine.setParticleCount(n);
     engine.setSaver(prefs.dataSaver);
   }, [prefs.dataSaver, prefs.particles, ready]);

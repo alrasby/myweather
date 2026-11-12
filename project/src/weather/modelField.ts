@@ -307,8 +307,14 @@ async function pluginSpatialUnshared(url: string, init: RequestInit | undefined,
 }
 
 async function probeLength(url: string, headers: Headers, signal?: AbortSignal): Promise<string | null> {
+  const now = Date.now();
+  // The .om metadata URL changes with each ECMWF run. A TTL alone does not
+  // remove old Map entries; cap this process-level cache for long sessions.
+  for (const [key, item] of spatialFileLengths) {
+    if (item.expires <= now) spatialFileLengths.delete(key);
+  }
   const cached = spatialFileLengths.get(url);
-  if (cached && cached.expires > Date.now()) return cached.value;
+  if (cached) return cached.value;
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key) && key.toLowerCase() !== "range") bag[key] = value;
@@ -328,6 +334,10 @@ async function probeLength(url: string, headers: Headers, signal?: AbortSignal):
     if (key.toLowerCase() !== "content-range" || value == null) continue;
     const total = String(value).match(/\/(\d+)\s*$/)?.[1];
     if (total) {
+      if (!spatialFileLengths.has(url) && spatialFileLengths.size >= 48) {
+        const oldest = spatialFileLengths.keys().next().value;
+        if (oldest !== undefined) spatialFileLengths.delete(oldest);
+      }
       spatialFileLengths.set(url, { value: total, expires: Date.now() + 90_000 });
       return total;
     }
@@ -426,10 +436,16 @@ export class ModelField {
   private refreshBase: number | null = null;
   private refreshSince = 0;
   private ready: Promise<void> = Promise.resolve();
+  private metadataAbort: AbortController | null = null;
+  private updateBoundsListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
     installSpatialFetch();
+    this.metadataAbort?.abort();
+    if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
     this.map = map;
+    const metadataAbort = new AbortController();
+    this.metadataAbort = metadataAbort;
     if (!map.getPane("wx-clouds")) {
       const clouds = map.createPane("wx-clouds");
       clouds.style.zIndex = "245";
@@ -455,13 +471,15 @@ export class ModelField {
     // Register before GridLayer moveend listeners: when pan/zoom finishes
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
+    this.updateBoundsListener = updateBounds;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
     this.pinnedRun = null;
-    this.ready = fetch(META)
+    this.ready = fetch(META, { signal: metadataAbort.signal })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
+        if (metadataAbort.signal.aborted || this.map !== map) return;
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -480,6 +498,7 @@ export class ModelField {
           : (json.valid_times ?? []).map((t) => Date.parse(t)).filter(Number.isFinite).sort((a, b) => a - b);
       })
       .catch((error: unknown) => {
+        if (metadataAbort.signal.aborted || this.map !== map) return;
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
         console.warn("MyWeather: spatial metadata fetch failed", this.lastError);
         this.times = [];
@@ -968,6 +987,30 @@ export class ModelField {
       if (nextVisible) this.onLive?.();
       else this.onMiss?.();
     }
+  }
+
+  /** Dispose all Leaflet image layers, timers and closures on map teardown.
+   * React StrictMode can re-attach the same instance after effect cleanup.
+   */
+  dispose() {
+    this.metadataAbort?.abort();
+    this.metadataAbort = null;
+    if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    this.updateBoundsListener = null;
+    this.visible = false;
+    this.playbackActive = false;
+    this.seq += 1; // invalidate asynchronous frame and metadata callbacks
+    this.onLive = null;
+    this.onMiss = null;
+    this.clear();
+    this.failedUntil.clear();
+    this.spatialVisible = false;
+    this.lastDisplayedStep = null;
+    this.holdingPreviousFrame = false;
+    this.times = [];
+    this.pinnedRun = null;
+    this.adapter = null;
+    this.map = null;
   }
 
   private clear() {

@@ -16,7 +16,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto px-3.5 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-3">
+    <div className="wx-settings h-full overflow-y-auto px-3.5 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-3">
       <Card title={t(lang, "appearance")}>
         <Field label={t(lang, "language")}>
           <Chips
@@ -99,7 +99,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         {widgetReady ? (
           <button
             type="button"
-            className="rounded-2xl border border-line px-3 py-3 text-start"
+            className="wx-settings-action rounded-2xl border border-line px-3 py-3 text-start"
             onClick={() => {
               const bridge = (window as unknown as { AndroidWidget?: { openSettings?: () => void } }).AndroidWidget;
               bridge?.openSettings?.();
@@ -201,10 +201,11 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
         <Field label={t(lang, "windMotion")}>
           <Chips
-            value={prefs.particles === "high" ? "high" : "low"}
+            value={prefs.particles}
             disabled={prefs.dataSaver}
             options={[
               ["low", t(lang, "motionLight")],
+              ["med", lang === "ar" ? "متوازن" : "Balanced"],
               ["high", t(lang, "motionClear")],
             ]}
             onChange={(particles) => setPrefs({ particles })}
@@ -213,7 +214,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         <Toggle on={prefs.storms} title={t(lang, "storms")} hint={t(lang, "stormsHint")} onClick={() => setPrefs({ storms: !prefs.storms })} />
       </Card>
 
-      <section className="wx-card mb-3 px-4 py-4">
+      <section className="wx-card wx-settings-card mb-3 px-4 py-4">
         <h2 className="text-[0.95rem] font-semibold text-fg">{t(lang, "sources")}</h2>
         <p className="mt-1.5 text-[0.72rem] leading-relaxed text-muted">{t(lang, "sourcesBody")}</p>
         <button
@@ -238,8 +239,8 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="wx-card mb-3 px-4 py-4">
-      <h2 className="text-[0.95rem] font-semibold tracking-tight text-fg">{title}</h2>
+    <section className="wx-card wx-settings-card mb-3 px-4 py-4">
+      <h2 className="flex items-center gap-2 text-[0.95rem] font-semibold tracking-tight text-fg"><span aria-hidden="true" className="wx-settings-dot" />{title}</h2>
       <div className="mt-3.5 flex flex-col gap-4">{children}</div>
     </section>
   );
@@ -271,7 +272,7 @@ function Chips<T extends string>({
   const grid = Boolean(cols && options.length > cols);
   return (
     <div
-      className={`chip-track gap-1 p-1 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "pointer-events-none opacity-45" : ""}`}
+      className={`chip-track wx-settings-chips gap-1 p-1 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "opacity-45" : ""}`}
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {options.map(([id, label]) => {
@@ -283,6 +284,7 @@ function Chips<T extends string>({
             onClick={() => onChange(id)}
             className={`flex min-h-11 w-full items-center justify-center rounded-full px-2 py-1.5 text-center text-[0.78rem] leading-tight ${on ? "chip-on font-semibold" : "text-fg/85"}`}
             aria-pressed={on}
+            disabled={disabled}
           >
             {label}
           </button>
@@ -294,7 +296,7 @@ function Chips<T extends string>({
 
 function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: string; hint?: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <div className={`flex items-center gap-3 border-t border-line pt-3.5 ${disabled ? "pointer-events-none opacity-45" : ""}`}>
+    <div className={`flex items-center gap-3 border-t border-line pt-3.5 ${disabled ? "opacity-45" : ""}`}>
       <div className="min-w-0 flex-1">
         <p className="text-[0.8rem] font-semibold leading-snug text-fg">{title}</p>
         {hint ? <p className="mt-0.5 text-[0.72rem] leading-relaxed text-muted">{hint}</p> : null}
@@ -303,6 +305,7 @@ function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: st
         type="button"
         role="switch"
         aria-checked={on}
+        disabled={disabled}
         onClick={onClick}
         className={`flex h-8 w-14 shrink-0 items-center rounded-full p-1 ${on ? "bg-chip" : "bg-line"}`}
       >

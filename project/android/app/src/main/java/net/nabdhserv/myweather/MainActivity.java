@@ -85,6 +85,20 @@ public class MainActivity extends BridgeActivity {
         super.onPause();
     }
 
+    @Override
+    public void onDestroy() {
+        // The JavascriptInterface holds this Activity while WebView exists.
+        // Unregister the sensor and pending Handler callbacks before teardown
+        // so neither a delayed location update nor a rotation callback retains it.
+        if (compass != null) {
+            compass.dispose();
+            compass = null;
+        }
+        compassBound = false;
+        widgetBound = false;
+        super.onDestroy();
+    }
+
     private void ensureWidget() {
         if (widgetBound || getBridge() == null || getBridge().getWebView() == null) return;
         getBridge().getWebView().addJavascriptInterface(new WeatherWidget.Bridge(this), "AndroidWidget");
@@ -176,6 +190,15 @@ public class MainActivity extends BridgeActivity {
             halt();
         }
 
+        void dispose() {
+            requested = false;
+            foreground = false;
+            halt();
+            main.removeCallbacksAndMessages(null);
+            web = null;
+            sensors = null;
+        }
+
         void onHostResume() {
             foreground = true;
             if (requested) listen();
@@ -188,7 +211,7 @@ public class MainActivity extends BridgeActivity {
             Sensor sensor = sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
             if (sensor == null) sensor = sensors.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR);
             if (sensor == null) return;
-            listening = sensors.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME, main);
+            listening = sensors.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI, main);
         }
 
         private void halt() {

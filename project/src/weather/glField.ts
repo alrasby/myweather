@@ -1243,15 +1243,15 @@ export class FieldEngine {
     if (!head || !prev || Math.hypot(head.x - prev.x, head.y - prev.y) >= 2.2) {
       p.trail.push({ lat: p.lat, lon: p.lon });
     }
-    this.trimTrail(p, 14);
+    this.trimTrail(p, 38);
   }
 
-  /** الأثر لا يطول عن شرطة قصيرة، حتى لا يصبح مشطاً على الشاشة. */
+  /** A bounded smooth streamline follows real U/V motion, not a 14px dash. */
   private trimTrail(p: Particle, maxPx: number) {
     while (p.trail.length > 2) {
       const tail = this.local(p.trail[0]!.lat, p.trail[0]!.lon);
       const head = this.local(p.trail[p.trail.length - 1]!.lat, p.trail[p.trail.length - 1]!.lon);
-      const long = p.trail.length > 7 || (!!tail && !!head && Math.hypot(head.x - tail.x, head.y - tail.y) > maxPx);
+      const long = p.trail.length > 14 || (!!tail && !!head && Math.hypot(head.x - tail.x, head.y - tail.y) > maxPx);
       if (!long) break;
       p.trail.shift();
     }
@@ -1280,24 +1280,36 @@ export class FieldEngine {
     if (xy.length >= 2) this.paintThread(ctx, xy, sample, fade);
   }
 
-  /** شرطة قصيرة فاتحة فوق طبقة اللون، كجزيئات ويندي لا كخيوط تغطي الخريطة. */
+  /** Gently curved, head-lit wind streamlines. Same particle budget/frame
+   * cadence as before; no shadowBlur, offscreen canvas, or extra animation.
+   * A single thin gradient stroke gives a transparent tail and a bright head.
+   */
   private paintThread(
     ctx: CanvasRenderingContext2D,
     xy: { x: number; y: number }[],
     _sample: FieldSample,
     fade: number,
   ) {
+    const tail = xy[0]!;
+    const head = xy[xy.length - 1]!;
+    if (Math.hypot(head.x - tail.x, head.y - tail.y) < 2) return;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 1.15;
+    ctx.lineWidth = 1.0;
     ctx.beginPath();
-    const p0 = xy[0]!;
-    ctx.moveTo(p0.x, p0.y);
-    for (let i = 1; i < xy.length; i++) {
-      const pt = xy[i]!;
-      ctx.lineTo(pt.x, pt.y);
+    ctx.moveTo(tail.x, tail.y);
+    for (let i = 1; i < xy.length - 1; i++) {
+      const here = xy[i]!;
+      const next = xy[i + 1]!;
+      ctx.quadraticCurveTo(here.x, here.y,
+        (here.x + next.x) / 2, (here.y + next.y) / 2);
     }
-    ctx.strokeStyle = `rgba(255,255,255,${(0.72 * fade).toFixed(3)})`;
+    ctx.lineTo(head.x, head.y);
+    const light = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+    light.addColorStop(0, "rgba(238,248,255,0)");
+    light.addColorStop(0.35, `rgba(240,249,255,${(0.24 * fade).toFixed(3)})`);
+    light.addColorStop(1, `rgba(255,255,255,${(0.82 * fade).toFixed(3)})`);
+    ctx.strokeStyle = light;
     ctx.stroke();
   }
 
@@ -1368,7 +1380,7 @@ export class FieldEngine {
     const zoom = map.getZoom();
     const pxPerDeg = (256 * 2 ** zoom) / 360;
     const deg = 2.4 / Math.max(8, pxPerDeg);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const mag = Math.hypot(cur.u, cur.v);
       if (mag < 0.3) break;
       const cos = Math.max(0.22, Math.cos((la * Math.PI) / 180));
