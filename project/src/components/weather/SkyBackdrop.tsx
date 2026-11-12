@@ -419,7 +419,9 @@ function makeSprites(day: boolean, code: number): CloudSprite[] {
   return layers;
 }
 
-function CloudField({ day, code, cover }: { day: boolean; code: number; cover: number }) {
+function CloudField({ day, code, cover, animate }: {
+  day: boolean; code: number; cover: number; animate: boolean;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const kind = skyKind(code);
   const veil = veilKind(day, code);
@@ -495,20 +497,42 @@ function CloudField({ day, code, cover }: { day: boolean; code: number; cover: n
         ctx.restore();
       }
     };
-    const loop = (now: number) => {
-      if (!alive) return;
-      paint(now);
-      if (!reduce) raf = window.requestAnimationFrame(loop);
+    // Cloud drift is only a few pixels per second: ~24fps is visually
+    // identical to 60fps here, with far fewer full-width canvas uploads.
+    // In map/settings tabs this backdrop is behind a foreground screen,
+    // so render it once but never compete with ECMWF tile decoding.
+    let timer = 0;
+    const pause = () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      if (timer) window.clearTimeout(timer);
+      raf = 0;
+      timer = 0;
     };
-    raf = window.requestAnimationFrame(loop);
+    const frame = (now: number) => {
+      raf = 0;
+      if (!alive || !animate || document.hidden) return;
+      paint(now);
+      timer = window.setTimeout(() => {
+        timer = 0;
+        if (alive && animate && !document.hidden) raf = window.requestAnimationFrame(frame);
+      }, 25);
+    };
+    const onVisibility = () => {
+      if (document.hidden) pause();
+      else if (animate && !reduce && !raf && !timer) raf = window.requestAnimationFrame(frame);
+    };
+    paint(performance.now());
+    if (animate && !reduce && !document.hidden) raf = window.requestAnimationFrame(frame);
+    document.addEventListener("visibilitychange", onVisibility);
     const ro = new ResizeObserver(() => paint(performance.now()));
     ro.observe(canvas);
     return () => {
       alive = false;
-      window.cancelAnimationFrame(raf);
+      pause();
       ro.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [day, code, cover]);
+  }, [day, code, cover, animate]);
   if (!veil && !(kind === "partly" || (day && kind === "clear" && code > 0))) return null;
   const deck = kind === "cloud" || kind === "storm";
   return <canvas ref={ref} className={`sky-clouds${kind === "partly" ? " is-puffs" : veil ? (deck ? " is-deck" : " is-veil") : ""}`} aria-hidden="true" />;
@@ -640,9 +664,9 @@ export function HeroPrecipitation({ code, cover, wind, direction }: {
   );
 }
 
-export function SkyBackdrop({ day, code, phase, cover, wind = 0, direction = 0, heroWeather = false, showClouds = true }: {
+export function SkyBackdrop({ day, code, phase, cover, wind = 0, direction = 0, heroWeather = false, animateClouds = true, showClouds = true }: {
   day: boolean; code: number; phase: number; cover: number;
-  wind?: number; direction?: number; heroWeather?: boolean; showClouds?: boolean;
+  wind?: number; direction?: number; heroWeather?: boolean; animateClouds?: boolean; showClouds?: boolean;
 }) {
   const kind = skyKind(code);
   return (
@@ -671,7 +695,7 @@ export function SkyBackdrop({ day, code, phase, cover, wind = 0, direction = 0, 
           ))}
         </div>
       ) : null}
-      {showClouds ? <CloudField day={day} code={code} cover={cover} /> : null}
+      {showClouds ? <CloudField day={day} code={code} cover={cover} animate={animateClouds} /> : null}
       {heroWeather ? <HeroPrecipitation code={code} cover={cover} wind={wind} direction={direction} /> : null}
       <div className="sky-column">
         {day && kind !== "cloud" && kind !== "storm" ? (
