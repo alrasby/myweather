@@ -436,10 +436,16 @@ export class ModelField {
   private refreshBase: number | null = null;
   private refreshSince = 0;
   private ready: Promise<void> = Promise.resolve();
+  private metadataAbort: AbortController | null = null;
+  private updateBoundsListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
     installSpatialFetch();
+    this.metadataAbort?.abort();
+    if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
     this.map = map;
+    const metadataAbort = new AbortController();
+    this.metadataAbort = metadataAbort;
     if (!map.getPane("wx-clouds")) {
       const clouds = map.createPane("wx-clouds");
       clouds.style.zIndex = "245";
@@ -465,13 +471,15 @@ export class ModelField {
     // Register before GridLayer moveend listeners: when pan/zoom finishes
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
+    this.updateBoundsListener = updateBounds;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
     this.adapter.addProtocol("om", omProtocol, modelSettings());
     this.lastError = null;
     this.pinnedRun = null;
-    this.ready = fetch(META)
+    this.ready = fetch(META, { signal: metadataAbort.signal })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
+        if (metadataAbort.signal.aborted || this.map !== map) return;
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -490,6 +498,7 @@ export class ModelField {
           : (json.valid_times ?? []).map((t) => Date.parse(t)).filter(Number.isFinite).sort((a, b) => a - b);
       })
       .catch((error: unknown) => {
+        if (metadataAbort.signal.aborted || this.map !== map) return;
         this.lastError = String(error instanceof Error ? error.message : error).slice(0, 160);
         console.warn("MyWeather: spatial metadata fetch failed", this.lastError);
         this.times = [];
@@ -984,6 +993,10 @@ export class ModelField {
    * React StrictMode can re-attach the same instance after effect cleanup.
    */
   dispose() {
+    this.metadataAbort?.abort();
+    this.metadataAbort = null;
+    if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    this.updateBoundsListener = null;
     this.visible = false;
     this.playbackActive = false;
     this.seq += 1; // invalidate asynchronous frame and metadata callbacks
