@@ -244,6 +244,18 @@ async function measuredNativeRequest(
     );
     return result;
   } catch (error) {
+    // Some Capacitor native transports reject non-2xx responses instead
+    // of resolving with a status object. Record a provider cooldown in
+    // either case; never treat such a rejection as a reason to retry via WebView.
+    if (error && typeof error === "object") {
+      const info = error as { status?: unknown; headers?: Record<string, unknown> };
+      const status = Number(info.status);
+      if (status === 429 || status === 503) {
+        const retryAfter = info.headers && Object.entries(info.headers)
+          .find(([name]) => name.toLowerCase() === "retry-after")?.[1];
+        spatialRateLimit.observe(status, retryAfter == null ? null : String(retryAfter));
+      }
+    }
     if (!(error instanceof SpatialRateLimitError)) spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
     throw error;
   }
