@@ -32,3 +32,16 @@ export function spatialViewportBounds(view: SpatialView): SpatialBounds {
   if (s >= n) return [...GLOBAL];
   return [w, s, e, n];
 }
+
+/** Reuse an existing .om decode window if the NEW padded viewport still
+ * fits inside it. A global window is deliberately replaced when it becomes
+ * safe to crop regionally again. Never reuse a partial window for dateline
+ * crossings or views outside its coverage. */
+export function canReuseSpatialWindow(previous: SpatialBounds | null, next: SpatialBounds): boolean {
+  if (!previous) return false;
+  const oldWidth = previous[2] - previous[0];
+  const nextWidth = next[2] - next[0];
+  if (oldWidth >= 300 && nextWidth < 300) return false;
+  return previous[0] <= next[0] && previous[1] <= next[1] &&
+    previous[2] >= next[2] && previous[3] >= next[3];
+}
