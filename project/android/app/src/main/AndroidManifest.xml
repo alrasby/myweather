@@ -11,7 +11,7 @@
         android:theme="@style/AppTheme">
         <meta-data
             android:name="androidx.car.app.minCarApiLevel"
-            android:value="1" />
+            android:value="7" />
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
