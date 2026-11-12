@@ -463,8 +463,13 @@ function CloudField({ day, code, cover }: { day: boolean; code: number; cover: n
         const span = dw;
         const x0 = -((((t * v) % span) + span) % span);
         ctx.globalAlpha = 1;
-        ctx.drawImage(field.canvas, x0, 0, dw, dh);
-        ctx.drawImage(field.canvas, x0 + span, 0, dw, dh);
+        // Neighboring copies shared a fractional-pixel gap on high-DPR
+        // Chromium WebViews, visible as a moving vertical light line.
+        // Overlap only the rasterized cloud texture by one device pixel;
+        // keep its period, motion and weather-specific generation unchanged.
+        const overlap = 1 / dpr;
+        ctx.drawImage(field.canvas, x0, 0, dw + overlap, dh);
+        ctx.drawImage(field.canvas, x0 + span, 0, dw + overlap, dh);
         return;
       }
       const scale = w / 390;
