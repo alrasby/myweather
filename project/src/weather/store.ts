@@ -134,6 +134,8 @@ function kmBetween(aLat: number, aLon: number, bLat: number, bLon: number): numb
   return Math.hypot(x, y);
 }
 
+let activeLoadGeneration = 0;
+
 export const useWeather = create<WeatherState>((set, get) => ({
   hydrated: false,
   places: INITIAL_CITIES.map((p) => ({ ...p })),
@@ -167,6 +169,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
     set({ prefs, places, activeId: viewed.activeId, peek: viewed.peek, here, hydrated: true });
   },
   loadActive: async (force, signal) => {
+    const generation = ++activeLoadGeneration;
     const peek = get().peek;
     const place =
       get().places.find((p) => p.id === get().activeId) ?? (peek && peek.id === get().activeId ? peek : undefined);
@@ -174,27 +177,30 @@ export const useWeather = create<WeatherState>((set, get) => ({
     const cached = readCacheFile().entries[place.id];
     const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS && !force;
     if (fresh && cached) {
+      if (signal?.aborted || generation !== activeLoadGeneration || get().activeId !== place.id) return;
       set({ bundle: cached.bundle, stale: false, estimated: false, loading: false, error: false });
       return;
     }
     const current = get().bundle;
     if (!current || current.placeId !== place.id) {
-      set({ bundle: estimateBundle(place), estimated: true, stale: true, loading: true, error: false });
+      // Show a real cached forecast during refresh; estimate only when the city has no cache.
+      set({ bundle: cached?.bundle ?? estimateBundle(place), estimated: !cached, stale: true, loading: true, error: false });
     } else {
       set({ loading: true, error: false });
     }
     try {
       const res = await loadWeather(place, { force, signal });
-      if (signal?.aborted) return;
+      if (signal?.aborted || generation !== activeLoadGeneration) return;
       if (get().activeId !== place.id) return;
       set({ bundle: res.bundle, stale: res.stale, estimated: res.estimated, loading: false, error: false });
     } catch (err) {
-      if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
+      if (signal?.aborted || generation !== activeLoadGeneration || (err instanceof DOMException && err.name === "AbortError")) return;
       if (get().activeId !== place.id) return;
       set({ loading: false, error: !get().bundle });
     }
   },
   setActive: (id) => {
+    if (id !== get().activeId) ++activeLoadGeneration;
     const place = get().places.find(p => p.id === id);
     if (!place) return;
     saveLastViewed(place);
@@ -298,8 +304,10 @@ export const useWeather = create<WeatherState>((set, get) => ({
     savePrefs(prefs);
   },
   clearCache: () => {
+    ++activeLoadGeneration;
     clearBundles();
-    set({ notice: "cleared", bundle: null, stale: false, estimated: false, revision: get().revision + 1 });
+    // Clearing disk cache must not blank the forecast already on screen.
+    set({ notice: "cleared", stale: !!get().bundle, loading: false, revision: get().revision + 1 });
   },
   setNotice: (notice) => set({ notice }),
 }));
