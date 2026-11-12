@@ -1,6 +1,8 @@
 import { ChevronDown, MapPin, SunMedium, Sunrise, Sunset, Thermometer, Umbrella, Wind, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DetailCards, QiblaCard } from "@/components/weather/SkyCards";
+import { HeroClouds } from "@/components/weather/SkyBackdrop";
+import { citySwipeTarget } from "@/weather/citySwipe";
 import { useDeviceCompass } from "@/weather/deviceHeading";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
@@ -36,6 +38,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const estimated = useWeather((s) => s.estimated);
   const stale = useWeather((s) => s.stale);
   const loadActive = useWeather((s) => s.loadActive);
+  const setActive = useWeather((s) => s.setActive);
   const setHere = useWeather((s) => s.setHere);
   const [compassLocating, setCompassLocating] = useState(false);
   const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
@@ -47,6 +50,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const reading = useDeviceCompass(qiblaFix?.lat ?? Number.NaN, qiblaFix?.lon ?? Number.NaN);
   const scroller = useRef<HTMLDivElement>(null);
   const pull = useRef(0);
+  const swipeStart = useRef<{ x: number; y: number; eligible: boolean } | null>(null);
   const [pulling, setPulling] = useState(0);
   const [locating, setLocating] = useState(false);
   const locateGen = useRef(0);
@@ -158,20 +162,52 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       ref={scroller}
       className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
       onTouchStart={(e) => {
-        if ((scroller.current?.scrollTop ?? 0) <= 0) pull.current = e.touches[0]?.clientY ?? 0;
+        if (e.touches.length !== 1) {
+          swipeStart.current = null;
+          pull.current = 0;
+          return;
+        }
+        const touch = e.touches[0]!;
+        const target = e.target instanceof Element ? e.target : null;
+        // Hourly ribbons, forecast carousel and interactive elements retain
+        // their own horizontal gestures. Only saved cities are eligible.
+        const nested = target?.closest('button, a, input, textarea, select, [role="slider"], [data-no-city-swipe], .overflow-x-auto');
+        swipeStart.current = { x: touch.clientX, y: touch.clientY, eligible: !nested };
+        pull.current = (scroller.current?.scrollTop ?? 0) <= 0 ? touch.clientY : 0;
       }}
       onTouchMove={(e) => {
-        if (!pull.current) return;
-        const dy = (e.touches[0]?.clientY ?? 0) - pull.current;
+        const point = e.touches[0];
+        if (!point || !swipeStart.current || !pull.current) return;
+        const dx = point.clientX - swipeStart.current.x;
+        const dy = point.clientY - swipeStart.current.y;
+        if (Math.abs(dx) > Math.abs(dy) * 1.2) {
+          setPulling(0);
+          return;
+        }
         if (dy > 0) setPulling(Math.min(80, dy));
       }}
       onTouchEnd={(e) => {
-        // Use measured gesture distance, not a potentially stale React render.
-        const moved = pull.current > 0 ? (e.changedTouches[0]?.clientY ?? pull.current) - pull.current : 0;
-        if (moved > 64) {
+        // Horizontal city paging must never also trigger vertical refresh.
+        const gesture = swipeStart.current;
+        const touch = e.changedTouches[0];
+        const dx = gesture && touch ? touch.clientX - gesture.x : 0;
+        const dy = gesture && touch ? touch.clientY - gesture.y : 0;
+        const target = gesture?.eligible
+          ? citySwipeTarget(places.map((p) => p.id), activeId, dx, dy, lang === "ar")
+          : null;
+        if (target) {
+          setActive(target); // Saves last-viewed location; never adds cities.
+          if (scroller.current) scroller.current.scrollTop = 0;
+        } else if (pull.current > 0 && dy > 64 && Math.abs(dy) > Math.abs(dx) * 1.2) {
           hideAlertsAfterPull();
           refresh();
         }
+        swipeStart.current = null;
+        pull.current = 0;
+        setPulling(0);
+      }}
+      onTouchCancel={() => {
+        swipeStart.current = null;
         pull.current = 0;
         setPulling(0);
       }}
@@ -237,6 +273,11 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           ) : null}
 
           <div className="temp-under-orb relative z-[1] px-1 text-on-sky" data-sky-hero="">
+            {bundle.placeId === place.id ? (
+              <HeroClouds day={bundle.current.isDay} code={bundle.current.code}
+                cover={bundle.current.cloud} wind={bundle.current.wind} direction={bundle.current.dir} />
+            ) : null}
+            <div className="relative z-[1]">
             <div className="flex items-end justify-between gap-3">
               <p className="text-5xl font-medium leading-none tracking-tight">{formatTemp(bundle.current.temp, prefs.temp, lang)}</p>
               <div className="min-w-0 max-w-[54%] pb-0.5 text-end">
@@ -257,6 +298,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
             ) : loading ? (
               <p className="mt-1 text-xs font-medium text-on-sky/75">{t(lang, "updating")}</p>
             ) : null}
+            </div>
           </div>
 
           <section className="wx-card mt-4 overflow-hidden py-2">
