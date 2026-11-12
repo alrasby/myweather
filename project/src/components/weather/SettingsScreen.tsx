@@ -16,7 +16,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto px-3.5 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-3">
+    <div className="wx-settings h-full overflow-y-auto px-3.5 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-3">
       <Card title={t(lang, "appearance")}>
         <Field label={t(lang, "language")}>
           <Chips
@@ -119,7 +119,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         <Toggle on={prefs.dataSaver} title={t(lang, "dataSaver")} hint={t(lang, "dataSaverHint")} onClick={() => setPrefs({ dataSaver: !prefs.dataSaver })} />
         <div className={prefs.alerts ? "" : "pointer-events-none opacity-45"}>
         <Field label={t(lang, "rainFrom")}>
-          <Chips
+          <Chips disabled={!prefs.alerts}
             value={String(prefs.rainAlert)}
             options={[
               ["0.2", "0.2 mm"],
@@ -130,7 +130,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
           />
         </Field>
         <Field label={t(lang, "windFrom")}>
-          <Chips
+          <Chips disabled={!prefs.alerts}
             value={String(prefs.windAlert)}
             options={[
               ["30", `30 ${t(lang, "kmh")}`],
@@ -141,7 +141,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
           />
         </Field>
         <Field label={t(lang, "dustFrom")}>
-          <Chips
+          <Chips disabled={!prefs.alerts}
             value={String(prefs.dustAlert)}
             options={[
               ["80", "80"],
@@ -247,7 +247,7 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div>
+    <div role="group" aria-label={label}>
       <p className="mb-2 text-[0.75rem] font-medium text-muted">{label}</p>
       {children}
     </div>
@@ -280,6 +280,7 @@ function Chips<T extends string>({
           <button
             key={id}
             type="button"
+            disabled={disabled}
             onClick={() => onChange(id)}
             className={`flex min-h-11 w-full items-center justify-center rounded-full px-2 py-1.5 text-center text-[0.78rem] leading-tight ${on ? "chip-on font-semibold" : "text-fg/85"}`}
             aria-pressed={on}
@@ -303,6 +304,8 @@ function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: st
         type="button"
         role="switch"
         aria-checked={on}
+        disabled={disabled}
+        aria-label={title}
         onClick={onClick}
         className={`flex h-8 w-14 shrink-0 items-center rounded-full p-1 ${on ? "bg-chip" : "bg-line"}`}
       >
