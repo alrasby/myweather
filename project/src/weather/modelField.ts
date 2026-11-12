@@ -307,8 +307,14 @@ async function pluginSpatialUnshared(url: string, init: RequestInit | undefined,
 }
 
 async function probeLength(url: string, headers: Headers, signal?: AbortSignal): Promise<string | null> {
+  const now = Date.now();
+  // The .om metadata URL changes with each ECMWF run. A TTL alone does not
+  // remove old Map entries; cap this process-level cache for long sessions.
+  for (const [key, item] of spatialFileLengths) {
+    if (item.expires <= now) spatialFileLengths.delete(key);
+  }
   const cached = spatialFileLengths.get(url);
-  if (cached && cached.expires > Date.now()) return cached.value;
+  if (cached) return cached.value;
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key) && key.toLowerCase() !== "range") bag[key] = value;
@@ -328,6 +334,10 @@ async function probeLength(url: string, headers: Headers, signal?: AbortSignal):
     if (key.toLowerCase() !== "content-range" || value == null) continue;
     const total = String(value).match(/\/(\d+)\s*$/)?.[1];
     if (total) {
+      if (!spatialFileLengths.has(url) && spatialFileLengths.size >= 48) {
+        const oldest = spatialFileLengths.keys().next().value;
+        if (oldest !== undefined) spatialFileLengths.delete(oldest);
+      }
       spatialFileLengths.set(url, { value: total, expires: Date.now() + 90_000 });
       return total;
     }
@@ -968,6 +978,26 @@ export class ModelField {
       if (nextVisible) this.onLive?.();
       else this.onMiss?.();
     }
+  }
+
+  /** Dispose all Leaflet image layers, timers and closures on map teardown.
+   * React StrictMode can re-attach the same instance after effect cleanup.
+   */
+  dispose() {
+    this.visible = false;
+    this.playbackActive = false;
+    this.seq += 1; // invalidate asynchronous frame and metadata callbacks
+    this.onLive = null;
+    this.onMiss = null;
+    this.clear();
+    this.failedUntil.clear();
+    this.spatialVisible = false;
+    this.lastDisplayedStep = null;
+    this.holdingPreviousFrame = false;
+    this.times = [];
+    this.pinnedRun = null;
+    this.adapter = null;
+    this.map = null;
   }
 
   private clear() {
