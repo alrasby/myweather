@@ -14,7 +14,7 @@ test("weather animation is behind the upper cards, not a child of scrolling temp
   assert.ok(sky.includes("heroWeather ? <HeroPrecipitation"), "retain only weather-driven precipitation in sky scene");
   assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}'));
   assert.ok(style.includes(".wx-hero-atmosphere") && style.includes("pointer-events: none;"));
-  assert.ok(style.includes("height: 11.5rem"), "precipitation remains bounded above the cards");
+  assert.ok(style.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "precipitation follows the cloud deck, not half the screen");
 });
 
 test("hero weather scene is bounded to low frame rate, pauses outside viewport and supports accessibility", () => {
@@ -44,7 +44,9 @@ test("upper sky fades softly behind cards with no scrolling shelf or full-screen
   assert.ok(sky && hero, "ambient cloud deck and localized precipitation must exist");
   assert.ok(sky.includes("0.82") && sky.includes("0.45") && sky.includes("0.12"));
   assert.ok(hero.includes("position: absolute") && hero.includes("pointer-events: none"));
-  assert.ok(hero.includes("height: 11.5rem"), "weather is restricted to upper hero band");
+  assert.ok(hero.includes("top: 0;"), "rain/snow start at the cloud ceiling, not halfway down the screen");
+  assert.ok(hero.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "weather is restricted to cloud-deck height");
+  assert.ok(hero.includes("rgb(0 0 0 / 0.36) 5%") && hero.includes("#000 19%"), "upper rain/snow materializes smoothly through the cloud deck");
   assert.ok(!hero.includes("inset: -0.55rem"), "hero is no longer glued to the scrolling temperature card");
   assert.ok(hero.includes("0.73") && hero.includes("0.27") && hero.includes("0.07"));
   assert.ok(hero.includes("transparent 100%"), "feather both ends of the atmosphere");

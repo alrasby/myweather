@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SpatialNativeQueue } from "./spatialNativeQueue.ts";
+import { SpatialNativeQueue, spatialNativePriority } from "./spatialNativeQueue.ts";
 
 test("native spatial HTTP cannot exceed its concurrency limit", async () => {
   const queue = new SpatialNativeQueue(2);
@@ -46,4 +46,29 @@ test("cancelling during native HTTP discards its late response", async () => {
   abort.abort();
   finish("obsolete");
   await assert.rejects(job, /spatial-request-aborted/);
+});
+\n
+test("only actual ECMWF cloud and rain files receive native queue priority", () => {
+  assert.equal(spatialNativePriority("https://s3.example/data/cloud_cover/2026.om"), 1);
+  assert.equal(spatialNativePriority("https://s3.example/data/precipitation/2026.om"), 1);
+  assert.equal(spatialNativePriority("om://example/model.om?variable=cloud_cover"), 1);
+  assert.equal(spatialNativePriority("https://s3.example/data/snowfall_water_equivalent/2026.om"), 0);
+  assert.equal(spatialNativePriority("https://s3.example/data/latest.json"), 0);
+});
+
+test("visible cloud/rain queued reads lead, but snow reads cannot starve", async () => {
+  const queue = new SpatialNativeQueue(1);
+  let unblock!: () => void;
+  const first = queue.run(undefined, () => new Promise<void>((resolve) => { unblock = resolve; }));
+  const observed: string[] = [];
+  const pending: Array<[string, 0 | 1]> = [
+    ["snow-a", 0], ["snow-b", 0],
+    ["cloud-a", 1], ["rain-a", 1], ["cloud-b", 1], ["rain-b", 1],
+  ];
+  const jobs = pending.map(([name, priority]) =>
+    queue.run(undefined, async () => { observed.push(name); }, priority));
+  unblock();
+  await Promise.all([first, ...jobs]);
+  assert.deepEqual(observed.slice(0, 4), ["cloud-a", "rain-a", "cloud-b", "snow-a"]);
+  assert.deepEqual(observed.slice(4), ["rain-b", "snow-b"]);
 });

@@ -3,7 +3,7 @@ import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariable
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
-import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
+import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
@@ -203,9 +203,9 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
   return new Response(bytes.byteLength ? body : null, { status: status || 0, headers });
 }
 
-// Six bounded native reads improve spatial decoding throughput on mobile
-// without allowing the dozens of simultaneous Range fetches triggered by
-// three Leaflet model layers. Every request still obeys cancellation.
+// Six bounded native reads, with fair priority for visible cloud/rain ranges,
+// prevent obsolete snowfall queues from delaying the first useful coverage.
+// Do not raise concurrency or bypass provider cooldowns.
 const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
@@ -234,7 +234,7 @@ async function measuredNativeRequest(
       spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
-    });
+    }, spatialNativePriority(options.url));
     const retryAfter = Object.entries(result.headers ?? {})
       .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
     spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));

@@ -40,3 +40,27 @@ test("invalid or nonfinite viewports fail safe to global model", () => {
   assert.deepEqual(bounds.slice(0,1), [-180]);
   assert.equal(bounds[2], 180);
 });
+\n
+test("mere padding beyond the antimeridian does not trigger a global ECMWF decode", () => {
+  const b = spatialViewportBounds({ west: 157, east: 178, south: 35, north: 55 });
+  assert.ok(b[0] > 140 && b[0] < 157);
+  assert.equal(b[2], 180);
+  assert.ok(b[2] - b[0] < 40, "retain regional window, not full 360 degrees");
+  assert.ok(b[1] <= 35 && b[3] >= 55);
+});
+
+test("continuous 360-degree panning preserves equivalent small regional windows", () => {
+  const view = { west: 25, east: 42, south: 10, north: 30 };
+  const expected = spatialViewportBounds(view);
+  assert.ok(expected[2] - expected[0] < 25);
+  assert.deepEqual(spatialViewportBounds({ ...view, west: 385, east: 402 }), expected);
+  assert.deepEqual(spatialViewportBounds({ ...view, west: -335, east: -318 }), expected);
+  assert.deepEqual(spatialViewportBounds({ ...view, west: 745, east: 762 }), expected);
+});
+
+test("actual antimeridian crossing still uses safe full-world coverage", () => {
+  assert.deepEqual(
+    spatialViewportBounds({ west: 172, east: 188, south: 15, north: 35 }),
+    [-180, -85.0511287798, 180, 85.0511287798],
+  );
+});
