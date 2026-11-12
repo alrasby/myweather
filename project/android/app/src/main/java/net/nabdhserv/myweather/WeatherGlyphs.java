@@ -28,9 +28,10 @@ public final class WeatherGlyphs {
     }
 
     private static void draw(Canvas canvas, String kind, boolean dark, int step) {
-        int cloud = dark ? Color.parseColor("#F4F8FC") : Color.parseColor("#4C6780");
-        int drop = dark ? Color.parseColor("#9ECBFF") : Color.parseColor("#2F7FBF");
-        int snow = dark ? Color.parseColor("#F7FBFF") : Color.parseColor("#7FA4C4");
+        // Weather icons retain real condition colors, never adaptive text tint.
+        int cloud = Color.parseColor("#78ACCE");
+        int drop = Color.parseColor("#2799E0");
+        int snow = Color.parseColor("#EDF8FF");
         if ("sun".equals(kind)) {
             sun(canvas, 24f, 24f, 8.6f, step * 18f);
             return;
@@ -101,6 +102,10 @@ public final class WeatherGlyphs {
         canvas.drawCircle(cx, cy - 3f * sc, 8f * sc, p);
         canvas.drawCircle(cx + 8f * sc, cy + 1.2f * sc, 6.4f * sc, p);
         canvas.drawRoundRect(cx - 13f * sc, cy, cx + 14f * sc, cy + 8.5f * sc, 5f * sc, 5f * sc, p);
+        Paint shine = paint(Color.parseColor("#C6E4F3"));
+        shine.setAlpha(176);
+        canvas.drawArc(cx - 6f * sc, cy - 8f * sc, cx + 7f * sc, cy + 5f * sc,
+            198, 88, false, shine);
     }
 
     private static void drops(Canvas canvas, int step, int color) {
