@@ -147,16 +147,6 @@
             android:gravity="center_vertical"
             android:layout_marginBottom="6dp">
             <TextView
-                android:id="@+id/tintAdaptive"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="5dp"
-                android:paddingTop="12dp"
-                android:paddingBottom="12dp"
-                android:gravity="center"
-                android:textSize="12sp" />
-            <TextView
                 android:id="@+id/tintWhite"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -233,6 +223,52 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+
+        <TextView
+            android:id="@+id/labelTextTint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="14dp"
+            android:paddingBottom="6dp"
+            android:textColor="#1C1C1E"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+            <TextView
+                android:id="@+id/textAdaptive"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="5dp"
+                android:padding="12dp"
+                android:gravity="center"
+                android:background="@drawable/widget_chip"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/textWhite"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="5dp"
+                android:padding="12dp"
+                android:gravity="center"
+                android:background="@drawable/widget_chip"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/textBlack"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:padding="12dp"
+                android:gravity="center"
+                android:background="@drawable/widget_chip"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/labelTone"
