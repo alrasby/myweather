@@ -999,8 +999,12 @@ export class ModelField {
     // While real rain/snow fallback is active, never show partial ECMWF
     // precipitation simultaneously. During playback, require full 3-layer
     // frames to avoid jumping between incompatible source products.
-    const coldCloudPreview = !this.playbackActive && this.firstCompleteReadyMs === null && this.lastDisplayedStep === null;
-    const preview = (!fallbackForHour || coldCloudPreview) && !cooldown && plan.goals.size === 0 && requested &&
+    // Do not expose a partial ECMWF cloud tile over an Open-Meteo
+    // fallback: they are different model products and the overlap shows
+    // as hard rectangular cloud patches when the viewport is moving.
+    // An early ECMWF cloud preview remains possible when there is no
+    // competing source-backed fallback currently on the screen.
+    const preview = !fallbackForHour && !cooldown && plan.goals.size === 0 && requested &&
       !requested.ready && requested.previewReady ? requested : null;
     this.holdingPreviousFrame = plan.holding && plan.anchor !== null && !preview;
     for (const [step, frame] of this.frames) {
