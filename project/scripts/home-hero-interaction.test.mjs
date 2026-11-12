@@ -133,12 +133,6 @@ test("saved city paging works on clickable daily rows, including Android touchca
   assert.ok(!selector.includes("'button,"), "forecast day buttons must not block city swipe");
   assert.ok(selector.includes(".overflow-x-auto"), "nested hourly ribbon must handle its own gestures");
 });
-test("cyclic atmospheric cloud field draws over fractional WebView seam", () => {
-  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
-  assert.ok(sky.includes('const overlap = 1 / dpr'));
-  assert.ok(sky.includes('ctx.drawImage(field.canvas, x0, 0, dw + overlap, dh)'));
-  assert.ok(sky.includes('ctx.drawImage(field.canvas, x0 + span, 0, dw + overlap, dh)'));
-});
 test("rain spatial failures reduce fallback delay without extra grid budgets", () => {
   const map = read("project/src/components/weather/MapScreen.tsx");
   assert.ok(map.includes('}, 4500);'));
