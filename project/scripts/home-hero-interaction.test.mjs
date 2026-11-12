@@ -71,3 +71,21 @@ test("city navigation and settings controls retain UX without redesign", () => {
   }
   assert.ok(settings.includes('aria-label={title}'), "switches need accessible names");
 });
+
+test("global cloud layers fade with home scroll without layout changes or JS animation loops", () => {
+  const home = read("project/src/components/weather/HomeScreen.tsx");
+  const css = read("project/src/styles.css");
+  assert.ok(home.includes("onScroll={syncSkyScroll}"));
+  assert.ok(home.includes('top / 155'));
+  assert.ok(home.includes('t * t * (3 - 2 * t)'));
+  assert.ok(home.includes('style.setProperty("--wx-sky-cloud-opacity"'));
+  assert.ok(home.includes('style.removeProperty("--wx-sky-cloud-opacity"'));
+  assert.ok(css.includes("opacity: var(--wx-sky-cloud-opacity, 1)"));
+});
+
+test("visible version stays 1.0.0 while upgrade-safe Android code remains 55", () => {
+  const gradle = read("project/android/app/build.gradle");
+  const workflow = read(".github/workflows/android-ci.yml");
+  assert.match(gradle, /versionCode 55\\s+versionName "1\\.0\\.0"/);
+  assert.ok(workflow.includes("versionCode='55' versionName='1.0.0'"));
+});
