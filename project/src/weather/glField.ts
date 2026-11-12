@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { nearestWorldLongitude } from "@/weather/windProjection";
+import { nearestWorldLongitude, windScreenStepDegrees } from "@/weather/windProjection";
 import type { LiveCyclone } from "@/weather/cyclones";
 import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid";
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
@@ -1265,17 +1265,11 @@ export class FieldEngine {
     const spd = Math.max(sample.spd, mag);
     if (spd < 0.5 || mag < 0.3) return null;
     const zoom = map.getZoom();
-    const pxPerDeg = (256 * 2 ** zoom) / 360;
     const zoomScale = zoom < 3 ? 0.62 : zoom < 5 ? 0.84 : zoom < 7 ? 1 : 1.08;
     const pxPerSec = Math.min(34, Math.max(10, 8 + spd * 0.28)) * zoomScale;
-    // Web Mercator stretches latitude at high latitudes by 1/cos(lat).
-    // Scale north/south geographic motion by cos, so the wind's VISUAL
-    // screen speed stays consistent from Oman to northern Norway/Russia.
-    // East/west pixels must not be multiplied by 1/cos twice.
-    const cos = Math.max(0.22, Math.cos((lat * Math.PI) / 180));
-    const deg = (pxPerSec * dt * cos) / Math.max(8, pxPerDeg);
-    let nlat = lat + (sample.v / mag) * deg;
-    let nlon = lon + ((sample.u / mag) * deg) / cos;
+    const delta = windScreenStepDegrees(lat, zoom, pxPerSec, dt);
+    let nlat = lat + (sample.v / mag) * delta.latitude;
+    let nlon = lon + (sample.u / mag) * delta.longitude;
     if (nlat > 84) nlat = 84;
     if (nlat < -78) nlat = -78;
     if (nlon > 180) nlon -= 360;
