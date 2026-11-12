@@ -97,6 +97,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const imageryRef = useRef<TileLayer | null>(null);
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
+  const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
   const engineRef = useRef<FieldEngine | null>(null);
@@ -187,8 +188,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
+        modelRef.current?.setSourceBackedFallback(engine.hasSourceRain());
         modelRef.current?.setPlaybackActive(engine.playing);
         modelRef.current?.sync(info.timeMs);
+        // While the next spatial hour decodes, fetch ONE lightweight genuine
+        // world fallback only if the user is actively waiting for playback.
+        if (engine.playing && info.playbackWaitingMs >= 1800) rainPlaybackQuickRef.current?.();
       }
       const now = performance.now();
       if (diagnosticsOpenRef.current && now - diagnosticsTickRef.current > 1000) {
@@ -767,6 +772,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     };
     rainFallbackRefreshRef.current = scheduleDetailedFallback;
     rainFallbackSuspendRef.current = suspendDetailedFallback;
+    const preparePlaybackFallback = () => {
+      if (dead || saver || quickWorldReady || quickWorldPending) return;
+      quickWorldPending = true;
+      void loadWorld().finally(() => { quickWorldPending = false; });
+    };
+    rainPlaybackQuickRef.current = preparePlaybackFallback;
 
     // Initially prioritize three actual ECMWF spatial layers. The
     // existing generic grid covers the fallback until a sustained outage.
@@ -781,6 +792,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     return () => {
       dead = true;
       if (rainFallbackRefreshRef.current === scheduleDetailedFallback) rainFallbackRefreshRef.current = null;
+      if (rainPlaybackQuickRef.current === preparePlaybackFallback) rainPlaybackQuickRef.current = null;
       if (rainFallbackSuspendRef.current === suspendDetailedFallback) rainFallbackSuspendRef.current = null;
       worldAc.abort();
       fineWorldAc?.abort();
