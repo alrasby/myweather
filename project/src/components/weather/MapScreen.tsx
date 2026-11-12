@@ -129,6 +129,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const [pilotKey, setPilotKey] = useState("");
   const [pilotResult, setPilotResult] = useState<MapTilerPilotCatalog | null>(null);
   const [pilotStatus, setPilotStatus] = useState("not-run");
+  const [copyStatus, setCopyStatus] = useState("");
   const pilotRequestRef = useRef<AbortController | null>(null);
   useEffect(() => () => pilotRequestRef.current?.abort(), []);
   const checkPilot = () => {
@@ -1087,6 +1088,26 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "إصدار ECMWF الثابت" : "Pinned ECMWF model run"}: {weatherDiagnostics?.modelRunPinned ? "OK" : "capture fallback"}
             {weatherDiagnostics?.modelRunReferenceTime ? ` · ${weatherDiagnostics.modelRunReferenceTime}` : ""}
           </p>
+          <button type="button" className="my-1 rounded border border-white/35 px-2 py-1"
+            onClick={() => {
+              const report = modelRef.current?.diagnostics();
+              if (!report || !navigator.clipboard?.writeText) {
+                setCopyStatus(lang === "ar" ? "النسخ غير متاح" : "Clipboard unavailable");
+                return;
+              }
+              void navigator.clipboard.writeText(JSON.stringify({
+                capturedAt: new Date().toISOString(),
+                layer: "ECMWF rain/cloud/snow",
+                dataSaver: prefs.dataSaver,
+                ...report,
+              }, null, 2)).then(
+                () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
+                () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
+              );
+            }}>
+            {lang === "ar" ? "نسخ تقرير الأداء الفعلي" : "Copy actual performance report"}
+          </button>
+          {copyStatus ? <p role="status">{copyStatus}</p> : null}
           <p>{lang === "ar" ? "استعلامات حجم الملف المشتركة" : "Shared size probes"}: {weatherDiagnostics?.sharedFileProbes ?? 0}
             {" · "}{lang === "ar" ? "استعلامات نشطة" : "active"}: {weatherDiagnostics?.activeFileProbes ?? 0}
           </p>
