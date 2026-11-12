@@ -462,6 +462,7 @@ export class ModelField {
   private orderKey = "";
   private visible = false;
   private playbackActive = false;
+  private sourceBackedFallback = false;
   private lastSyncAt = 0;
   // Do not re-evaluate the same ECMWF tile scheduler every 50 ms while only
   // the forecast blend opacity changes. Tile load/error events and hour
@@ -573,7 +574,13 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    return canAdvanceSpatialTime(i, ready, blocked, this.loading);
+    return canAdvanceSpatialTime(i, ready, blocked, this.loading, this.sourceBackedFallback);
+  }
+
+  setSourceBackedFallback(available: boolean) {
+    if (this.sourceBackedFallback === available) return;
+    this.sourceBackedFallback = available;
+    if (this.visible) this.applyOpacity();
   }
 
   /** A deliberately hidden, read-only map diagnostic for comparing independent
@@ -969,7 +976,11 @@ export class ModelField {
     const readySteps = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) readySteps.add(step);
     const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
-    const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
+    // An actual fallback has its own time-aligned precipitation field.
+    // Never hold an obsolete ECMWF hour over a new fallback forecast hour.
+    const plan = this.sourceBackedFallback && !readySteps.has(this.base)
+      ? { goals: new Map<number, number>(), anchor: null, holding: false }
+      : selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
     // A first completed cloud viewport should not be held hostage by slow
     // precipitation/snowfall .om decoding. Only source-backed, fully loaded
     // individual layers are shown; partially loaded image tiles remain hidden.
@@ -1036,11 +1047,12 @@ export class ModelField {
         layer.setOpacity?.(allowed ? value : 0);
       }
     }
-    const visibleOpacity = Array.from(this.frames.values()).reduce(
-      (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
-      0,
-    ) + (preview ? 1 : 0);
-    const nextVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
+    // Cloud-only previews must not hide the real precipitation/snow fallback.
+    // A complete ECMWF frame is required before turning it off.
+    const completedOpacity = Array.from(this.frames.values()).reduce(
+      (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0), 0,
+    );
+    const nextVisible = this.diagnosticMode !== "fallback" && completedOpacity >= 0.88;
     if (spatialCoverageChanged(this.spatialVisible, nextVisible)) {
       this.spatialVisible = nextVisible;
       // Visibility changes require switching the fallback renderer. Repeated
