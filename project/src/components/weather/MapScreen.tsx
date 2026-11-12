@@ -1098,6 +1098,15 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 {" · n="}{weatherDiagnostics?.performance.tilePipeline[i]?.count ?? 0}
               </p>
             ))}
+            <p>{lang === "ar" ? "زمن تهيئة النموذج" : "Model startup"}: 
+              {" metadata "}{weatherDiagnostics?.startupMs.metadata?.toFixed(0) ?? "—"}{"ms"}
+              {" · "}{lang === "ar" ? "أول غيوم جاهزة" : "first clouds ready"}{" "}{weatherDiagnostics?.startupMs.firstCloudReady?.toFixed(0) ?? "—"}{"ms"}
+              {" · "}{lang === "ar" ? "أول إطار مكتمل" : "first complete frame"}{" "}{weatherDiagnostics?.startupMs.firstCompleteReady?.toFixed(0) ?? "—"}{"ms"}
+            </p>
+            <p>{"429/Retry-After "}{weatherDiagnostics?.rateLimitedResponses ?? 0}
+              {" · "}{lang === "ar" ? "باقي مهلة المزود" : "Provider cooldown"}{" "}
+              {Math.ceil((weatherDiagnostics?.rateLimitRemainingMs ?? 0) / 1000)}{"s"}
+            </p>
             <p>{"native errors "}{weatherDiagnostics?.performance.nativeFailures ?? 0}
               {" · canceled "}{weatherDiagnostics?.performance.nativeCancellations ?? 0}
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
