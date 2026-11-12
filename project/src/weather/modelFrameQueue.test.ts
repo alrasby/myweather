@@ -111,3 +111,9 @@ test("playback never starts more than one unready frame while the next is loadin
   const plan = planSpatialRequests(8, 32, new Set([8]), new Set([9]), new Set(), true, 5000, true);
   assert.deepEqual(plan, { cancel: [], start: null });
 });
+
+test("a real precipitation fallback may advance time while ECMWF decodes without mislabeling a held frame", () => {
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), true), true);
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), false), false);
+  assert.equal(canAdvanceSpatialTime(9, new Set([9]), new Set(), new Set([10]), false), true);
+});
