@@ -209,7 +209,8 @@ test("regression: map does not mount PR81 duplicate safety grids or defer spatia
 test("regression: fallback and ECMWF are switched atomically, not alpha-composited into rectangular artifacts", () => {
   const model = read("project/src/weather/modelField.ts");
   assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
-  assert.ok(model.includes("!fallbackForHour && !cooldown"));
+  assert.ok(model.includes("(!fallbackForHour || coldCloudPreview) && !cooldown"), "keep genuine cold-start ECMWF clouds available");
+  assert.ok(model.includes("(!fallbackForHour || idx === 0)"), "never duplicate fallback rain/snow with partial ECMWF precipitation");
   assert.ok(model.includes("fallbackForHour || returningToReadyModel ? goal"));
   assert.ok(model.includes("!fallbackForHour && this.diagnosticMode"));
 });
