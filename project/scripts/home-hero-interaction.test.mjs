@@ -72,15 +72,24 @@ test("city navigation and settings controls retain UX without redesign", () => {
   assert.ok(settings.includes('aria-label={title}'), "switches need accessible names");
 });
 
-test("global cloud layers fade with home scroll without layout changes or JS animation loops", () => {
+test("global fixed cloud canvas is absent while the weather hero remains scroll-bound", () => {
+  const app = read("project/src/components/weather/WeatherApp.tsx");
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  const home = read("project/src/components/weather/HomeScreen.tsx");
+  assert.ok(app.includes("showClouds={false}"), "remove fixed cloud plane behind forecast cards");
+  assert.ok(sky.includes("showClouds ? <CloudField"), "cloud layer is conditionally mounted");
+  assert.ok(home.includes("<HeroClouds"), "keep procedural weather only inside scrollable hero");
+  assert.ok(!home.includes("onScroll={syncSkyScroll}"), "remove ineffective DOM opacity updates");
+});
+
+test("15-day card receives subtle polish without changing its structure or baseline palette", () => {
   const home = read("project/src/components/weather/HomeScreen.tsx");
   const css = read("project/src/styles.css");
-  assert.ok(home.includes("onScroll={syncSkyScroll}"));
-  assert.ok(home.includes('top / 155'));
-  assert.ok(home.includes('t * t * (3 - 2 * t)'));
-  assert.ok(home.includes('style.setProperty("--wx-sky-cloud-opacity"'));
-  assert.ok(home.includes('style.removeProperty("--wx-sky-cloud-opacity"'));
-  assert.ok(css.includes("opacity: var(--wx-sky-cloud-opacity, 1)"));
+  assert.ok(home.includes("wx-daily-card") && home.includes("wx-daily-row"));
+  assert.ok(home.includes("wx-daily-reveal"));
+  assert.ok(css.includes("@keyframes wx-day-reveal") && css.includes("prefers-reduced-motion: reduce"));
+  assert.ok(css.includes(".wx-daily-card .wx-daily-row"));
+  assert.ok(css.includes("backdrop-filter: blur(22px) saturate(1.45)"));
 });
 
 test("visible version stays 1.0.0 while upgrade-safe Android code remains 55", () => {
@@ -98,6 +107,7 @@ test("Android Auto weather uses trusted Car App templates and the existing forec
   assert.ok(gradle.includes('androidx.car.app:app:1.7.0'));
   assert.ok(gradle.includes('androidx.car.app:app-projected:1.7.0'));
   assert.ok(manifest.includes('androidx.car.app.category.WEATHER'));
+  assert.ok(manifest.includes('android:value="7"'));
   assert.ok(manifest.includes('com.google.android.gms.car.application'));
   assert.ok(descriptor.includes('<uses name="template" />'));
   assert.ok(service.includes('new ListTemplate.Builder()'));
