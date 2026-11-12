@@ -40,7 +40,7 @@ test("invalid or nonfinite viewports fail safe to global model", () => {
   assert.deepEqual(bounds.slice(0,1), [-180]);
   assert.equal(bounds[2], 180);
 });
-\n
+
 test("mere padding beyond the antimeridian does not trigger a global ECMWF decode", () => {
   const b = spatialViewportBounds({ west: 157, east: 178, south: 35, north: 55 });
   assert.ok(b[0] > 140 && b[0] < 157);

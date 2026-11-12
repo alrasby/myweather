@@ -47,7 +47,7 @@ test("cancelling during native HTTP discards its late response", async () => {
   finish("obsolete");
   await assert.rejects(job, /spatial-request-aborted/);
 });
-\n
+
 test("only actual ECMWF cloud and rain files receive native queue priority", () => {
   assert.equal(spatialNativePriority("https://s3.example/data/cloud_cover/2026.om"), 1);
   assert.equal(spatialNativePriority("https://s3.example/data/precipitation/2026.om"), 1);
