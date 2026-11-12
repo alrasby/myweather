@@ -80,7 +80,7 @@ test("both interactive cloud layers fade away before hourly cards scroll beneath
   assert.ok(sky.includes("heroWeather ? <HeroClouds"), "retain adaptive local clouds and precipitation in background");
   assert.ok(!home.includes("<HeroClouds"), "no cloud canvas on the scrolling hero");
   assert.ok(home.includes("onScroll={syncCloudsWithScroll}"), "tie both cloud layers to the real Home scroller");
-  assert.ok(home.includes("top / 96"), "fully fade the clouds before cards reach the sky band");
+  assert.ok(home.includes("top / 200"), "fully fade the clouds before cards reach the sky band");
   assert.ok(home.includes("t * t * (3 - 2 * t)"), "use smoothstep, avoiding abrupt opacity cuts");
   assert.ok(home.includes('style.removeProperty("--wx-cloud-scroll-opacity")'), "reset cloud visibility on leaving Home");
   assert.ok(css.split(".sky-clouds {")[1]?.split("}")[0]?.includes("opacity: var(--wx-cloud-scroll-opacity, 1)"));
