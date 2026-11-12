@@ -42,6 +42,13 @@ export function canReuseSpatialWindow(previous: SpatialBounds | null, next: Spat
   const oldWidth = previous[2] - previous[0];
   const nextWidth = next[2] - next[0];
   if (oldWidth >= 300 && nextWidth < 300) return false;
-  return previous[0] <= next[0] && previous[1] <= next[1] &&
-    previous[2] >= next[2] && previous[3] >= next[3];
+  if (oldWidth >= 300 || nextWidth >= 300) return oldWidth >= 300 && nextWidth >= 300;
+  // The requested rectangle already contains 10% padding around the raw
+  // viewport. Allow consuming at most HALF of that padding without forcing
+  // a new .om crop on each 1-3px movement, but always retain a visible-core
+  // safety margin. A long fling or significant zoom still triggers refresh.
+  const lonSlack = nextWidth / 24;
+  const latSlack = (next[3] - next[1]) / 24;
+  return previous[0] <= next[0] + lonSlack && previous[1] <= next[1] + latSlack &&
+    previous[2] >= next[2] - lonSlack && previous[3] >= next[3] - latSlack;
 }
