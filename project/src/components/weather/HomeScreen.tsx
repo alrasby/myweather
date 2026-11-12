@@ -1,8 +1,7 @@
 import { ChevronDown, MapPin, SunMedium, Sunrise, Sunset, Thermometer, Umbrella, Wind, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DetailCards, QiblaCard } from "@/components/weather/SkyCards";
-import { HeroClouds } from "@/components/weather/SkyBackdrop";
-import { citySwipeTarget } from "@/weather/citySwipe";
+import { citySwipeOrder, citySwipeTarget } from "@/weather/citySwipe";
 import { useDeviceCompass } from "@/weather/deviceHeading";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
@@ -31,6 +30,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const places = useWeather((s) => s.places);
   const activeId = useWeather((s) => s.activeId);
   const peek = useWeather((s) => s.peek);
+  const here = useWeather((s) => s.here);
   const prefs = useWeather((s) => s.prefs);
   const bundle = useWeather((s) => s.bundle);
   const loading = useWeather((s) => s.loading);
@@ -44,6 +44,19 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
   const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
+  // A GPS fix remains a preview, not a saved city. Include it in gesture
+  // navigation when distinct from saved locations, without modifying places.
+  const gpsPreview = here && !places.some((p) => {
+    const dLat = (p.lat - here.lat) * 111;
+    const dLon = (p.lon - here.lon) * 111 * Math.cos((p.lat + here.lat) * Math.PI / 360);
+    return p.id === here.id || Math.hypot(dLat, dLon) < 0.35;
+  }) ? here : null;
+  const swipeIds = citySwipeOrder(places.map((p) => p.id), gpsPreview?.id, peek?.id);
+  const navigateSwipe = (target: string) => {
+    if (places.some((p) => p.id === target)) setActive(target);
+    else if (gpsPreview?.id === target) locatePlace(gpsPreview);
+    else if (peek?.id === target) locatePlace(peek);
+  };
   // Do not silently treat a GPS fix saved in a previous session as current.
   const compassPlace = qiblaFix ?? place;
   // Declination must use the phone's measured position, not an unrelated selected city.
@@ -220,10 +233,10 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         const dx = gesture && touch ? touch.clientX - gesture.x : 0;
         const dy = gesture && touch ? touch.clientY - gesture.y : 0;
         const target = gesture?.eligible
-          ? citySwipeTarget(places.map((p) => p.id), activeId, dx, dy, lang === "ar")
+          ? citySwipeTarget(swipeIds, activeId, dx, dy, lang === "ar")
           : null;
         if (target) {
-          setActive(target); // Saves last-viewed location; never adds cities.
+          navigateSwipe(target); // Changes view only; never adds GPS to saved cities.
         } else if (pull.current > 0 && dy > 64 && Math.abs(dy) > Math.abs(dx) * 1.2) {
           hideAlertsAfterPull();
           refresh();
@@ -237,10 +250,10 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         const gesture = swipeStart.current;
         const last = swipeLast.current;
         const target = gesture?.eligible && last
-          ? citySwipeTarget(places.map((p) => p.id), activeId,
+          ? citySwipeTarget(swipeIds, activeId,
               last.x - gesture.x, last.y - gesture.y, lang === "ar")
           : null;
-        if (target) setActive(target);
+        if (target) navigateSwipe(target);
         swipeStart.current = null;
         swipeLast.current = null;
         pull.current = 0;
@@ -308,10 +321,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           ) : null}
 
           <div className="temp-under-orb relative z-[1] px-1 text-on-sky" data-sky-hero="">
-            {bundle.placeId === place.id ? (
-              <HeroClouds day={bundle.current.isDay} code={bundle.current.code}
-                cover={bundle.current.cloud} wind={bundle.current.wind} direction={bundle.current.dir} />
-            ) : null}
             <div className="relative z-[1]">
             <div className="flex items-end justify-between gap-3">
               <p className="text-5xl font-medium leading-none tracking-tight">{formatTemp(bundle.current.temp, prefs.temp, lang)}</p>
