@@ -86,6 +86,6 @@ test("global cloud layers fade with home scroll without layout changes or JS ani
 test("visible version stays 1.0.0 while upgrade-safe Android code remains 55", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.match(gradle, /versionCode 55\\s+versionName "1\\.0\\.0"/);
+  assert.ok(gradle.includes('versionCode 55') && gradle.includes('versionName "1.0.0"'));
   assert.ok(workflow.includes("versionCode='55' versionName='1.0.0'"));
 });
