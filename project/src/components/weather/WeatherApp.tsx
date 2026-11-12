@@ -162,7 +162,7 @@ export function WeatherApp() {
   }, [tab]);
 
   const showMap = tab === "map";
-  const code = bundle?.current.code ?? 1;
+  const code = bundle?.placeId === place.id ? bundle.current.code : 1;
 
   return (
     <div className={`relative flex h-dvh flex-col overflow-hidden ${light ? "" : "is-night"}`}>
