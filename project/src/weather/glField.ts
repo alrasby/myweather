@@ -306,6 +306,11 @@ export class FieldEngine {
   private last = 0;
   private zoomSeen = -1;
   private dpr = 1;
+  private mapGestures = 0;
+  private onMapGestureStart = () => { this.mapGestures++; };
+  private onMapGestureEnd = () => {
+    this.mapGestures = Math.max(0, this.mapGestures - 1);
+  };
   private onMove = () => {
     this.drawField();
   };
@@ -362,6 +367,10 @@ export class FieldEngine {
     }
     // requestAnimationFrame already redraws during gestures. Avoid redundant
     // synchronous WebGL draws on every Leaflet move/zoom event.
+    map.on("movestart", this.onMapGestureStart);
+    map.on("zoomstart", this.onMapGestureStart);
+    map.on("moveend", this.onMapGestureEnd);
+    map.on("zoomend", this.onMapGestureEnd);
     map.on("moveend", this.onMove);
     map.on("zoomend", this.onZoom);
     map.on("viewreset", this.onMove);
@@ -529,6 +538,11 @@ export class FieldEngine {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.map?.off("movestart", this.onMapGestureStart);
+    this.map?.off("zoomstart", this.onMapGestureStart);
+    this.map?.off("moveend", this.onMapGestureEnd);
+    this.map?.off("zoomend", this.onMapGestureEnd);
+    this.mapGestures = 0;
     this.map?.off("moveend", this.onMove);
     this.map?.off("zoomend", this.onZoom);
     this.map?.off("viewreset", this.onMove);
@@ -769,6 +783,15 @@ export class FieldEngine {
   private frame = (now: number) => {
     this.raf = 0;
     if (this.dead || this.paused) return;
+    // Wind uses a costly geo-projected particle canvas + shader. During
+    // moving/zooming Leaflet is also compositing tiles. ~30 Hz is sufficient
+    // for motion and leaves the other animation frames to the map renderer.
+    // last is intentionally NOT advanced on skipped frames: the next dt
+    // accounts for elapsed time and wind speed remains unchanged.
+    if (this.kind === 0 && this.mapGestures > 0 && now - this.last < 32) {
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     this.whirl += dt;
