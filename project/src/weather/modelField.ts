@@ -3,7 +3,7 @@ import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariable
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
-import { SpatialTileReveal, type SpatialTileNode } from "@/weather/spatialTileReveal";
+import { SpatialTileReveal, canStageSpatialRefresh, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
@@ -985,10 +985,16 @@ export class ModelField {
       this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+    const rasterView = (): SpatialRasterView => {
+      const b = map.getBounds();
+      return { west: b.getWest(), east: b.getEast(), south: b.getSouth(),
+        north: b.getNorth(), zoom: map.getZoom() };
+    };
     for (const [index, layer] of made.entries()) {
       const tileStart = new WeakMap<object, number>();
       const tileGate = frame.tileGates[index]!;
       let refreshBatch = false;
+      let lastCompletedView: SpatialRasterView | null = null;
       layer.on("tileloadstart", (event) => {
         if (!alive() || !event?.tile) return;
         tileStart.set(event.tile, performance.now());
@@ -1004,7 +1010,12 @@ export class ModelField {
       // viewport tile queue has settled. Only the latter may replace fallback.
       layer.on("loading", () => {
         if (!alive()) return;
-        refreshBatch = frame.ready || frame.previewReady;
+        // Staging helps only when the old image still covers the same zoom.
+        // A large move or pinch invalidates previous tile coverage; show new
+        // tiles as they decode instead of hiding the screen for 8+ seconds.
+        tileGate.release();
+        refreshBatch = (frame.ready || frame.previewReady) &&
+          canStageSpatialRefresh(lastCompletedView, rasterView());
         frame.loaded[index] = false;
         frame.layerStartedAt[index] = Date.now();
         frame.layerFirstTileAt[index] = 0;
@@ -1021,6 +1032,7 @@ export class ModelField {
         // per tile or switch to an incompatible coarse model mid-refresh.
         tileGate.release();
         refreshBatch = false;
+        if (frame.tileCounts[index]! > 0) lastCompletedView = rasterView();
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
         refresh();

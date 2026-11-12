@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { modelTileFrameReady, modelVariablesReady, spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, SPATIAL_LAYER_COUNT } from "./modelTileReadiness.ts";
-import { SpatialTileReveal } from "./spatialTileReveal.ts";
+import { SpatialTileReveal, canStageSpatialRefresh } from "./spatialTileReveal.ts";
 
 test("cloud, rain and snowfall must all load successfully", () => {
   assert.equal(SPATIAL_LAYER_COUNT, 3);
@@ -88,4 +88,15 @@ test("viewport tile batch becomes visible atomically, preserving original styles
   assert.equal(gate.pending, 0);
   gate.hold(undefined);
   gate.discard(undefined);
+});
+
+test("batch reveal is allowed only when the previous raster still covers the new view", () => {
+  const a = { west: 8, east: 38, south: 48, north: 68, zoom: 6 };
+  assert.equal(canStageSpatialRefresh(null, a), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, west: 10, east: 40 }), true);
+  assert.equal(canStageSpatialRefresh(a, { ...a, west: 18, east: 48 }), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, zoom: 7 }), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, south: 58, north: 78 }), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, west: 368, east: 398 }), true);
+  assert.equal(canStageSpatialRefresh(a, { ...a, east: NaN }), false);
 });

@@ -320,6 +320,10 @@ test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite
   assert.ok(src.includes('tileGate.hold(event.tile as SpatialTileNode)'));
   assert.ok(src.includes('layer.on("load", () => {') && src.includes('tileGate.release()'));
   assert.ok(src.includes('layer.on("tileunload", (event)'));
+  assert.ok(src.includes("canStageSpatialRefresh(lastCompletedView, rasterView())"),
+    "stage only same-zoom small-area updates; show new pixels immediately on large pans");
+  assert.ok(src.includes("tileGate.release();"),
+    "previous held tiles cannot survive an invalidated viewport");
   assert.ok(src.includes('map.on("move", onMove)'));
   assert.ok(src.includes('significantSpatialMove(origin,'));
   assert.ok(queue.includes("const cancel = deferred ? []"));
