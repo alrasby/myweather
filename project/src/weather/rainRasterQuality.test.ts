@@ -10,7 +10,7 @@ test("coarse global rain stays hidden when a cell expands to a huge rectangle", 
 });
 test("regional source-backed rain is still usable at practical zoom", () => {
   assert.equal(usablePrecipitationGrid(20, 70, 6), true);
-  assert.equal(usablePrecipitationGrid(20, 70, 8), false);
+  assert.equal(usablePrecipitationGrid(20, 70, 9), false); // ~104px per cell
 });
 test("unavailable or malformed grids never turn into fake weather", () => {
   assert.equal(usablePrecipitationGrid(360, 0, 4), false);
