@@ -194,3 +194,30 @@ test("a missing rain grid uses a stable forecast time reference, never Date.now 
   assert.ok(helper.includes("rainClockWithoutGrid(startMs: number, hour: number)"));
   assert.ok(engine.includes('this.global && !this.global.id.startsWith("est|")'));
 });
+
+test("regression: map does not mount PR81 duplicate safety grids or defer spatial frames during dragging", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const model = read("project/src/weather/modelField.ts");
+  const wind = read("project/src/weather/glField.ts");
+  assert.ok(map.includes("const underlay = L.tileLayer(imageryUrl"));
+  assert.ok(!map.includes("underlay4") && !map.includes("underlay5"));
+  assert.ok(!model.includes("canReuseSpatialWindow(this.decodeWindow"), "never reuse a stale OM decode window");
+  assert.ok(!model.includes("mapInteractions > 0"), "do not freeze frame scheduler after unmatched Leaflet events");
+  assert.ok(!wind.includes("now - this.last < 32"), "never throttle wind by incorrectly skipping map animation frames");
+});
+
+test("regression: fallback and ECMWF are switched atomically, not alpha-composited into rectangular artifacts", () => {
+  const model = read("project/src/weather/modelField.ts");
+  assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
+  assert.ok(model.includes("!fallbackForHour && !cooldown"));
+  assert.ok(model.includes("fallbackForHour || returningToReadyModel ? goal"));
+  assert.ok(model.includes("!fallbackForHour && this.diagnosticMode"));
+});
+
+test("regression: wind particles reproject to nearest world and reset trails at pan start", () => {
+  const wind = read("project/src/weather/glField.ts");
+  assert.ok(wind.includes("nearestWorldLongitude(lon, map.getCenter().lng)"));
+  assert.ok(wind.includes('map.on("movestart", this.onMoveStart)'));
+  assert.ok(wind.includes('this.map?.off("movestart", this.onMoveStart)'));
+  assert.ok(wind.includes("for (const p of this.particles) p.trail.length = 0"));
+});
