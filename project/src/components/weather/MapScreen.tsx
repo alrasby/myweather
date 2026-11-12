@@ -10,6 +10,7 @@ import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } 
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
 import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -321,10 +322,40 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
-        L.tileLayer(
+        const labelTiles = L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
-        ).addTo(map);
+          {
+            maxZoom: 16, opacity: 0.92, pane: "wx-labels",
+            // Places are supplemental. Avoid competing with real satellite
+            // imagery during a fast pan or fetching intermediate pinch levels.
+            updateWhenIdle: true, updateWhenZooming: false,
+            updateInterval: 250, keepBuffer: 2,
+          },
+        );
+        manageRasterZoomLabels(map, labelTiles, labels, {
+          setTimeout: (fn, delay) => window.setTimeout(fn, delay),
+          clearTimeout: (handle) => window.clearTimeout(handle),
+          requestAnimationFrame: (fn) => window.requestAnimationFrame(fn),
+          cancelAnimationFrame: (handle) => window.cancelAnimationFrame(handle),
+        }, window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+        // Do not fill the initial network connection slots with secondary
+        // labels before satellite imagery has begun arriving. This is a
+        // bounded one-shot defer, never a second imagery layer or a new
+        // background poll. Mount after the first real image tile or 800ms.
+        let labelsMounted = false;
+        const mountLabels = () => {
+          if (labelsMounted) return;
+          labelsMounted = true;
+          window.clearTimeout(labelMountTimer);
+          imagery.off("tileload", mountLabels);
+          labelTiles.addTo(map!);
+        };
+        const labelMountTimer = window.setTimeout(mountLabels, 800);
+        imagery.on("tileload", mountLabels);
+        map.once("unload", () => {
+          window.clearTimeout(labelMountTimer);
+          imagery.off("tileload", mountLabels);
+        });
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
           // Show one coherent model at a time. The earlier permanent overlap
