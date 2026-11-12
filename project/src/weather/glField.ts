@@ -668,8 +668,13 @@ export class FieldEngine {
         if ((!world || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
       }
       if (world) return world;
-      if (this.detail && this.detailFillsView(this.detail)) return this.detail;
-      return this.global ?? this.detail;
+      // The initial global grid may be estimateGrid(). Never sample it as
+      // real precipitation (or let a missing model fabricate rain on a map).
+      // Only a successfully fetched rain/world/view or measured detail
+      // can supply rainfall until the official spatial frame is ready.
+      if (this.detail && this.detailFillsView(this.detail) &&
+          !this.detail.id.startsWith("est|")) return this.detail;
+      return null;
     }
     if (this.detail && this.detailFillsView(this.detail)) return this.detail;
     return this.global ?? this.detail;
