@@ -263,3 +263,13 @@ test("cloud previews remain real ECMWF data and never overlay a mismatched model
   assert.ok(model.includes("completedOpacity >= 0.88"));
   assert.ok(!model.includes("coldCloudPreview"));
 });
+
+test("satellite failures are independently measurable, never mistaken for OM missing weather", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  for (const event of ["tileloadstart", "tileload", "tileerror", "tileabort"]) {
+    assert.ok(map.includes('imagery.on("' + event + '"'), "track Esri " + event);
+  }
+  assert.ok(map.includes("satelliteTiles: basemapTilesRef.current"));
+  assert.ok(map.includes("basemapTilesRef.current.pending = Math.max(0, basemapTilesRef.current.pending - 1)"));
+  assert.ok(map.includes("basemapTilesRef.current.errors"));
+});
