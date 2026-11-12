@@ -139,6 +139,15 @@ function moonAlt(ms: number, lat: number, lon: number): number {
   return Math.asin(Math.max(-1, Math.min(1, sinAlt)));
 }
 
+/** Show the moon in the home sky only while it is above this city's horizon.
+ * Reuses the same lunar coordinates already used for moonrise/set instead of
+ * treating every night as a moonlit night. */
+export function moonAboveHorizon(lat: number, lon: number, now: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(now) ||
+      Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+  return moonAlt(now, lat, lon) > 0;
+}
+
 export function moonRiseSet(lat: number, lon: number, now: number): { rise: number | null; set: number | null } {
   const t0 = now - 3 * 3_600_000;
   let rise: number | null = null;

@@ -354,7 +354,9 @@ function bakeAtmo(kind: VeilKind) {
   for (let y = 0; y < h; y++) {
     const ny = y / (h - 1);
     for (let x = 0; x < w; x++) {
-      const s = sampleAtmo(kind, x / w, ny);
+      // Both horizontal border pixels sample the same periodic longitude,
+      // so a repeated field cannot expose a texture boundary.
+      const s = sampleAtmo(kind, x / (w - 1), ny);
       const i = (y * w + x) * 4;
       d[i] = s.r;
       d[i + 1] = s.g;
@@ -419,7 +421,9 @@ function makeSprites(day: boolean, code: number): CloudSprite[] {
   return layers;
 }
 
-function CloudField({ day, code, cover }: { day: boolean; code: number; cover: number }) {
+function CloudField({ day, code, cover, animate }: {
+  day: boolean; code: number; cover: number; animate: boolean;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const kind = skyKind(code);
   const veil = veilKind(day, code);
@@ -434,6 +438,7 @@ function CloudField({ day, code, cover }: { day: boolean; code: number; cover: n
     const mode = veilKind(day, code);
     const field = mode ? atmoOf(mode) : null;
     const clouds = mode ? [] : makeSprites(day, code);
+    const pattern = field ? ctx.createPattern(field.canvas, "repeat") : null;
     const paint = (now: number) => {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const w = canvas.clientWidth;
@@ -454,17 +459,25 @@ function CloudField({ day, code, cover }: { day: boolean; code: number; cover: n
         /* بعض متصفحات الجوال */
       }
       const t = reduce ? 0 : now / 1000;
-      if (mode && field) {
+      if (mode && field && pattern) {
         const dw = w * 1.42;
         const sceneH = canvas.parentElement?.clientHeight || h;
         const deckDraw = mode.endsWith("cloud") || mode.endsWith("storm");
         const dh = mode.endsWith("partly") ? h / 0.4 : deckDraw ? h : Math.max(sceneH, h);
         const v = w * (mode === "day-partly" ? 0.016 : mode.endsWith("cloud") || mode === "day-storm" ? 0.007 : 0.011);
-        const span = dw;
-        const x0 = -((((t * v) % span) + span) % span);
-        ctx.globalAlpha = 1;
-        ctx.drawImage(field.canvas, x0, 0, dw, dh);
-        ctx.drawImage(field.canvas, x0 + span, 0, dw, dh);
+        const offset = (((t * v) % dw) + dw) % dw;
+        // Paint one continuous repeating texture, not two translucent
+        // drawImages that can leave a vertical gap or a brighter overlap.
+        // Scale and scroll the same cached field without new raster work.
+        const density = heroAtmosphere(code, cover, 0).coverage;
+        ctx.save();
+        ctx.globalAlpha = 0.67 + density * 0.33;
+        const sx = dw / field.canvas.width;
+        ctx.translate(-offset, 0);
+        ctx.scale(sx, dh / field.canvas.height);
+        ctx.fillStyle = pattern;
+        ctx.fillRect(offset / sx, 0, w / sx, field.canvas.height);
+        ctx.restore();
         return;
       }
       const scale = w / 390;
@@ -486,59 +499,61 @@ function CloudField({ day, code, cover }: { day: boolean; code: number; cover: n
         ctx.restore();
       }
     };
-    const loop = (now: number) => {
-      if (!alive) return;
-      paint(now);
-      if (!reduce) raf = window.requestAnimationFrame(loop);
+    // Cloud drift is only a few pixels per second: ~24fps is visually
+    // identical to 60fps here, with far fewer full-width canvas uploads.
+    // In map/settings tabs this backdrop is behind a foreground screen,
+    // so render it once but never compete with ECMWF tile decoding.
+    let timer = 0;
+    const pause = () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      if (timer) window.clearTimeout(timer);
+      raf = 0;
+      timer = 0;
     };
-    raf = window.requestAnimationFrame(loop);
+    const frame = (now: number) => {
+      raf = 0;
+      if (!alive || !animate || document.hidden) return;
+      paint(now);
+      timer = window.setTimeout(() => {
+        timer = 0;
+        if (alive && animate && !document.hidden) raf = window.requestAnimationFrame(frame);
+      }, 25);
+    };
+    const onVisibility = () => {
+      if (document.hidden) pause();
+      else if (animate && !reduce && !raf && !timer) raf = window.requestAnimationFrame(frame);
+    };
+    paint(performance.now());
+    if (animate && !reduce && !document.hidden) raf = window.requestAnimationFrame(frame);
+    document.addEventListener("visibilitychange", onVisibility);
     const ro = new ResizeObserver(() => paint(performance.now()));
     ro.observe(canvas);
     return () => {
       alive = false;
-      window.cancelAnimationFrame(raf);
+      pause();
       ro.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [day, code, cover]);
+  }, [day, code, cover, animate]);
   if (!veil && !(kind === "partly" || (day && kind === "clear" && code > 0))) return null;
   const deck = kind === "cloud" || kind === "storm";
   return <canvas ref={ref} className={`sky-clouds${kind === "partly" ? " is-puffs" : veil ? (deck ? " is-deck" : " is-veil") : ""}`} aria-hidden="true" />;
 }
 
-/** Original, locally rendered cloud bank for the top HOME WEATHER HERO only.
- * Reuses the existing procedural cumulus baker: no images, new data requests,
- * WebGL contexts or whole-screen overlays. The one canvas is clipped to its
- * card and suspended when scrolled offscreen or in the background.
- */
-const heroSpriteCache = new Map<string, HTMLCanvasElement[]>();
-
-function heroCloudTextures(day: boolean, storm: boolean): HTMLCanvasElement[] {
-  const key = `${day ? "day" : "night"}:${storm ? "storm" : "soft"}`;
-  const cached = heroSpriteCache.get(key);
-  if (cached) return cached;
-  const pal: Pal = storm
-    ? day
-      ? { hi: [220, 228, 238], mid: [133, 155, 181], lo: [68, 83, 108] }
-      : { hi: [191, 205, 224], mid: [112, 137, 169], lo: [59, 79, 110] }
-    : day ? CUMULUS_DAY : CUMULUS_NIGHT;
-  const textures = [0.8, 2.7, 4.4].map((seed) =>
-    bake(336, 160, pal, (nx, ny) => cumulusSample(nx, ny, seed)));
-  heroSpriteCache.set(key, textures);
-  return textures;
-}
-
-export function HeroClouds({ day, code, cover, wind, direction }: {
-  day: boolean; code: number; cover: number; wind: number; direction: number;
+/** Rain/snow ONLY in the upper hero band. All clouds use the existing
+ * atmospheric CloudField renderer, so no standalone repeated cloud sprite
+ * can look glued to the temperature text. No new network or canvas layers. */
+export function HeroPrecipitation({ code, cover, wind, direction }: {
+  code: number; cover: number; wind: number; direction: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
     const plan = heroAtmosphere(code, cover, wind);
-    if (plan.clouds === 0 && plan.precipitation === "none") return;
+    if (plan.precipitation === "none") return;
     const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
-    const textures = plan.clouds ? heroCloudTextures(day, plan.dark) : [];
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const sign = Number.isFinite(direction) && Math.sin(direction * Math.PI / 180) > 0 ? -1 : 1;
     let alive = true;
@@ -562,20 +577,6 @@ export function HeroClouds({ day, code, cover, wind, direction }: {
       ctx.setTransform(pw / w, 0, 0, ph / h, 0, 0);
       ctx.clearRect(0, 0, w, h);
       const t = reduceMotion ? 0 : Math.max(0, (now - start) / 1000);
-      for (let i = 0; i < plan.clouds; i++) {
-        const sprite = textures[i]!;
-        const sw = w * (i === 0 ? 0.83 : i === 1 ? 0.67 : 0.76);
-        const sh = Math.min(h * 1.12, sw * sprite.height / sprite.width);
-        const baseX = w * (0.08 + i * 0.37) - sw * 0.28;
-        const cycle = w + sw;
-        const dx = sign * t * plan.driftPxPerSecond * (i === 0 ? 0.73 : i === 1 ? 1.08 : 0.88);
-        const x = (((baseX + dx + sw) % cycle) + cycle) % cycle - sw;
-        const y = h * (i === 0 ? 0.01 : i === 1 ? 0.28 : 0.44)
-          + (reduceMotion ? 0 : Math.sin(t * 0.23 + i * 2) * 1.4);
-        ctx.globalAlpha = plan.opacity * (i === 0 ? 0.83 : i === 1 ? 0.68 : 0.56);
-        ctx.drawImage(sprite, x, y, sw, sh);
-        if (x + sw < w) ctx.drawImage(sprite, x + cycle, y, sw, sh);
-      }
       // Keep precipitation sparse and in the hero only. It represents WMO
       // weather state, not fake real-time particle positions over the map.
       if (plan.precipitation !== "none") {
@@ -656,15 +657,19 @@ export function HeroClouds({ day, code, cover, wind, direction }: {
       document.removeEventListener("visibilitychange", onVisibility);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
-  }, [day, code, cover, wind, direction]);
+  }, [code, cover, wind, direction]);
+  if (heroAtmosphere(code, cover, wind).precipitation === "none") return null;
   return (
-    <div className="wx-hero-atmosphere" aria-hidden="true" data-hero-weather="localized">
+    <div className="wx-hero-atmosphere" aria-hidden="true" data-hero-weather="precipitation-only">
       <canvas ref={ref} />
     </div>
   );
 }
 
-export function SkyBackdrop({ day, code, phase, cover }: { day: boolean; code: number; phase: number; cover: number }) {
+export function SkyBackdrop({ day, code, phase, moonVisible, cover, wind = 0, direction = 0, heroWeather = false, animateClouds = true, showClouds = true }: {
+  day: boolean; code: number; phase: number; moonVisible: boolean; cover: number;
+  wind?: number; direction?: number; heroWeather?: boolean; animateClouds?: boolean; showClouds?: boolean;
+}) {
   const kind = skyKind(code);
   return (
     <div className={`sky-scene sky-${kind} ${day ? "is-day" : "is-night-sky"}`} aria-hidden="true">
@@ -692,11 +697,12 @@ export function SkyBackdrop({ day, code, phase, cover }: { day: boolean; code: n
           ))}
         </div>
       ) : null}
-      <CloudField day={day} code={code} cover={cover} />
+      {showClouds ? <CloudField day={day} code={code} cover={cover} animate={animateClouds} /> : null}
+      {heroWeather ? <HeroPrecipitation code={code} cover={cover} wind={wind} direction={direction} /> : null}
       <div className="sky-column">
         {day && kind !== "cloud" && kind !== "storm" ? (
           <div className="sky-sun" />
-        ) : !day ? (
+        ) : !day && moonVisible ? (
           <MoonDisc phase={phase} sizeClass="sky-moon" shadeId="sky" />
         ) : null}
       </div>

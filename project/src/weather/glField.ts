@@ -1,10 +1,12 @@
 import type { Map as LeafletMap } from "leaflet";
+import { nearestWorldLongitude, windScreenStepDegrees } from "@/weather/windProjection";
+import { usablePrecipitationGrid } from "@/weather/rainRasterQuality";
 import type { LiveCyclone } from "@/weather/cyclones";
 import { covers, indexToMs, mercY, mercYView, sampleGrid } from "@/weather/grid";
 import { buildLutBytes, colorAt, layerByKind, LAYERS } from "@/weather/layers";
 import { paintCyclones, type PaintedSystem } from "@/weather/synoptic";
 import type { FieldSample, GridField, Lang, ShadeKind, WindUnit } from "@/weather/types";
-import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback } from "@/weather/weatherPlayback";
+import { nextPlaybackHour, secondsPerForecastHour, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback, rainClockWithoutGrid } from "@/weather/weatherPlayback";
 
 /**
  * رسم الطبقات على WebGL2 (مزج زمني باليونيفورم فقط).
@@ -294,6 +296,10 @@ export class FieldEngine {
   private rainView: GridField | null = null;
   private kind: ShadeKind = 0;
   private hourMax = 47;
+  private rainClockOriginMs = Date.now();
+  private rainForecastTime(grid: GridField | null, hour: number): number {
+    return grid ? indexToMs(grid.times, hour) : rainClockWithoutGrid(this.rainClockOriginMs, hour);
+  }
   private particles: Particle[] = [];
   private particleTarget = 420;
   private paused = false;
@@ -302,7 +308,30 @@ export class FieldEngine {
   private last = 0;
   private zoomSeen = -1;
   private dpr = 1;
+  private onMoveStart = () => {
+    if (this.kind !== 0) return;
+    // A screen-projected wind trail cannot survive a Leaflet pan/zoom:
+    // its historical points refer to a different map transform. Keep
+    // particle positions and original wind speed, discard only old paths.
+    // After a fling the old particles still occupied the entire particle
+    // budget in the PREVIOUS viewport. Clearing trails alone did not
+    // redistribute them, producing a small island of wind streaks.
+    this.particles.length = 0;
+    this.partCtx?.clearRect(0, 0, this.partCanvas.width, this.partCanvas.height);
+  };
   private onMove = () => {
+    this.drawField();
+    if (this.kind === 0) {
+      this.particles.length = 0;
+      this.drawParticles(0);
+    }
+  };
+  private onZoom = () => {
+    // Wind traces are screen-projected from geographic coordinates; a zoom
+    // transforms historical tail points disproportionately. Keep the particle
+    // positions and count, but rebuild their trails after zoom settles.
+    if (this.kind === 0) this.particles.length = 0;
+    this.zoomSeen = this.map?.getZoom() ?? this.zoomSeen;
     this.drawField();
   };
   private settle = () => {
@@ -350,8 +379,10 @@ export class FieldEngine {
     }
     // requestAnimationFrame already redraws during gestures. Avoid redundant
     // synchronous WebGL draws on every Leaflet move/zoom event.
+    map.on("movestart", this.onMoveStart);
+    map.on("zoomstart", this.onMoveStart);
     map.on("moveend", this.onMove);
-    map.on("zoomend", this.onMove);
+    map.on("zoomend", this.onZoom);
     map.on("viewreset", this.onMove);
     map.on("resize", this.settle);
     this.resize();
@@ -391,6 +422,7 @@ export class FieldEngine {
   }
 
   setKind(kind: ShadeKind) {
+    if (kind === 2 && this.kind !== 2) this.rainClockOriginMs = Date.now();
     this.kind = kind;
     this.weatherWaitSince = null;
     this.lastRainEmitAt = 0;
@@ -473,6 +505,15 @@ export class FieldEngine {
     return this.pick();
   }
 
+  /** A real measured/forecast precipitation grid is available for the
+   * current hour. Do not count the estimated initial bootstrap grid. */
+  hasSourceRain(): boolean {
+    if (this.kind !== 2) return false;
+    const grid = this.pick();
+    return !!grid && !grid.id.startsWith("est|") &&
+      Number.isFinite(grid.hours) && grid.hours > 0;
+  }
+
   sampleAt(lat: number, lon: number): FieldSample | null {
     const grid = this.pick();
     if (!grid) return null;
@@ -507,8 +548,10 @@ export class FieldEngine {
     this.playing = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.map?.off("movestart", this.onMoveStart);
+    this.map?.off("zoomstart", this.onMoveStart);
     this.map?.off("moveend", this.onMove);
-    this.map?.off("zoomend", this.onMove);
+    this.map?.off("zoomend", this.onZoom);
     this.map?.off("viewreset", this.onMove);
     this.map?.off("resize", this.settle);
     this.dropTextures();
@@ -660,16 +703,31 @@ export class FieldEngine {
 
   private pick(): GridField | null {
     if (this.kind === 2) {
+      const usable = (grid: GridField | null): grid is GridField =>
+        !!grid && !grid.id.startsWith("est|") &&
+        usablePrecipitationGrid(
+          grid.lonSpan, grid.cols, this.map?.getZoom() ?? 0, 72,
+          (grid.north - grid.south) / Math.max(1, grid.rows),
+          this.map?.getCenter().lat ?? 0,
+        );
       const world = this.rainWorld;
       const view = this.rainView;
-      if (view && this.detailFillsView(view)) {
+      if (usable(view) && this.detailFillsView(view)) {
         const viewCell = view.lonSpan / Math.max(1, view.cols);
         const worldCell = world ? world.lonSpan / Math.max(1, world.cols) : 99;
-        if ((!world || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
+        if ((!usable(world) || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
       }
-      if (world) return world;
-      if (this.detail && this.detailFillsView(this.detail)) return this.detail;
-      return this.global ?? this.detail;
+      if (usable(world)) return world;
+      // The initial global grid may be estimateGrid(). Never sample it as
+      // real precipitation (or let a missing model fabricate rain on a map).
+      // Only a successfully fetched rain/world/view or measured detail
+      // can supply rainfall until the official spatial frame is ready.
+      if (usable(this.detail) && this.detailFillsView(this.detail)) return this.detail;
+      // The wind/heat global grid is also fetched from Open-Meteo and
+      // contains real precipitation fields. Reuse it if present, but NEVER
+      // use the synthetic estimateGrid() bootstrap as a rain forecast.
+      if (usable(this.global)) return this.global;
+      return null;
     }
     if (this.detail && this.detailFillsView(this.detail)) return this.detail;
     return this.global ?? this.detail;
@@ -725,7 +783,7 @@ export class FieldEngine {
   private local(lat: number, lon: number): { x: number; y: number } | null {
     const map = this.map;
     if (!map) return null;
-    const p = map.latLngToContainerPoint([lat, lon]);
+    const p = map.latLngToContainerPoint([lat, nearestWorldLongitude(lon, map.getCenter().lng)]);
     return { x: p.x, y: p.y };
   }
 
@@ -748,7 +806,7 @@ export class FieldEngine {
       const step = nextPlaybackHour(
         this.hour, dt, max, secondsPerForecastHour(this.kind),
         (candidate) => this.kind !== 2 || !this.canAdvanceRainTime ||
-          this.canAdvanceRainTime(grid ? indexToMs(grid.times, candidate) : Date.now()),
+          this.canAdvanceRainTime(this.rainForecastTime(grid, candidate)),
       );
       this.hour = step.hour;
       if (step.waiting) this.weatherWaitSince ??= now;
@@ -764,7 +822,11 @@ export class FieldEngine {
     // retain their original per-frame paint behaviour.
     const fallbackDue = shouldPaintWeatherFallback(this.kind, this.modelCover) &&
       (this.kind !== 2 || shouldUpdateRainFallback(now, this.lastRainFallbackPaintAt));
-    if (this.kind !== 2 || cycloneDue) this.pinView();
+    // drawField() already synchronizes the viewport and georeferenced
+    // canvas. Calling pinView() immediately before it repeated expensive
+    // Leaflet projection calculations on every wind frame (60Hz).
+    // Only cyclone-only frames still need a separate viewport sync.
+    if (cycloneDue && !fallbackDue) this.pinView();
     if (fallbackDue) {
       if (this.kind === 2) this.lastRainFallbackPaintAt = now;
       this.drawField();
@@ -785,7 +847,7 @@ export class FieldEngine {
       this.lastRainEmitAt = now;
     }
     const grid = this.pick();
-    const timeMs = grid ? indexToMs(grid.times, this.hour) : Date.now();
+    const timeMs = this.kind === 2 ? this.rainForecastTime(grid, this.hour) : grid ? indexToMs(grid.times, this.hour) : Date.now();
     let sample: FieldSample | null = null;
     if (grid && this.map) {
       const c = this.map.getCenter();
@@ -1140,7 +1202,9 @@ export class FieldEngine {
     }
     const rain = this.kind === 2;
     const zoomNow = this.map?.getZoom() ?? 0;
-    if (this.zoomSeen >= 0 && Math.abs(zoomNow - this.zoomSeen) > 1.25) this.particles.length = 0;
+    if (this.kind === 0 && this.zoomSeen >= 0 && Math.abs(zoomNow - this.zoomSeen) > 0.35) {
+      for (const p of this.particles) p.trail.length = 0;
+    }
     this.zoomSeen = zoomNow;
     const cap = this.kind === 2 ? Math.max(this.particleTarget, 680) : this.particleTarget;
     let born = 0;
@@ -1218,13 +1282,11 @@ export class FieldEngine {
     const spd = Math.max(sample.spd, mag);
     if (spd < 0.5 || mag < 0.3) return null;
     const zoom = map.getZoom();
-    const pxPerDeg = (256 * 2 ** zoom) / 360;
     const zoomScale = zoom < 3 ? 0.62 : zoom < 5 ? 0.84 : zoom < 7 ? 1 : 1.08;
     const pxPerSec = Math.min(34, Math.max(10, 8 + spd * 0.28)) * zoomScale;
-    const deg = (pxPerSec * dt) / Math.max(8, pxPerDeg);
-    const cos = Math.max(0.22, Math.cos((lat * Math.PI) / 180));
-    let nlat = lat + (sample.v / mag) * deg;
-    let nlon = lon + ((sample.u / mag) * deg) / cos;
+    const delta = windScreenStepDegrees(lat, zoom, pxPerSec, dt);
+    let nlat = lat + (sample.v / mag) * delta.latitude;
+    let nlon = lon + (sample.u / mag) * delta.longitude;
     if (nlat > 84) nlat = 84;
     if (nlat < -78) nlat = -78;
     if (nlon > 180) nlon -= 360;
@@ -1378,14 +1440,15 @@ export class FieldEngine {
     let lo = lon;
     let cur = sample;
     const zoom = map.getZoom();
-    const pxPerDeg = (256 * 2 ** zoom) / 360;
-    const deg = 2.4 / Math.max(8, pxPerDeg);
     for (let i = 0; i < 8; i++) {
       const mag = Math.hypot(cur.u, cur.v);
       if (mag < 0.3) break;
-      const cos = Math.max(0.22, Math.cos((la * Math.PI) / 180));
-      la -= (cur.v / mag) * deg;
-      lo -= ((cur.u / mag) * deg) / cos;
+      // Seed paths must use the SAME Mercator projection as subsequent
+      // wind advection. The older 1/cos longitude adjustment created
+      // stretched initial trails near Scandinavia and northern Russia.
+      const delta = windScreenStepDegrees(la, zoom, 2.4, 1);
+      la -= (cur.v / mag) * delta.latitude;
+      lo -= (cur.u / mag) * delta.longitude;
       if (lo > 180) lo -= 360;
       if (lo < -180) lo += 360;
       if (la > 84 || la < -78) break;

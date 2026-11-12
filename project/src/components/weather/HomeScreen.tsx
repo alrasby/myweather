@@ -1,8 +1,7 @@
 import { ChevronDown, MapPin, SunMedium, Sunrise, Sunset, Thermometer, Umbrella, Wind, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DetailCards, QiblaCard } from "@/components/weather/SkyCards";
-import { HeroClouds } from "@/components/weather/SkyBackdrop";
-import { citySwipeTarget } from "@/weather/citySwipe";
+import { citySwipeOrder, citySwipeTarget } from "@/weather/citySwipe";
 import { useDeviceCompass } from "@/weather/deviceHeading";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { placeFromCoords } from "@/weather/api";
@@ -31,6 +30,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const places = useWeather((s) => s.places);
   const activeId = useWeather((s) => s.activeId);
   const peek = useWeather((s) => s.peek);
+  const here = useWeather((s) => s.here);
   const prefs = useWeather((s) => s.prefs);
   const bundle = useWeather((s) => s.bundle);
   const loading = useWeather((s) => s.loading);
@@ -39,18 +39,52 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const stale = useWeather((s) => s.stale);
   const loadActive = useWeather((s) => s.loadActive);
   const setActive = useWeather((s) => s.setActive);
+  const locatePlace = useWeather((s) => s.locatePlace);
   const setHere = useWeather((s) => s.setHere);
   const [compassLocating, setCompassLocating] = useState(false);
   const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
-  const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
+  // A GPS fix remains a preview, not a saved city. Include it in gesture
+  // navigation when distinct from saved locations, without modifying places.
+  const gpsPreview = here && !places.some((p) => {
+    const dLat = (p.lat - here.lat) * 111;
+    const dLon = (p.lon - here.lon) * 111 * Math.cos((p.lat + here.lat) * Math.PI / 360);
+    return p.id === here.id || Math.hypot(dLat, dLon) < 0.35;
+  }) ? here : null;
+  const swipeIds = citySwipeOrder(places.map((p) => p.id), gpsPreview?.id, peek?.id);
+  const navigateSwipe = (target: string) => {
+    if (places.some((p) => p.id === target)) setActive(target);
+    else if (gpsPreview?.id === target) locatePlace(gpsPreview);
+    else if (peek?.id === target) locatePlace(peek);
+  };
   // Do not silently treat a GPS fix saved in a previous session as current.
   const compassPlace = qiblaFix ?? place;
   // Declination must use the phone's measured position, not an unrelated selected city.
   const reading = useDeviceCompass(qiblaFix?.lat ?? Number.NaN, qiblaFix?.lon ?? Number.NaN);
   const scroller = useRef<HTMLDivElement>(null);
+  // The atmospheric sky and the localized hero are separate canvases.
+  // Fade BOTH before forecast cards reach the cloud area: neither a fixed
+  // backdrop nor a scrolling hero should appear attached to the cards.
+  // Scroll updates write one compositor-friendly CSS variable, without
+  // React state changes, timers or additional canvas draw calls.
+  const syncCloudsWithScroll = () => {
+    const top = Math.max(0, scroller.current?.scrollTop ?? 0);
+    const t = Math.min(1, top / 200);
+    const opacity = 1 - t * t * (3 - 2 * t);
+    document.documentElement.style.setProperty("--wx-cloud-scroll-opacity", opacity.toFixed(4));
+  };
+  useEffect(() => {
+    syncCloudsWithScroll();
+    return () => {
+      document.documentElement.style.removeProperty("--wx-cloud-scroll-opacity");
+    };
+    // The ref points to the same Home scroll container for its lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pull = useRef(0);
   const swipeStart = useRef<{ x: number; y: number; eligible: boolean } | null>(null);
+  const swipeLast = useRef<{ x: number; y: number } | null>(null);
   const [pulling, setPulling] = useState(0);
   const [locating, setLocating] = useState(false);
   const locateGen = useRef(0);
@@ -160,10 +194,13 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   return (
     <div
       ref={scroller}
+      onScroll={syncCloudsWithScroll}
+      style={{ touchAction: "pan-y" }}
       className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
       onTouchStart={(e) => {
         if (e.touches.length !== 1) {
           swipeStart.current = null;
+          swipeLast.current = null;
           pull.current = 0;
           return;
         }
@@ -171,13 +208,16 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         const target = e.target instanceof Element ? e.target : null;
         // Hourly ribbons, forecast carousel and interactive elements retain
         // their own horizontal gestures. Only saved cities are eligible.
-        const nested = target?.closest('button, a, input, textarea, select, [role="slider"], [data-no-city-swipe], .overflow-x-auto');
+        const nested = target?.closest('header, nav, a, input, textarea, select, [role="slider"], [data-no-city-swipe], .overflow-x-auto, .wx-qibla-refresh');
         swipeStart.current = { x: touch.clientX, y: touch.clientY, eligible: !nested };
+        swipeLast.current = { x: touch.clientX, y: touch.clientY };
         pull.current = (scroller.current?.scrollTop ?? 0) <= 0 ? touch.clientY : 0;
       }}
       onTouchMove={(e) => {
         const point = e.touches[0];
-        if (!point || !swipeStart.current || !pull.current) return;
+        if (!point || !swipeStart.current) return;
+        swipeLast.current = { x: point.clientX, y: point.clientY };
+        if (!pull.current) return;
         const dx = point.clientX - swipeStart.current.x;
         const dy = point.clientY - swipeStart.current.y;
         if (Math.abs(dx) > Math.abs(dy) * 1.2) {
@@ -189,25 +229,33 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       onTouchEnd={(e) => {
         // Horizontal city paging must never also trigger vertical refresh.
         const gesture = swipeStart.current;
-        const touch = e.changedTouches[0];
+        const touch = e.changedTouches[0] ?? swipeLast.current;
         const dx = gesture && touch ? touch.clientX - gesture.x : 0;
         const dy = gesture && touch ? touch.clientY - gesture.y : 0;
         const target = gesture?.eligible
-          ? citySwipeTarget(places.map((p) => p.id), activeId, dx, dy, lang === "ar")
+          ? citySwipeTarget(swipeIds, activeId, dx, dy, lang === "ar")
           : null;
         if (target) {
-          setActive(target); // Saves last-viewed location; never adds cities.
-          if (scroller.current) scroller.current.scrollTop = 0;
+          navigateSwipe(target); // Changes view only; never adds GPS to saved cities.
         } else if (pull.current > 0 && dy > 64 && Math.abs(dy) > Math.abs(dx) * 1.2) {
           hideAlertsAfterPull();
           refresh();
         }
         swipeStart.current = null;
+        swipeLast.current = null;
         pull.current = 0;
         setPulling(0);
       }}
       onTouchCancel={() => {
+        const gesture = swipeStart.current;
+        const last = swipeLast.current;
+        const target = gesture?.eligible && last
+          ? citySwipeTarget(swipeIds, activeId,
+              last.x - gesture.x, last.y - gesture.y, lang === "ar")
+          : null;
+        if (target) navigateSwipe(target);
         swipeStart.current = null;
+        swipeLast.current = null;
         pull.current = 0;
         setPulling(0);
       }}
@@ -273,10 +321,6 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           ) : null}
 
           <div className="temp-under-orb relative z-[1] px-1 text-on-sky" data-sky-hero="">
-            {bundle.placeId === place.id ? (
-              <HeroClouds day={bundle.current.isDay} code={bundle.current.code}
-                cover={bundle.current.cloud} wind={bundle.current.wind} direction={bundle.current.dir} />
-            ) : null}
             <div className="relative z-[1]">
             <div className="flex items-end justify-between gap-3">
               <p className="text-5xl font-medium leading-none tracking-tight">{formatTemp(bundle.current.temp, prefs.temp, lang)}</p>
@@ -305,7 +349,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
             <HourRibbon bundle={bundle} lang={lang} />
           </section>
 
-          <section className="wx-card mt-3 overflow-hidden px-2.5 py-3">
+          <section className="wx-card wx-daily-card mt-3 overflow-hidden px-2.5 py-3">
             <div className="mb-1 px-1">
               <h2 className="text-base font-semibold text-fg">{t(lang, "daily")}</h2>
             </div>
@@ -313,7 +357,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
               {bundle.daily.slice(0, 15).map((d) => {
                 const open = openDay === d.t;
                 return (
-                  <div key={d.t} className="border-b border-line last:border-b-0">
+                  <div key={d.t} className="wx-daily-row border-b border-line last:border-b-0">
                     <button
                       type="button"
                       className="grid min-h-[3.15rem] w-full min-w-0 items-center gap-x-1 py-1.5 text-start"
@@ -339,7 +383,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
                       </bdi>
                       <ChevronDown className={`size-4 justify-self-center text-muted transition-transform ${open ? "rotate-180" : ""}`} />
                     </button>
-                    {open ? <DayPanel bundle={bundle} day={d} lang={lang} /> : null}
+                    {open ? <div className="wx-daily-reveal"><DayPanel bundle={bundle} day={d} lang={lang} /></div> : null}
                   </div>
                 );
               })}

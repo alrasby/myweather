@@ -1,10 +1,12 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
+import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
 import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
+import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
 import { spatialTileOptions } from "@/weather/spatialTilePolicy";
@@ -51,12 +53,17 @@ export type WeatherModelDiagnostics = {
   nativeReads: number;
   sharedRangeReads: number;
   activeSharedRanges: number;
+  activeFileProbes: number;
+  sharedFileProbes: number;
   layerTimings: SpatialLayerTiming[];
   loadingFrames: number[];
   cacheEligible: number;
   cacheStored: number;
   cacheRejected: number;
   performance: SpatialPerformanceSnapshot;
+  rateLimitedResponses: number;
+  rateLimitRemainingMs: number;
+  startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
 };
 
 type AnyLayer = {
@@ -203,6 +210,8 @@ const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
 const spatialRangeFlights = new SpatialRangeFlights<Response>();
+const spatialLengthFlights = new SpatialRangeFlights<string | null>();
+const spatialRateLimit = new SpatialRateLimit();
 let spatialCacheHits = 0;
 let spatialNativeReads = 0;
 let spatialCacheEligible = 0;
@@ -222,9 +231,13 @@ async function measuredNativeRequest(
   try {
     const result = await spatialNativeQueue.run(signal, () => {
       started = performance.now();
+      spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
     });
+    const retryAfter = Object.entries(result.headers ?? {})
+      .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
+    spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));
     const bytes = spatialTransferBytes(options.method ?? "GET", result.status, result.headers ?? {}, result.data);
     spatialPerformance.networkRequest(
       started - queued, performance.now() - started,
@@ -232,7 +245,19 @@ async function measuredNativeRequest(
     );
     return result;
   } catch (error) {
-    spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
+    // Some Capacitor native transports reject non-2xx responses instead
+    // of resolving with a status object. Record a provider cooldown in
+    // either case; never treat such a rejection as a reason to retry via WebView.
+    if (error && typeof error === "object") {
+      const info = error as { status?: unknown; headers?: Record<string, unknown> };
+      const status = Number(info.status);
+      if (status === 429 || status === 503) {
+        const retryAfter = info.headers && Object.entries(info.headers)
+          .find(([name]) => name.toLowerCase() === "retry-after")?.[1];
+        spatialRateLimit.observe(status, retryAfter == null ? null : String(retryAfter));
+      }
+    }
+    if (!(error instanceof SpatialRateLimitError)) spatialPerformance.networkRequest(started - queued, performance.now() - started, 0, false, !!signal?.aborted);
     throw error;
   }
 }
@@ -315,6 +340,13 @@ async function probeLength(url: string, headers: Headers, signal?: AbortSignal):
   }
   const cached = spatialFileLengths.get(url);
   if (cached) return cached.value;
+  // The reader may query the same .om file length from several tiles
+  // concurrently. Coalesce the native 0-0 probe, keeping callers abortable.
+  return spatialLengthFlights.run(`length|${url}`, signal,
+    (sharedSignal) => probeLengthUnshared(url, headers, sharedSignal));
+}
+
+async function probeLengthUnshared(url: string, headers: Headers, signal?: AbortSignal): Promise<string | null> {
   const bag: Record<string, string> = {};
   headers.forEach((value, key) => {
     if (headerName(key) && key.toLowerCase() !== "range") bag[key] = value;
@@ -363,10 +395,15 @@ export function installSpatialFetch(): void {
     if (native) {
       try {
         return await pluginSpatial(url, { ...init, method, signal }, headers);
-      } catch {
+      } catch (error) {
+        // Never double-send a 429/Retry-After request through browser fallback:
+        // that worsens provider throttling and delays the first real frame.
+        if (error instanceof SpatialRateLimitError || spatialRateLimit.remainingMs() > 0) {
+          throw new SpatialRateLimitError(spatialRateLimit.remainingMs());
+        }
         // A cancelled Leaflet frame must never start another network request.
         if (signal?.aborted) throw new Error("spatial-request-aborted");
-        /* الطلب الأصلي للمتصفح إن رفضت الإضافة الطول */
+        /* Use browser transport only when the native bridge fails otherwise. */
       }
     }
     const ctrl = new AbortController();
@@ -426,6 +463,8 @@ export class ModelField {
   private orderKey = "";
   private visible = false;
   private playbackActive = false;
+  private sourceBackedFallback = false;
+  private fallbackForMissingHour = false;
   private lastSyncAt = 0;
   // Do not re-evaluate the same ECMWF tile scheduler every 50 ms while only
   // the forecast blend opacity changes. Tile load/error events and hour
@@ -437,9 +476,19 @@ export class ModelField {
   private refreshSince = 0;
   private ready: Promise<void> = Promise.resolve();
   private metadataAbort: AbortController | null = null;
+  // First-session readiness timings are read-only and measured on device.
+  // They are NOT claimed to isolate WASM decoding from worker rasterization.
+  private attachedAt = 0;
+  private metadataReadyMs: number | null = null;
+  private firstCloudReadyMs: number | null = null;
+  private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
+    this.attachedAt = performance.now();
+    this.metadataReadyMs = null;
+    this.firstCloudReadyMs = null;
+    this.firstCompleteReadyMs = null;
     installSpatialFetch();
     this.metadataAbort?.abort();
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
@@ -480,6 +529,7 @@ export class ModelField {
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
         if (metadataAbort.signal.aborted || this.map !== map) return;
+        this.metadataReadyMs = performance.now() - this.attachedAt;
         // Do not launch a partly available spatial frame: it would suppress
         // the global snowfall field even if the ECMWF snow file is absent.
         if (!modelVariablesReady(json.variables)) {
@@ -526,7 +576,13 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    return canAdvanceSpatialTime(i, ready, blocked, this.loading);
+    return canAdvanceSpatialTime(i, ready, blocked, this.loading, this.sourceBackedFallback);
+  }
+
+  setSourceBackedFallback(available: boolean) {
+    if (this.sourceBackedFallback === available) return;
+    this.sourceBackedFallback = available;
+    if (this.visible) this.applyOpacity();
   }
 
   /** A deliberately hidden, read-only map diagnostic for comparing independent
@@ -576,6 +632,8 @@ export class ModelField {
       nativeReads: spatialNativeReads,
       sharedRangeReads: spatialRangeFlights.joined,
       activeSharedRanges: spatialRangeFlights.active,
+      activeFileProbes: spatialLengthFlights.active,
+      sharedFileProbes: spatialLengthFlights.joined,
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
@@ -583,6 +641,13 @@ export class ModelField {
         globalThis.crossOriginIsolated === true,
         (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize ?? null,
       ),
+      rateLimitedResponses: spatialRateLimit.incidents,
+      rateLimitRemainingMs: spatialRateLimit.remainingMs(),
+      startupMs: {
+        metadata: this.metadataReadyMs,
+        firstCloudReady: this.firstCloudReadyMs,
+        firstCompleteReady: this.firstCompleteReadyMs,
+      },
       layerTimings: Array.from({ length: SPATIAL_LAYER_COUNT }, (_, index) =>
         spatialLayerTiming(Date.now(), frame?.layerStartedAt[index] ?? 0,
           frame?.layerFirstTileAt[index] ?? 0, frame?.layerLastTileAt[index] ?? 0,
@@ -613,6 +678,7 @@ export class ModelField {
       this.refreshSince = 0;
       this.playbackActive = false;
       this.lastScheduledAt = 0;
+      this.fallbackForMissingHour = false;
       this.clear();
     }
   }
@@ -776,6 +842,9 @@ export class ModelField {
       const previewChanged = frame.previewReady !== preview || frame.previewMask !== previewMask;
       frame.previewReady = preview;
       frame.previewMask = previewMask;
+      if (step === this.base && preview && this.firstCloudReadyMs === null) {
+        this.firstCloudReadyMs = performance.now() - this.attachedAt;
+      }
       // A completed successful reload clears stale timeout errors, even when
       // the previous frame already remained visible during the refresh.
       if (frame.loaded.every(Boolean) && frame.errored.size === 0 && frame.tileCounts.every((n) => n > 0)) {
@@ -797,6 +866,9 @@ export class ModelField {
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
+        if (step === this.base && this.firstCompleteReadyMs === null) {
+          this.firstCompleteReadyMs = performance.now() - this.attachedAt;
+        }
         this.loading.delete(step);
         this.failedUntil.delete(step);
         this.lastError = null;
@@ -907,12 +979,32 @@ export class ModelField {
     const readySteps = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) readySteps.add(step);
     const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
-    const plan = selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
+    // An actual fallback has its own time-aligned precipitation field.
+    // Never hold an obsolete ECMWF hour over a new fallback forecast hour.
+    // A real Open-Meteo fallback and ECMWF are separate forecast products.
+    // Do not cross-fade their coarse/fine raster imagery: the overlap is seen
+    // as rectangular cloud/rain patches during fast pans and time playback.
+    const { fallback: fallbackForHour, snapCompleteModel: returningToReadyModel } =
+      chooseWeatherSource(readySteps.has(this.base), this.sourceBackedFallback, this.fallbackForMissingHour);
+    this.fallbackForMissingHour = fallbackForHour;
+    const plan = fallbackForHour
+      ? { goals: new Map<number, number>(), anchor: null, holding: false }
+      : selectSpatialFramePlan(this.base, this.blend, readySteps, this.lastDisplayedStep, cooldown);
     // A first completed cloud viewport should not be held hostage by slow
     // precipitation/snowfall .om decoding. Only source-backed, fully loaded
     // individual layers are shown; partially loaded image tiles remain hidden.
     const requested = this.frames.get(this.base);
-    const preview = !cooldown && plan.goals.size === 0 && requested &&
+    // The original quick first-paint still matters: show only a complete
+    // source-backed ECMWF CLOUD preview before any full model hour is ready.
+    // While real rain/snow fallback is active, never show partial ECMWF
+    // precipitation simultaneously. During playback, require full 3-layer
+    // frames to avoid jumping between incompatible source products.
+    // Do not expose a partial ECMWF cloud tile over an Open-Meteo
+    // fallback: they are different model products and the overlap shows
+    // as hard rectangular cloud patches when the viewport is moving.
+    // An early ECMWF cloud preview remains possible when there is no
+    // competing source-backed fallback currently on the screen.
+    const preview = !fallbackForHour && !cooldown && plan.goals.size === 0 && requested &&
       !requested.ready && requested.previewReady ? requested : null;
     this.holdingPreviousFrame = plan.holding && plan.anchor !== null && !preview;
     for (const [step, frame] of this.frames) {
@@ -925,7 +1017,7 @@ export class ModelField {
       preview.opacity = 1;
       // Leaflet.setOpacity() traverses tile elements. Do it only when a
       // particular source finishes or diagnostic mode changes, NOT at 20Hz.
-      const opacityKey = `${this.diagnosticMode}:${preview.previewMask}:${preview.previewReady}`;
+      const opacityKey = `${this.diagnosticMode}:${preview.previewMask}:${preview.previewReady}:${fallbackForHour}`;
       if (preview.previewOpacityKey !== opacityKey) {
         preview.previewOpacityKey = opacityKey;
         preview.layers.forEach((layer, idx) => {
@@ -936,7 +1028,7 @@ export class ModelField {
         const mode = this.diagnosticMode;
         const allowed = mode === "all" || (mode === "cloud" && idx === 0) ||
           (mode === "rain" && idx === 1) || (mode === "snow" && idx === 2);
-        layer.setOpacity?.(complete && allowed ? 1 : 0);
+        layer.setOpacity?.(complete && allowed && (!fallbackForHour || idx === 0) ? 1 : 0);
         });
       }
     }
@@ -963,7 +1055,11 @@ export class ModelField {
       // On a failed model hour the forecast clock is allowed to continue
       // using the matching global field. Hide stale ECMWF imagery immediately
       // instead of letting it linger as a seemingly current cloud pattern.
-      const shown = cooldown && goal === 0 ? 0 : cur + (goal - cur) * 0.28;
+      // Switching between unrelated data products must be atomic, not
+      // intermediate alpha=0.5 ECMWF atop alpha=1 fallback. Keep normal
+      // temporal interpolation between fully ready ECMWF forecast hours.
+      const shown = fallbackForHour || returningToReadyModel ? goal :
+        cooldown && goal === 0 ? 0 : cur + (goal - cur) * 0.28;
       const value = Math.abs(goal - shown) < 0.02 ? goal : shown;
       if (Math.abs(frame.opacity - value) < 0.01) continue;
       frame.opacity = value;
@@ -974,11 +1070,12 @@ export class ModelField {
         layer.setOpacity?.(allowed ? value : 0);
       }
     }
-    const visibleOpacity = Array.from(this.frames.values()).reduce(
-      (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0),
-      0,
-    ) + (preview ? 1 : 0);
-    const nextVisible = this.diagnosticMode !== "fallback" && visibleOpacity >= 0.88;
+    // Cloud-only previews must not hide the real precipitation/snow fallback.
+    // A complete ECMWF frame is required before turning it off.
+    const completedOpacity = Array.from(this.frames.values()).reduce(
+      (sum, frame) => sum + (frame.ready ? Math.max(0, frame.opacity) : 0), 0,
+    );
+    const nextVisible = !fallbackForHour && this.diagnosticMode !== "fallback" && completedOpacity >= 0.88;
     if (spatialCoverageChanged(this.spatialVisible, nextVisible)) {
       this.spatialVisible = nextVisible;
       // Visibility changes require switching the fallback renderer. Repeated
@@ -1007,6 +1104,7 @@ export class ModelField {
     this.spatialVisible = false;
     this.lastDisplayedStep = null;
     this.holdingPreviousFrame = false;
+    this.fallbackForMissingHour = false;
     this.times = [];
     this.pinnedRun = null;
     this.adapter = null;

@@ -53,6 +53,7 @@ export function canAdvanceSpatialTime(
   ready: ReadonlySet<number>,
   blocked: ReadonlySet<number>,
   loading: ReadonlySet<number> = new Set(),
+  sourceBackedFallback = false,
 ): boolean {
   // A ready FUTURE hour must not authorize displaying an unavailable
   // requested hour. That advanced the clock over stale older cloud tiles.
@@ -60,6 +61,10 @@ export function canAdvanceSpatialTime(
   // (modelFrameTimeline suppresses any stale held spatial frame in cooldown).
   if (blocked.has(requested)) return true;
   if (ready.has(requested)) return true;
+  // A real source-backed precipitation grid can display the requested time
+  // while the heavier ECMWF spatial tiles finish. This never authorizes an
+  // artificial grid or stale held ECMWF frame to masquerade as current.
+  if (sourceBackedFallback) return true;
   // No spatial frame exists: allow global fallback only when no model request
   // is in progress, so playback never silently outruns an active decode.
   return ready.size === 0 && loading.size === 0;

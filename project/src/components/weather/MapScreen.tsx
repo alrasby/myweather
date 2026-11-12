@@ -7,8 +7,10 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
 import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -96,6 +98,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const imageryRef = useRef<TileLayer | null>(null);
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
+  const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
   if (!modelRef.current) modelRef.current = new ModelField();
   const engineRef = useRef<FieldEngine | null>(null);
@@ -123,6 +126,36 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const diagnosticsOpenRef = useRef(false);
   const diagnosticsTickRef = useRef(0);
   const rainTapRef = useRef({ count: 0, last: 0 });
+  // Catalog-only experiment: isolated from the live weather map.
+  // Key exists solely in transient input state and is cleared on submit.
+  const [pilotKey, setPilotKey] = useState("");
+  const [pilotResult, setPilotResult] = useState<MapTilerPilotCatalog | null>(null);
+  const [pilotStatus, setPilotStatus] = useState("not-run");
+  const [copyStatus, setCopyStatus] = useState("");
+  const pilotRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => pilotRequestRef.current?.abort(), []);
+  const checkPilot = () => {
+    if (!pilotKey.trim() || pilotStatus === "loading") return;
+    const key = pilotKey;
+    setPilotKey("");
+    pilotRequestRef.current?.abort();
+    const ctrl = new AbortController();
+    pilotRequestRef.current = ctrl;
+    setPilotResult(null);
+    setPilotStatus("loading");
+    void inspectMapTilerCatalog(key, ctrl.signal)
+      .then((catalog) => {
+        if (ctrl.signal.aborted) return;
+        setPilotResult(catalog);
+        setPilotStatus("ok");
+      })
+      .catch((error: unknown) => {
+        if (ctrl.signal.aborted) return;
+        // Do not display URL, API key or provider response text.
+        const reason = error instanceof Error ? error.message : "";
+        setPilotStatus(/^maptiler-(?:http-\d{3}|catalog-invalid|key-missing-or-invalid)$/.test(reason) ? reason : "unavailable");
+      });
+  };
   diagnosticsOpenRef.current = weatherDiagnosticsOpen;
   const [kind, setKind] = useState<ShadeKind>(prefs.mapLayer);
   const [playing, setPlaying] = useState(false);
@@ -156,8 +189,21 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
+        // Do not jump to the coarse real-data fallback at EVERY hourly
+        // boundary when the next high-resolution ECMWF frame may finish
+        // shortly. Wait briefly while a previous ECMWF frame is showing;
+        // start the real fallback immediately for cold start / missing data.
+        const hasRealRain = engine.hasSourceRain();
+        const needFallback = hasRealRain && (
+          !engine.playing || !modelRef.current?.isSpatialVisible() ||
+          info.playbackWaitingMs >= 1600
+        );
+        modelRef.current?.setSourceBackedFallback(needFallback);
         modelRef.current?.setPlaybackActive(engine.playing);
         modelRef.current?.sync(info.timeMs);
+        // While the next spatial hour decodes, fetch ONE lightweight genuine
+        // world fallback only if the user is actively waiting for playback.
+        if (engine.playing && info.playbackWaitingMs >= 1800) rainPlaybackQuickRef.current?.();
       }
       const now = performance.now();
       if (diagnosticsOpenRef.current && now - diagnosticsTickRef.current > 1000) {
@@ -276,10 +322,40 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
-        L.tileLayer(
+        const labelTiles = L.tileLayer(
           "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-          { maxZoom: 16, opacity: 0.92, pane: "wx-labels", updateWhenIdle: false, updateInterval: 150, keepBuffer: 3 },
-        ).addTo(map);
+          {
+            maxZoom: 16, opacity: 0.92, pane: "wx-labels",
+            // Places are supplemental. Avoid competing with real satellite
+            // imagery during a fast pan or fetching intermediate pinch levels.
+            updateWhenIdle: true, updateWhenZooming: false,
+            updateInterval: 250, keepBuffer: 2,
+          },
+        );
+        manageRasterZoomLabels(map, labelTiles, labels, {
+          setTimeout: (fn, delay) => window.setTimeout(fn, delay),
+          clearTimeout: (handle) => window.clearTimeout(handle),
+          requestAnimationFrame: (fn) => window.requestAnimationFrame(fn),
+          cancelAnimationFrame: (handle) => window.cancelAnimationFrame(handle),
+        }, window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+        // Do not fill the initial network connection slots with secondary
+        // labels before satellite imagery has begun arriving. This is a
+        // bounded one-shot defer, never a second imagery layer or a new
+        // background poll. Mount after the first real image tile or 800ms.
+        let labelsMounted = false;
+        const mountLabels = () => {
+          if (labelsMounted) return;
+          labelsMounted = true;
+          window.clearTimeout(labelMountTimer);
+          imagery.off("tileload", mountLabels);
+          labelTiles.addTo(map!);
+        };
+        const labelMountTimer = window.setTimeout(mountLabels, 800);
+        imagery.on("tileload", mountLabels);
+        map.once("unload", () => {
+          window.clearTimeout(labelMountTimer);
+          imagery.off("tileload", mountLabels);
+        });
         modelRef.current?.attach(L, map);
         if (modelRef.current) {
           // Show one coherent model at a time. The earlier permanent overlap
@@ -718,7 +794,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       fallbackTimer = window.setTimeout(() => {
         fallbackTimer = 0;
         enableDetailedFallback();
-      }, 8000);
+      }, 4500);
     };
     const suspendDetailedFallback = () => {
       if (!detailAllowed && !fallbackTimer && !viewAc && !fineWorldAc) return;
@@ -736,6 +812,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     };
     rainFallbackRefreshRef.current = scheduleDetailedFallback;
     rainFallbackSuspendRef.current = suspendDetailedFallback;
+    const preparePlaybackFallback = () => {
+      if (dead || saver || quickWorldReady || quickWorldPending) return;
+      quickWorldPending = true;
+      void loadWorld().finally(() => { quickWorldPending = false; });
+    };
+    rainPlaybackQuickRef.current = preparePlaybackFallback;
 
     // Initially prioritize three actual ECMWF spatial layers. The
     // existing generic grid covers the fallback until a sustained outage.
@@ -743,13 +825,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const consider = () => {
       if (dead) return;
       window.clearTimeout(timer);
-      timer = window.setTimeout(pullView, 280);
+      // A short debounce suppresses intermediate fling requests but starts
+      // a settled regional rain fetch sooner. Existing generation tokens,
+      // AbortControllers and cached-coverage checks remain unchanged.
+      timer = window.setTimeout(pullView, 220);
     };
     map.on("moveend", consider);
     map.on("zoomend", consider);
     return () => {
       dead = true;
       if (rainFallbackRefreshRef.current === scheduleDetailedFallback) rainFallbackRefreshRef.current = null;
+      if (rainPlaybackQuickRef.current === preparePlaybackFallback) rainPlaybackQuickRef.current = null;
       if (rainFallbackSuspendRef.current === suspendDetailedFallback) rainFallbackSuspendRef.current = null;
       worldAc.abort();
       fineWorldAc?.abort();
@@ -1057,6 +1143,29 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "إصدار ECMWF الثابت" : "Pinned ECMWF model run"}: {weatherDiagnostics?.modelRunPinned ? "OK" : "capture fallback"}
             {weatherDiagnostics?.modelRunReferenceTime ? ` · ${weatherDiagnostics.modelRunReferenceTime}` : ""}
           </p>
+          <button type="button" className="my-1 rounded border border-white/35 px-2 py-1"
+            onClick={() => {
+              const report = modelRef.current?.diagnostics();
+              if (!report || !navigator.clipboard?.writeText) {
+                setCopyStatus(lang === "ar" ? "النسخ غير متاح" : "Clipboard unavailable");
+                return;
+              }
+              void navigator.clipboard.writeText(JSON.stringify({
+                capturedAt: new Date().toISOString(),
+                layer: "ECMWF rain/cloud/snow",
+                dataSaver: prefs.dataSaver,
+                ...report,
+              }, null, 2)).then(
+                () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
+                () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
+              );
+            }}>
+            {lang === "ar" ? "نسخ تقرير الأداء الفعلي" : "Copy actual performance report"}
+          </button>
+          {copyStatus ? <p role="status">{copyStatus}</p> : null}
+          <p>{lang === "ar" ? "استعلامات حجم الملف المشتركة" : "Shared size probes"}: {weatherDiagnostics?.sharedFileProbes ?? 0}
+            {" · "}{lang === "ar" ? "استعلامات نشطة" : "active"}: {weatherDiagnostics?.activeFileProbes ?? 0}
+          </p>
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
@@ -1098,6 +1207,15 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 {" · n="}{weatherDiagnostics?.performance.tilePipeline[i]?.count ?? 0}
               </p>
             ))}
+            <p>{lang === "ar" ? "زمن تهيئة النموذج" : "Model startup"}: 
+              {" metadata "}{weatherDiagnostics?.startupMs.metadata?.toFixed(0) ?? "—"}{"ms"}
+              {" · "}{lang === "ar" ? "أول غيوم جاهزة" : "first clouds ready"}{" "}{weatherDiagnostics?.startupMs.firstCloudReady?.toFixed(0) ?? "—"}{"ms"}
+              {" · "}{lang === "ar" ? "أول إطار مكتمل" : "first complete frame"}{" "}{weatherDiagnostics?.startupMs.firstCompleteReady?.toFixed(0) ?? "—"}{"ms"}
+            </p>
+            <p>{"429/Retry-After "}{weatherDiagnostics?.rateLimitedResponses ?? 0}
+              {" · "}{lang === "ar" ? "باقي مهلة المزود" : "Provider cooldown"}{" "}
+              {Math.ceil((weatherDiagnostics?.rateLimitRemainingMs ?? 0) / 1000)}{"s"}
+            </p>
             <p>{"native errors "}{weatherDiagnostics?.performance.nativeFailures ?? 0}
               {" · canceled "}{weatherDiagnostics?.performance.nativeCancellations ?? 0}
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
@@ -1124,6 +1242,38 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 ? ` · idle ${Math.round(weatherDiagnostics.layerTimings[index]!.idleMs! / 1000)}s` : ""}
             </p>
           ))}
+          <div className="mt-2 rounded-md border border-white/15 p-2 text-[0.66rem]">
+            <p className="font-semibold">{lang === "ar" ? "MapTiler Weather — فحص تجريبي للبيانات الوصفية فقط" : "MapTiler Weather — catalog-only experimental probe"}</p>
+            <p className="text-white/65">{lang === "ar"
+              ? "لا يغير الطبقات أو محرك ECMWF. أدخل مفتاحًا عامًا مقيدًا للاختبار؛ لا يُحفظ."
+              : "Does not change ECMWF or imagery. Enter a restricted public test key; it is not saved."}</p>
+            <div className="mt-1 flex gap-1">
+              <input type="password" autoComplete="off" value={pilotKey}
+                onChange={(e) => setPilotKey(e.target.value)}
+                placeholder={lang === "ar" ? "مفتاح MapTiler التجريبي" : "MapTiler test key"}
+                aria-label={lang === "ar" ? "مفتاح MapTiler التجريبي" : "MapTiler test key"}
+                className="min-w-0 flex-1 rounded border border-white/25 bg-transparent px-2 py-1 text-white"
+              />
+              <button type="button" className="rounded border border-white/35 px-2 py-1"
+                disabled={pilotStatus === "loading" || !pilotKey.trim()}
+                onClick={checkPilot}>
+                {lang === "ar" ? "فحص" : "Check"}
+              </button>
+            </div>
+            <p role="status">{pilotStatus === "ok"
+              ? (lang === "ar" ? "تم التحقق من الفهرس" : "Catalog verified")
+              : pilotStatus === "loading" ? (lang === "ar" ? "فحص المصدر..." : "Checking...")
+              : pilotStatus === "not-run" ? (lang === "ar" ? "غير مفعل" : "Not enabled")
+              : pilotStatus}</p>
+            {pilotResult ? (
+              <div>
+                <p>{lang === "ar" ? "المتغيرات المتاحة" : "Catalog variables"}: {pilotResult.variables.length}</p>
+                {pilotResult.variables.filter((v) => /cloud|precip|rain|snow/i.test(v.id)).slice(0, 8).map((v) => (
+                  <p key={v.id}>{v.id}: {v.keyframeCount} frames · {v.firstTime ?? "—"} → {v.lastTime ?? "—"}</p>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <p className="mt-1 text-white/65">{lang === "ar" ? "للمقارنة فقط؛ لا يغير البيانات أو إعدادات الطبقات." : "Comparison only; does not alter forecast values."}</p>
         </div>
       ) : null}

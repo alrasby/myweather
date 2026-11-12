@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { solarDaylight, daylightNow } from "./astro.ts";
+import { solarDaylight, daylightNow, moonAboveHorizon } from "./astro.ts";
 import { repairSolarForecast, solarEventsForDate } from "./solarForecast.ts";
 import type { WeatherBundle } from "./types.ts";
 
@@ -43,6 +43,16 @@ test("valid provider events stay untouched rather than being replaced by estimat
     daily: [{ t: at(8), sunrise: sun.rise + 6 * 60_000, sunset: sun.set - 5 * 60_000 }],
   } as WeatherBundle;
   assert.equal(repairSolarForecast(source, { lat: 23.588, lon: 58.3829 }), source);
+});
+
+test("night sky does not show a moon below the city's horizon", () => {
+  // 12 Nov 2026 at 17:52 Muscat / 14:52 Hammerfest: after sunset,
+  // but the moon is still below the Hammerfest horizon.
+  const dusk = Date.parse("2026-11-12T13:52:00Z");
+  assert.equal(moonAboveHorizon(70.6631, 23.6809, dusk), false);
+  // Moon is above the Muscat horizon earlier the same day.
+  assert.equal(moonAboveHorizon(23.588, 58.3829, Date.parse("2026-11-12T10:00:00Z")), true);
+  assert.equal(moonAboveHorizon(Number.NaN, 23, dusk), false);
 });
 
 test("invalid date keys cannot silently create bogus solar data", () => {

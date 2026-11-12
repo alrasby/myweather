@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback } from "./weatherPlayback.ts";
+import { nextPlaybackHour, secondsPerForecastHour, weatherLoadingPhase, shouldPaintWeatherFallback, shouldEmitRainFrame, needsRainOverlay, shouldUpdateRainOverlay, shouldUpdateRainFallback, rainClockWithoutGrid } from "./weatherPlayback.ts";
 
 test("rain/snow playback does not outrun ECMWF; wind and temperature retain their cadence", () => {
   assert.equal(secondsPerForecastHour(2), 4);
@@ -59,4 +59,11 @@ test("low-resolution fallback limits GPU redraws while ECMWF decodes", () => {
   assert.equal(shouldUpdateRainFallback(20, 0), true);
   assert.equal(shouldUpdateRainFallback(199, 100), false);
   assert.equal(shouldUpdateRainFallback(200, 100), true);
+});
+
+test("rain clock remains based on one real UTC hour while spatial/actual grids load", () => {
+  const now = Date.parse("2026-11-12T06:55:00Z");
+  assert.equal(rainClockWithoutGrid(now, 0), Date.parse("2026-11-12T06:00:00Z"));
+  assert.equal(rainClockWithoutGrid(now, 1.25), Date.parse("2026-11-12T07:15:00Z"));
+  assert.equal(rainClockWithoutGrid(now, NaN), Date.parse("2026-11-12T06:00:00Z"));
 });

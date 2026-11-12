@@ -294,6 +294,9 @@ html.light {
 }
 
 .sky-clouds {
+  /* Weather-driven clouds remain animated in the sky, while scroll
+     progressively fades them before the hourly forecast reaches this band. */
+  opacity: var(--wx-cloud-scroll-opacity, 1);
   position: absolute;
   top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 4.45rem + 2mm);
   right: 0;
@@ -362,7 +365,8 @@ html.light {
   border-radius: var(--radius-card);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.8),
-    0 12px 28px rgb(16 40 64 / 0.12);
+    0 3px 8px rgb(16 40 64 / 0.035),
+    0 12px 28px rgb(16 40 64 / 0.10);
   backdrop-filter: blur(22px) saturate(1.45);
   -webkit-backdrop-filter: blur(22px) saturate(1.45);
 }
@@ -377,7 +381,8 @@ html:not(.light) .wx-card {
   border-color: color-mix(in srgb, white 20%, transparent);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.12),
-    0 12px 28px rgb(0 0 0 / 0.22);
+    0 3px 9px rgb(0 0 0 / 0.08),
+    0 12px 28px rgb(0 0 0 / 0.18);
 }
 
 .map-bar {
@@ -447,6 +452,10 @@ html:not(.light) .pop-chance {
    tile-edge bright lines visible across latitude and longitude while panning.
    No transform, tile size or weather animation is changed here. */
 
+/* Weather tiles must use Leaflet's own loaded-tile opacity and the
+   existing ECMWF frame-level transition, not a second per-tile CSS fade.
+   Duplicated 160ms fades exposed semi-transparent rectangular patches
+   as each .om tile finished at a different time. Keep native tile sizes. */
 
 .map-tools {
   position: absolute;
@@ -756,18 +765,21 @@ html:not(.light) .wx-settings-card {
    Using one transparent canvas avoids a duplicate filter/compositing layer. */
 .temp-under-orb { touch-action: pan-y; }
 .wx-hero-atmosphere {
+  /* Independent, weather-responsive sky layer, no longer a child of the
+     scrolling temperature block. Sits behind the upper forecast cards and
+     feathers before its lower boundary; rain/snow is clipped to this region. */
+  opacity: var(--wx-cloud-scroll-opacity, 1);
   position: absolute;
-  z-index: 0;
-  /* Extend across the hero's horizontal insets and a little into the gap
-     BEFORE the hourly card. Do not create rounded rectangle corners: this
-     is ambient sky, not a new card. All pixels fade out before the overlay
-     reaches the forecast-card content. */
-  inset: -0.55rem -1rem -1.6rem;
+  z-index: 2;
+  top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 7.25rem);
+  right: 0;
+  left: 0;
+  height: 11.5rem;
   overflow: hidden;
   border-radius: 0;
   pointer-events: none;
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 9%, #000 48%, rgb(0 0 0 / 0.85) 60%, rgb(0 0 0 / 0.46) 76%, rgb(0 0 0 / 0.13) 90%, transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0%, #000 9%, #000 48%, rgb(0 0 0 / 0.85) 60%, rgb(0 0 0 / 0.46) 76%, rgb(0 0 0 / 0.13) 90%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgb(0 0 0 / 0.36) 12%, #000 28%, #000 44%, rgb(0 0 0 / 0.73) 61%, rgb(0 0 0 / 0.27) 77%, rgb(0 0 0 / 0.07) 91%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgb(0 0 0 / 0.36) 12%, #000 28%, #000 44%, rgb(0 0 0 / 0.73) 61%, rgb(0 0 0 / 0.27) 77%, rgb(0 0 0 / 0.07) 91%, transparent 100%);
 }
 .wx-hero-atmosphere > canvas {
   display: block;
@@ -777,3 +789,13 @@ html:not(.light) .wx-settings-card {
 @media (prefers-reduced-motion: reduce) {
   .wx-hero-atmosphere > canvas { transition: none; }
 }
+
+/* UX polish: preserve card palette, translucency, radius and placement. */
+.wx-daily-card .wx-daily-row { border-bottom-color: color-mix(in srgb, var(--color-line) 65%, transparent); }
+.wx-daily-card .wx-daily-row:last-child { border-bottom-color: transparent; }
+.wx-daily-reveal { animation: wx-day-reveal 170ms ease-out both; }
+@keyframes wx-day-reveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) { .wx-daily-reveal { animation: none; } }
