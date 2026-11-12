@@ -4,18 +4,17 @@ import assert from "node:assert/strict";
 
 const read = (path) => readFileSync(new URL("../../" + path, import.meta.url), "utf8");
 
-test("animated weather cloud field is mounted ONLY inside the existing home hero", () => {
+test("weather animation is behind the upper cards, not a child of scrolling temperature content", () => {
   const home = read("project/src/components/weather/HomeScreen.tsx");
   const app = read("project/src/components/weather/WeatherApp.tsx");
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
   const style = read("project/src/styles.css");
-  const hero = home.indexOf('className="temp-under-orb');
-  const clouds = home.indexOf("<HeroClouds ");
-  const nextCard = home.indexOf('<section className="wx-card mt-4 overflow-hidden py-2">');
-  assert.ok(hero >= 0 && hero < clouds && clouds < nextCard,
-    "The new cloud component must remain inside the top weather hero only");
-  assert.ok(!app.includes("HeroClouds"), "No hero cloud layer across the full screen");
+  assert.ok(home.includes('className="temp-under-orb'), "keep original temperature layout");
+  assert.ok(!home.includes("<HeroClouds"), "remove cloud canvas that was glued to the hero card");
+  assert.ok(sky.includes("heroWeather ? <HeroClouds"), "preserve adaptive clouds/rain/snow in independent sky scene");
+  assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}'));
   assert.ok(style.includes(".wx-hero-atmosphere") && style.includes("pointer-events: none;"));
-  assert.ok(home.includes("bundle.placeId === place.id"), "Never paint previous city's sky");
+  assert.ok(style.includes("height: 11.5rem"), "precipitation remains bounded above the cards");
 });
 
 test("hero weather scene is bounded to low frame rate, pauses outside viewport and supports accessibility", () => {
@@ -30,27 +29,25 @@ test("hero weather scene is bounded to low frame rate, pauses outside viewport a
 
 test("saved-city gestures ignore nested horizontal scrollers and preserve vertical refresh", () => {
   const home = read("project/src/components/weather/HomeScreen.tsx");
-  assert.ok(home.includes('citySwipeTarget(places.map((p) => p.id), activeId, dx, dy, lang === "ar")'));
+  assert.ok(home.includes('citySwipeTarget(swipeIds, activeId, dx, dy, lang === "ar")'));
   assert.ok(home.includes(".overflow-x-auto"));
   assert.ok(home.includes("Math.abs(dy) > Math.abs(dx) * 1.2"));
   assert.ok(home.includes("hideAlertsAfterPull();"));
-  assert.ok(home.includes("setActive(target)"));
+  assert.ok(home.includes("navigateSwipe(target)"));
   assert.ok(home.includes("onTouchCancel"));
 });
 
-test("home cloud atmosphere blends out gradually without a rounded or opaque card-edge shelf", () => {
+test("upper sky fades softly behind cards with no scrolling shelf or full-screen rain", () => {
   const css = read("project/src/styles.css");
   const sky = css.split(".sky-clouds.is-deck {")[1]?.split("}")[0];
   const hero = css.split(".wx-hero-atmosphere {")[1]?.split("}")[0];
-  assert.ok(sky && hero, "global cloud deck and localized hero must exist");
-  assert.ok(!sky.includes("#000 0 88%"), "no late sudden deck cutoff");
-  assert.ok(sky.includes("0.82") && sky.includes("0.45") && sky.includes("0.12"),
-    "cloud deck must have intermediate alpha levels before cards");
-  assert.ok(hero.includes("border-radius: 0"), "rounded atmospheric corners exposed a rectangular edge");
-  assert.ok(hero.includes("inset: -0.55rem -1rem -1.6rem"), "scene should bleed into gap above hourly card");
-  assert.ok(hero.includes("0.85") && hero.includes("0.46") && hero.includes("0.13"),
-    "hero alpha must fade progressively, not stop at the element boundary");
-  assert.ok(hero.includes("transparent 100%"), "scene must reach fully transparent before the next card");
+  assert.ok(sky && hero, "ambient cloud deck and localized precipitation must exist");
+  assert.ok(sky.includes("0.82") && sky.includes("0.45") && sky.includes("0.12"));
+  assert.ok(hero.includes("position: absolute") && hero.includes("pointer-events: none"));
+  assert.ok(hero.includes("height: 11.5rem"), "weather is restricted to upper hero band");
+  assert.ok(!hero.includes("inset: -0.55rem"), "hero is no longer glued to the scrolling temperature card");
+  assert.ok(hero.includes("0.73") && hero.includes("0.27") && hero.includes("0.07"));
+  assert.ok(hero.includes("transparent 100%"), "feather both ends of the atmosphere");
 });
 
 test("refresh keeps cached city data visible and ignores superseded responses", () => {
@@ -80,7 +77,8 @@ test("both interactive cloud layers fade away before hourly cards scroll beneath
   assert.ok(!app.includes("showClouds={false}"), "restore dynamic weather-driven sky clouds");
   assert.ok(app.includes("<SkyBackdrop"), "preserve responsive sky, sun and moon");
   assert.ok(sky.includes("showClouds ? <CloudField"), "restore original CloudField lifecycle");
-  assert.ok(home.includes("<HeroClouds"), "retain localized animated clouds and precipitation");
+  assert.ok(sky.includes("heroWeather ? <HeroClouds"), "retain adaptive local clouds and precipitation in background");
+  assert.ok(!home.includes("<HeroClouds"), "no cloud canvas on the scrolling hero");
   assert.ok(home.includes("onScroll={syncCloudsWithScroll}"), "tie both cloud layers to the real Home scroller");
   assert.ok(home.includes("top / 96"), "fully fade the clouds before cards reach the sky band");
   assert.ok(home.includes("t * t * (3 - 2 * t)"), "use smoothstep, avoiding abrupt opacity cuts");
@@ -130,7 +128,7 @@ test("saved city paging works on clickable daily rows, including Android touchca
   assert.ok(home.includes('const swipeLast = useRef'));
   assert.ok(home.includes('swipeLast.current = { x: point.clientX, y: point.clientY }'));
   assert.ok(home.includes('onTouchCancel={() => {'));
-  assert.ok(home.includes('if (target) setActive(target);'));
+  assert.ok(home.includes('if (target) navigateSwipe(target);'));
   const selector = home.split('const nested = target?.closest(')[1]?.split(';')[0] ?? "";
   assert.ok(!selector.includes("'button,"), "forecast day buttons must not block city swipe");
   assert.ok(selector.includes(".overflow-x-auto"), "nested hourly ribbon must handle its own gestures");
@@ -146,4 +144,44 @@ test("rain spatial failures reduce fallback delay without extra grid budgets", (
   assert.ok(map.includes('}, 4500);'));
   assert.ok(map.includes('modelRef.current?.isSpatialVisible()'));
   assert.ok(map.includes('const budget = 4200;'));
+});
+
+test("GPS preview navigation never persists as a saved city", () => {
+  const home = read("project/src/components/weather/HomeScreen.tsx");
+  assert.ok(home.includes("citySwipeOrder(places.map((p) => p.id), gpsPreview?.id, peek?.id)"));
+  assert.ok(home.includes("else if (gpsPreview?.id === target) locatePlace(gpsPreview)"));
+  assert.ok(!home.includes("addPlace(gpsPreview)"));
+});
+
+test("rain/snow hero visuals remain conditional on real weather code and clipped to sky", () => {
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  const css = read("project/src/styles.css");
+  const app = read("project/src/components/weather/WeatherApp.tsx");
+  assert.ok(sky.includes('heroAtmosphere(code, cover, wind)'));
+  assert.ok(sky.includes('plan.precipitation === "snow"'));
+  assert.ok(sky.includes('if (plan.precipitation !== "none")'));
+  assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen'));
+  assert.ok(css.includes('height: 11.5rem'));
+});
+
+test("wind zoom transitions reset obsolete trails without changing wind physics", () => {
+  const engine = read("project/src/weather/glField.ts");
+  assert.ok(engine.includes('map.on("zoomend", this.onZoom)'));
+  assert.ok(engine.includes('this.map?.off("zoomend", this.onZoom)'));
+  assert.ok(engine.includes('if (this.kind === 0) for (const p of this.particles) p.trail.length = 0'));
+  assert.ok(engine.includes("this.windStep(lat, lon, cur"));
+});
+
+test("source-backed rain fallback can play while full ECMWF decodes; no fake or stale layer", () => {
+  const model = read("project/src/weather/modelField.ts");
+  const engine = read("project/src/weather/glField.ts");
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(engine.includes('hasSourceRain(): boolean'));
+  assert.ok(engine.includes('!grid.id.startsWith("est|")'));
+  assert.ok(model.includes("setSourceBackedFallback(available: boolean)"));
+  assert.ok(model.includes("this.sourceBackedFallback && !readySteps.has(this.base)"));
+  assert.ok(model.includes("completedOpacity >= 0.88"), "cloud preview must not hide real rain/snow fallback");
+  assert.ok(map.includes("rainPlaybackQuickRef.current?.()"));
+  assert.ok(map.includes("engine.hasSourceRain()"));
+  assert.ok(map.includes("info.playbackWaitingMs >= 1800"));
 });
