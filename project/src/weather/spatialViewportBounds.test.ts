@@ -44,10 +44,13 @@ test("invalid or nonfinite viewports fail safe to global model", () => {
 test("small pans inside a padded .om window do not retrigger full decoding", () => {
   const current = spatialViewportBounds({ west: 40, east: 60, south: 15, north: 30 });
   const slight = spatialViewportBounds({ west: 40.3, east: 60.3, south: 15.1, north: 30.1 });
-  assert.equal(canReuseSpatialWindow(current, slight), false,
-    "once the padded edge moves outside, refresh to preserve coverage");
+  assert.equal(canReuseSpatialWindow(current, slight), true,
+    "a tiny move can reuse most of the padded region, keeping a safety margin");
   const stillWithin = [current[0] + 0.1, current[1] + 0.1, current[2] - 0.1, current[3] - 0.1];
   assert.equal(canReuseSpatialWindow(current, stillWithin as typeof current), true);
+  const shifted = spatialViewportBounds({ west: 42, east: 62, south: 15, north: 30 });
+  assert.equal(canReuseSpatialWindow(current, shifted), false,
+    "a move beyond half the buffered margin must refresh the crop");
   const distant = spatialViewportBounds({ west: 75, east: 95, south: 15, north: 30 });
   assert.equal(canReuseSpatialWindow(current, distant), false);
 });
