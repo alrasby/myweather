@@ -258,3 +258,29 @@ test("wind streamline seeds and per-frame advection share one Mercator-correct p
   assert.ok(engine.includes("windScreenStepDegrees(lat, zoom, pxPerSec, dt)"));
   assert.ok(!seed?.includes("lo -= ((cur.u / mag) * deg) / cos"));
 });
+
+test("map painting performs only one viewport projection for each wind/temperature frame", () => {
+  const src = read("project/src/weather/glField.ts");
+  const frame = src.split("private frame = (now: number) => {")[1]?.split("private emit()")[0] ?? "";
+  assert.ok(frame.includes("if (cycloneDue && !fallbackDue) this.pinView()"), "only cyclone-only frames need a separate viewport sync");
+  assert.ok(frame.includes("if (fallbackDue) {") && frame.includes("this.drawField()"), "normal frame draws must keep working");
+  assert.ok(src.includes("private drawField() {") && src.includes("this.syncViewport()"), "field painting still uses current map geometry");
+});
+
+test("loaded real ECMWF tiles enter with a short fade, never interpolated weather data", () => {
+  const css = read("project/src/styles.css");
+  assert.ok(css.includes(".leaflet-wx-clouds-pane .leaflet-tile") && css.includes(".leaflet-wx-model-pane .leaflet-tile"));
+  assert.ok(css.includes(".leaflet-tile.leaflet-tile-loaded"));
+  assert.ok(css.includes("transition: opacity 160ms ease-out"), "gentle compositor-only tile entry");
+  assert.ok(css.includes("@media (prefers-reduced-motion: reduce)"));
+  const model = read("project/src/weather/spatialTilePolicy.ts");
+  assert.ok(model.includes("updateWhenIdle: true") && model.includes("keepBuffer: 1"));
+});
+
+test("rain regional fallback starts slightly sooner after release without changing source budgets", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(map.includes("window.setTimeout(pullView, 220)"));
+  assert.ok(map.includes("viewAc?.abort()"));
+  assert.ok(map.includes("modelRef.current?.isSpatialVisible()"));
+  assert.ok(map.includes("const budget = 4200;"));
+});
