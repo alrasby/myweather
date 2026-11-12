@@ -1130,6 +1130,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "استعلامات حجم الملف المشتركة" : "Shared size probes"}: {weatherDiagnostics?.sharedFileProbes ?? 0}
             {" · "}{lang === "ar" ? "استعلامات نشطة" : "active"}: {weatherDiagnostics?.activeFileProbes ?? 0}
           </p>
+          <p>{lang === "ar" ? "تجديد نافذة فك بيانات OM" : "Spatial window updates"}: {weatherDiagnostics?.spatialWindowUpdates ?? 0}
+            {" · "}{lang === "ar" ? "إعادة الاستخدام" : "reused"}: {weatherDiagnostics?.spatialWindowReuses ?? 0}
+            {" · "}{lang === "ar" ? "حركة الخريطة" : "gesture"}: {weatherDiagnostics?.gestureActive ? "yes" : "no"}
+          </p>
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
