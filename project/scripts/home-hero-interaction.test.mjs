@@ -316,6 +316,18 @@ test("weather hero uses one atmospheric cloud generator, with precipitation-only
   assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
 });
 
+test("cloud field uses seamless single-pass pattern and moon respects the city's horizon", () => {
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  const app = read("project/src/components/weather/WeatherApp.tsx");
+  const astro = read("project/src/weather/astro.ts");
+  assert.ok(sky.includes('ctx.createPattern(field.canvas, "repeat")'), "one continuously repeated cloud texture");
+  assert.ok(sky.includes("x / (w - 1)"), "cloud edges match in the periodic texture");
+  assert.ok(!sky.includes("const overlap = 1 / dpr"), "no double-alpha cloud seam");
+  assert.ok(sky.includes("!day && moonVisible"), "night sky does not imply moon above horizon");
+  assert.ok(app.includes("moonAboveHorizon(place.lat, place.lon, clock)"));
+  assert.ok(astro.includes("return moonAlt(now, lat, lon) > 0"));
+});
+
 test("home sky renders gently but never competes with weather map tile decoding offscreen", () => {
   const sky = read("project/src/components/weather/SkyBackdrop.tsx");
   const app = read("project/src/components/weather/WeatherApp.tsx");
