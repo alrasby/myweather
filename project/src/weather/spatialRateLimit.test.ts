@@ -30,7 +30,7 @@ test("HTTP-date retry hints and extreme values are bounded without too-short ret
   const now = Date.parse("2026-11-12T06:00:00Z");
   assert.equal(providerRetryMs(429, new Date(now + 25000).toUTCString(), now), 25000);
   assert.equal(providerRetryMs(429, "9000", now), 3600000);
-  assert.equal(providerRetryMs(429, "-12", now), 30000);
+  assert.equal(providerRetryMs(429, "invalid date", now), 30000);
 });
 
 test("user-canceled requests remain independent from provider throttling", () => {
