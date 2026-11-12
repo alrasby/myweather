@@ -54,3 +54,12 @@ export function shouldUpdateRainOverlay(nowMs: number, lastMs: number): boolean 
 export function shouldUpdateRainFallback(nowMs: number, lastPaintMs: number): boolean {
   return lastPaintMs === 0 || nowMs - lastPaintMs >= 100;
 }
+
+/** A stable UTC forecast-hour clock when measured rain tiles are still
+ * loading. This is a time coordinate ONLY, never synthetic weather data.
+ * In particular, it must not recalculate Date.now() every animation frame. */
+export function rainClockWithoutGrid(startMs: number, hour: number): number {
+  const base = Math.floor(startMs / 3_600_000) * 3_600_000;
+  const safeHour = Number.isFinite(hour) ? Math.max(0, hour) : 0;
+  return base + safeHour * 3_600_000;
+}
