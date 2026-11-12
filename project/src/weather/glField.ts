@@ -1268,8 +1268,12 @@ export class FieldEngine {
     const pxPerDeg = (256 * 2 ** zoom) / 360;
     const zoomScale = zoom < 3 ? 0.62 : zoom < 5 ? 0.84 : zoom < 7 ? 1 : 1.08;
     const pxPerSec = Math.min(34, Math.max(10, 8 + spd * 0.28)) * zoomScale;
-    const deg = (pxPerSec * dt) / Math.max(8, pxPerDeg);
+    // Web Mercator stretches latitude at high latitudes by 1/cos(lat).
+    // Scale north/south geographic motion by cos, so the wind's VISUAL
+    // screen speed stays consistent from Oman to northern Norway/Russia.
+    // East/west pixels must not be multiplied by 1/cos twice.
     const cos = Math.max(0.22, Math.cos((lat * Math.PI) / 180));
+    const deg = (pxPerSec * dt * cos) / Math.max(8, pxPerDeg);
     let nlat = lat + (sample.v / mag) * deg;
     let nlon = lon + ((sample.u / mag) * deg) / cos;
     if (nlat > 84) nlat = 84;
