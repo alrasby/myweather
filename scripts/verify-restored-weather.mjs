@@ -7,7 +7,10 @@ const map = readFileSync(new URL('../project/src/components/weather/MapScreen.ts
 const android = readFileSync(new URL('../project/vite.android.config.ts', import.meta.url), 'utf8');
 assert.match(net, /export async function proxyFetch\(/, 'network entrypoint must exist');
 assert.match(net, /CapacitorHttp\.request/, 'native HTTP transport must exist');
-assert.match(net, /raceTimeout/, 'network timeout protection must exist');
+assert.match(net, /raceRequestTimeout/, 'abort-aware network timeout protection must exist');
+const slots = source('requestSlots.ts');
+assert.match(slots, /class RequestSlots/, 'bounded HTTP request budget must exist');
+assert.match(slots, /clearTimeout\(timer\)/, 'timeout timers must be cleaned');
 assert.match(grid, /export (async )?function fetchGrid\(/, 'grid entrypoint must exist');
 assert.match(grid, /precipitation/, 'rain input must exist');
 assert.match(grid, /snowfall/, 'snow input must exist');
