@@ -16,3 +16,17 @@ export function citySwipeTarget(
   const step = (deltaX > 0 ? 1 : -1) * (rtl ? 1 : -1);
   return savedIds[current + step] ?? null;
 }
+
+/** Visible navigation order: unsaved GPS/preview may be visited without
+ * becoming a persisted saved city. Returned IDs are never stored here. */
+export function citySwipeOrder(
+  savedIds: readonly string[],
+  gpsPreviewId?: string | null,
+  activePreviewId?: string | null,
+): string[] {
+  const ids: string[] = [];
+  for (const id of [activePreviewId, gpsPreviewId, ...savedIds]) {
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
