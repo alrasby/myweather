@@ -294,8 +294,9 @@ html.light {
 }
 
 .sky-clouds {
-  /* Clouds belong to the sky, not to the scrolling forecast cards.
-     As cards advance they blend into the static sky naturally. */
+  /* Weather-driven clouds remain animated in the sky, while scroll
+     progressively fades them before the hourly forecast reaches this band. */
+  opacity: var(--wx-cloud-scroll-opacity, 1);
   position: absolute;
   top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 4.45rem + 2mm);
   right: 0;
@@ -760,6 +761,9 @@ html:not(.light) .wx-settings-card {
    Using one transparent canvas avoids a duplicate filter/compositing layer. */
 .temp-under-orb { touch-action: pan-y; }
 .wx-hero-atmosphere {
+  /* The localized moving clouds must fade alongside the separate sky
+     canvas; otherwise they seem glued to the forecast cards on scroll. */
+  opacity: var(--wx-cloud-scroll-opacity, 1);
   position: absolute;
   z-index: 0;
   /* Extend across the hero's horizontal insets and a little into the gap
