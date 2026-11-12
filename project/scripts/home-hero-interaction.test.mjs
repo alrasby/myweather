@@ -168,7 +168,7 @@ test("wind zoom transitions reset obsolete trails without changing wind physics"
   const engine = read("project/src/weather/glField.ts");
   assert.ok(engine.includes('map.on("zoomend", this.onZoom)'));
   assert.ok(engine.includes('this.map?.off("zoomend", this.onZoom)'));
-  assert.ok(engine.includes('if (this.kind === 0) for (const p of this.particles) p.trail.length = 0'));
+  assert.ok(engine.includes("if (this.kind === 0) this.particles.length = 0"), "pan and zoom must release obsolete particle positions, not only tails");
   assert.ok(engine.includes("this.windStep(lat, lon, cur"));
 });
 
