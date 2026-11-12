@@ -5,9 +5,17 @@
 export function usablePrecipitationGrid(
   longitudeSpan: number, columns: number, zoom: number,
   maxCellPixels = 72,
+  latitudeCellSpan = 0,
+  centerLatitude = 0,
 ): boolean {
-  if (![longitudeSpan, columns, zoom, maxCellPixels].every(Number.isFinite) ||
-      longitudeSpan <= 0 || columns <= 0 || zoom < 0 || maxCellPixels <= 0) return false;
-  const pixelsPerCell = (256 * 2 ** zoom) * (longitudeSpan / columns) / 360;
-  return pixelsPerCell <= maxCellPixels;
+  if (![longitudeSpan, columns, zoom, maxCellPixels, latitudeCellSpan, centerLatitude].every(Number.isFinite) ||
+      longitudeSpan <= 0 || columns <= 0 || zoom < 0 || maxCellPixels <= 0 ||
+      latitudeCellSpan < 0) return false;
+  const pixelsPerDegree = (256 * 2 ** zoom) / 360;
+  const horizontalPixels = pixelsPerDegree * (longitudeSpan / columns);
+  // Web Mercator enlarges N/S spans near the poles. A 9-degree grid
+  // latitude cell that is tolerable in Oman can be a giant slab at 60N.
+  const mercatorScale = 1 / Math.max(0.22, Math.cos(centerLatitude * Math.PI / 180));
+  const verticalPixels = pixelsPerDegree * latitudeCellSpan * mercatorScale;
+  return Math.max(horizontalPixels, verticalPixels) <= maxCellPixels;
 }
