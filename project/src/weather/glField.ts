@@ -305,6 +305,14 @@ export class FieldEngine {
   private onMove = () => {
     this.drawField();
   };
+  private onZoom = () => {
+    // Wind traces are screen-projected from geographic coordinates; a zoom
+    // transforms historical tail points disproportionately. Keep the particle
+    // positions and count, but rebuild their trails after zoom settles.
+    if (this.kind === 0) for (const p of this.particles) p.trail.length = 0;
+    this.zoomSeen = this.map?.getZoom() ?? this.zoomSeen;
+    this.drawField();
+  };
   private settle = () => {
     this.drawField();
     this.drawParticles(0);
@@ -351,7 +359,7 @@ export class FieldEngine {
     // requestAnimationFrame already redraws during gestures. Avoid redundant
     // synchronous WebGL draws on every Leaflet move/zoom event.
     map.on("moveend", this.onMove);
-    map.on("zoomend", this.onMove);
+    map.on("zoomend", this.onZoom);
     map.on("viewreset", this.onMove);
     map.on("resize", this.settle);
     this.resize();
@@ -473,6 +481,15 @@ export class FieldEngine {
     return this.pick();
   }
 
+  /** A real measured/forecast precipitation grid is available for the
+   * current hour. Do not count the estimated initial bootstrap grid. */
+  hasSourceRain(): boolean {
+    if (this.kind !== 2) return false;
+    const grid = this.pick();
+    return !!grid && !grid.id.startsWith("est|") &&
+      Number.isFinite(grid.hours) && grid.hours > 0;
+  }
+
   sampleAt(lat: number, lon: number): FieldSample | null {
     const grid = this.pick();
     if (!grid) return null;
@@ -508,7 +525,7 @@ export class FieldEngine {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.map?.off("moveend", this.onMove);
-    this.map?.off("zoomend", this.onMove);
+    this.map?.off("zoomend", this.onZoom);
     this.map?.off("viewreset", this.onMove);
     this.map?.off("resize", this.settle);
     this.dropTextures();
@@ -1145,7 +1162,9 @@ export class FieldEngine {
     }
     const rain = this.kind === 2;
     const zoomNow = this.map?.getZoom() ?? 0;
-    if (this.zoomSeen >= 0 && Math.abs(zoomNow - this.zoomSeen) > 1.25) this.particles.length = 0;
+    if (this.kind === 0 && this.zoomSeen >= 0 && Math.abs(zoomNow - this.zoomSeen) > 0.35) {
+      for (const p of this.particles) p.trail.length = 0;
+    }
     this.zoomSeen = zoomNow;
     const cap = this.kind === 2 ? Math.max(this.particleTarget, 680) : this.particleTarget;
     let born = 0;
