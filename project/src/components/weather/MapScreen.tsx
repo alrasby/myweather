@@ -370,7 +370,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine || !ready) return;
-    const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : 240;
+    const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : prefs.particles === "med" ? 300 : 240;
     engine.setParticleCount(n);
     engine.setSaver(prefs.dataSaver);
   }, [prefs.dataSaver, prefs.particles, ready]);
