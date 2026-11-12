@@ -86,7 +86,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         // The WebView's JavascriptInterfaces retain their Java bridge objects;
         // the compass bridge in turn retains this Activity. Release both before
         // Capacitor tears down its WebView to avoid a stale Activity/sensor leak.
