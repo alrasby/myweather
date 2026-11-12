@@ -4,7 +4,7 @@ import { CitiesScreen } from "@/components/weather/CitiesScreen";
 import { HomeScreen } from "@/components/weather/HomeScreen";
 import { SettingsScreen } from "@/components/weather/SettingsScreen";
 import { SkyBackdrop } from "@/components/weather/SkyBackdrop";
-import { moonState, daylightNow } from "@/weather/astro";
+import { moonState, moonAboveHorizon, daylightNow } from "@/weather/astro";
 import { placeTitle } from "@/weather/format";
 import { hasWorldPack } from "@/weather/i18n-world";
 import { t } from "@/weather/i18n";
@@ -170,7 +170,7 @@ export function WeatherApp() {
         wind={bundle?.current.wind ?? 0} direction={bundle?.current.dir ?? 0}
         heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}
         animateClouds={tab === "home" && !placesOpen}
-        phase={moonState(clock).frac} />
+        phase={moonState(clock).frac} moonVisible={moonAboveHorizon(place.lat, place.lon, clock)} />
       <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
         <section className={`under-status mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col ${tab === "map" ? "hidden" : ""}`}>
           <div className="min-h-0 flex-1">
