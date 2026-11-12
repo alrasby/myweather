@@ -39,10 +39,10 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const stale = useWeather((s) => s.stale);
   const loadActive = useWeather((s) => s.loadActive);
   const setActive = useWeather((s) => s.setActive);
+  const locatePlace = useWeather((s) => s.locatePlace);
   const setHere = useWeather((s) => s.setHere);
   const [compassLocating, setCompassLocating] = useState(false);
   const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
-  const locatePlace = useWeather((s) => s.locatePlace);
   const place = activePlace({ places, activeId, peek });
   // A GPS fix remains a preview, not a saved city. Include it in gesture
   // navigation when distinct from saved locations, without modifying places.
