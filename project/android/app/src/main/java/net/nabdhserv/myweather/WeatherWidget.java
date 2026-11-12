@@ -115,8 +115,11 @@ public class WeatherWidget extends AppWidgetProvider {
         JSONObject data = pickCity(root, sp.getString(KEY_PLACE, ""));
         boolean rtl = root.optBoolean("rtl", true);
         views.setInt(R.id.root, "setLayoutDirection", rtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
-        int fg = dark ? Color.parseColor("#F7F8FA") : Color.parseColor("#142433");
-        int muted = dark ? Color.parseColor("#C5CED6") : Color.parseColor("#3E5364");
+        // Adaptive applies to text only; colored weather glyphs remain unchanged.
+        int fg = widgetTextColor(context, tint, dark);
+        int muted = "adaptive".equals(tint)
+            ? mixRgb(fg, dark ? 0xFF8BA9BE : 0xFF546879, 0.28f)
+            : dark ? Color.parseColor("#C5CED6") : Color.parseColor("#3E5364");
         views.setTextViewText(R.id.city, data.optString("city", "طقسي"));
         views.setTextColor(R.id.city, muted);
         views.setTextViewText(R.id.temp, data.optString("temp", "--°"));
@@ -139,8 +142,8 @@ public class WeatherWidget extends AppWidgetProvider {
             views.setTextColor(R.id.date, muted);
         }
         if (forecast) bindDays(views, data, fg, dark, density);
-        int wPx = Math.max(1, Math.round(Math.max(w, 110) * density));
-        int hPx = Math.max(1, Math.round(Math.max(h, 40) * density));
+        int wPx = Math.min(1200, Math.max(1, Math.round(Math.max(w, 110) * density)));
+        int hPx = Math.min(1000, Math.max(1, Math.round(Math.max(h, 40) * density)));
         views.setImageViewBitmap(R.id.bg, glass(wPx, hPx, alpha, dark, density, tint, tone, strength, context));
         Intent open = new Intent(context, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -239,26 +242,26 @@ public class WeatherWidget extends AppWidgetProvider {
         return requestedDark;
     }
 
+    /** Contrast-aware wallpaper-derived typography, independent of glyphs. */
+    static int widgetTextColor(Context context, String choice, boolean dark) {
+        if (!"adaptive".equals(choice)) return dark ? 0xFFF7F8FA : 0xFF142433;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                String resource = dark ? "system_neutral1_50" : "system_neutral1_900";
+                int id = context.getResources().getIdentifier(resource, "color", "android");
+                if (id != 0) return context.getColor(id);
+            } catch (RuntimeException ignored) { /* OEM palette optional */ }
+        }
+        return dark ? 0xFFF4F8FB : 0xFF152739;
+    }
+
     /** Material You wallpaper-derived system palette on Android 12+.
      * No wallpaper image access, sensitive permissions or background sampler.
      * OEMs without a dynamic palette use our established ocean glass fallback.
      */
     static int glassTint(Context context, String choice, boolean dark, int tone, int strength) {
-        if (!"adaptive".equals(choice)) return glassTint(choice, dark, tone, strength);
-        int accent = 0;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                int id = context.getResources().getIdentifier("system_accent1_500", "color", "android");
-                if (id != 0) accent = context.getColor(id);
-            } catch (RuntimeException ignored) { /* Samsung/OEM may omit dynamic palette */ }
-        }
-        if (accent == 0) accent = Color.parseColor(dark ? "#244C65" : "#91C6E7");
-        float shade = Math.max(0f, Math.min(100f, tone)) / 100f;
-        int toned = shade < 0.5f
-            ? mixRgb(accent, dark ? 0xFF9FC4D4 : 0xFFE6F3FA, (0.5f - shade) * 0.80f)
-            : mixRgb(accent, dark ? 0xFF0C1B31 : 0xFF294767, (shade - 0.5f) * 0.75f);
-        return mixRgb(dark ? 0xFF65778B : 0xFFD7E2EB, toned,
-            Math.max(0f, Math.min(1f, strength / 100f)));
+        // Adaptive selects the TEXT color; background remains neutral glass.
+        return glassTint("adaptive".equals(choice) ? "ocean" : choice, dark, tone, strength);
     }
 
     /** Colors are separate from opacity: reducing opacity never forces a dark or white wash. */
@@ -357,8 +360,15 @@ public class WeatherWidget extends AppWidgetProvider {
 
         @JavascriptInterface
         public void push(String json) {
-            if (json == null) return;
-            prefs(context).edit().putString(KEY_JSON, json).commit();
+            if (json == null || json.length() < 2 || json.length() > 196608) return;
+            try {
+                JSONObject root = new JSONObject(json);
+                JSONArray cities = root.optJSONArray("cities");
+                if (cities != null && cities.length() > 32) return;
+            } catch (Exception invalid) {
+                return;
+            }
+            prefs(context).edit().putString(KEY_JSON, json).apply();
             updateAll(context);
         }
 
