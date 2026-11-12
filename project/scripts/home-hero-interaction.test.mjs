@@ -247,7 +247,7 @@ test("fallback rain grid cells must not become large blurry polygons after zoom"
   assert.ok(field.includes("usablePrecipitationGrid(") && field.includes("grid.lonSpan, grid.cols"), "verify geographic resolution before drawing fallback");
   assert.ok(field.includes("if (usable(world)) return world;"));
   assert.ok(field.includes("if (usable(this.detail) && this.detailFillsView(this.detail))"));
-  assert.ok(quality.includes("pixelsPerCell <= maxCellPixels"));
+  assert.ok(quality.includes("Math.max(horizontalPixels, verticalPixels) <= maxCellPixels"), "rain resolution must account for longitude and latitude scale");
   assert.ok(field.includes('!grid.id.startsWith("est|")'), "no estimated rain tiles");
 });
 
