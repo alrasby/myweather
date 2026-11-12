@@ -85,8 +85,8 @@ test("both interactive cloud layers fade away before hourly cards scroll beneath
   assert.ok(home.includes("top / 96"), "fully fade the clouds before cards reach the sky band");
   assert.ok(home.includes("t * t * (3 - 2 * t)"), "use smoothstep, avoiding abrupt opacity cuts");
   assert.ok(home.includes('style.removeProperty("--wx-cloud-scroll-opacity")'), "reset cloud visibility on leaving Home");
-  assert.match(css, /\\.sky-clouds \\{[^}]*opacity: var\\(--wx-cloud-scroll-opacity, 1\\)/);
-  assert.match(css, /\\.wx-hero-atmosphere \\{[^}]*opacity: var\\(--wx-cloud-scroll-opacity, 1\\)/);
+  assert.ok(css.split(".sky-clouds {")[1]?.split("}")[0]?.includes("opacity: var(--wx-cloud-scroll-opacity, 1)"));
+  assert.ok(css.split(".wx-hero-atmosphere {")[1]?.split("}")[0]?.includes("opacity: var(--wx-cloud-scroll-opacity, 1)"));
 });
 
 test("15-day card receives subtle polish without changing its structure or baseline palette", () => {
