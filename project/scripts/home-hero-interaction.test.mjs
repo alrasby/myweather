@@ -179,7 +179,7 @@ test("source-backed rain fallback can play while full ECMWF decodes; no fake or 
   assert.ok(engine.includes('hasSourceRain(): boolean'));
   assert.ok(engine.includes('!grid.id.startsWith("est|")'));
   assert.ok(model.includes("setSourceBackedFallback(available: boolean)"));
-  assert.ok(model.includes("this.sourceBackedFallback && !readySteps.has(this.base)"));
+  assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base), this.sourceBackedFallback"), "actual fallback is selected only when current ECMWF data are incomplete");
   assert.ok(model.includes("completedOpacity >= 0.88"), "cloud preview must not hide real rain/snow fallback");
   assert.ok(map.includes("rainPlaybackQuickRef.current?.()"));
   assert.ok(map.includes("engine.hasSourceRain()"));
