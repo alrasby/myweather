@@ -194,3 +194,36 @@ test("a missing rain grid uses a stable forecast time reference, never Date.now 
   assert.ok(helper.includes("rainClockWithoutGrid(startMs: number, hour: number)"));
   assert.ok(engine.includes('this.global && !this.global.id.startsWith("est|")'));
 });
+
+test("pan-release avoids repeated ECMWF decodes without changing model resolution or forecast data", () => {
+  const model = read("project/src/weather/modelField.ts");
+  const bounds = read("project/src/weather/spatialViewportBounds.ts");
+  const policy = read("project/src/weather/spatialTilePolicy.ts");
+  assert.ok(model.includes("canReuseSpatialWindow(this.decodeWindow, requested)"));
+  assert.ok(model.includes('map.on("movestart", this.onMapStart)'));
+  assert.ok(model.includes('map.on("moveend", this.onMapStop)'));
+  assert.ok(model.includes("this.mapInteractions > 0) return;"));
+  assert.ok(model.includes("this.map.off(\"movestart\", this.onMapStart)"));
+  assert.ok(bounds.includes("const lonSlack = nextWidth / 24"));
+  assert.ok(policy.includes("updateWhenIdle: true"), "model tiles load only after the map settles");
+  assert.ok(policy.includes("keepBuffer: 1"), "do not increase heavy ECMWF tile budget");
+  assert.ok(model.includes("spatialWindowReuses: this.spatialWindowReuses"));
+});
+
+test("wind draw has a 30Hz gesture budget and fully retains map speed when stationary", () => {
+  const engine = read("project/src/weather/glField.ts");
+  assert.ok(engine.includes('this.kind === 0 && this.mapGestures > 0 && now - this.last < 32'));
+  assert.ok(engine.includes('this.raf = requestAnimationFrame(this.frame);'));
+  assert.ok(engine.includes('map.on("movestart", this.onMapGestureStart)'));
+  assert.ok(engine.includes('this.map?.off("movestart", this.onMapGestureStart)'));
+  assert.ok(engine.includes('for (const p of this.particles) p.trail.length = 0'));
+});
+
+test("satellite flings retain one real Esri underlay and never change model tiles", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(map.includes("const underlay4 = L.tileLayer(imageryUrl"));
+  assert.ok(map.includes("const underlay5 = L.tileLayer(imageryUrl"));
+  assert.ok(map.includes('satelliteUnderlayZoom(map.getZoom())'));
+  assert.ok(map.includes('if (target !== 4 && map.hasLayer(underlay4))'));
+  assert.ok(map.includes('if (target !== 5 && map.hasLayer(underlay5))'));
+});
