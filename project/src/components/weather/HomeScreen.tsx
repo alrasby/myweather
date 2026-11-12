@@ -71,6 +71,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
 
   const pull = useRef(0);
   const swipeStart = useRef<{ x: number; y: number; eligible: boolean } | null>(null);
+  const swipeLast = useRef<{ x: number; y: number } | null>(null);
   const [pulling, setPulling] = useState(0);
   const [locating, setLocating] = useState(false);
   const locateGen = useRef(0);
@@ -181,10 +182,12 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
     <div
       ref={scroller}
       onScroll={syncCloudsWithScroll}
+      style={{ touchAction: "pan-y" }}
       className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
       onTouchStart={(e) => {
         if (e.touches.length !== 1) {
           swipeStart.current = null;
+          swipeLast.current = null;
           pull.current = 0;
           return;
         }
@@ -192,13 +195,16 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
         const target = e.target instanceof Element ? e.target : null;
         // Hourly ribbons, forecast carousel and interactive elements retain
         // their own horizontal gestures. Only saved cities are eligible.
-        const nested = target?.closest('button, a, input, textarea, select, [role="slider"], [data-no-city-swipe], .overflow-x-auto');
+        const nested = target?.closest('header, nav, a, input, textarea, select, [role="slider"], [data-no-city-swipe], .overflow-x-auto, .wx-qibla-refresh');
         swipeStart.current = { x: touch.clientX, y: touch.clientY, eligible: !nested };
+        swipeLast.current = { x: touch.clientX, y: touch.clientY };
         pull.current = (scroller.current?.scrollTop ?? 0) <= 0 ? touch.clientY : 0;
       }}
       onTouchMove={(e) => {
         const point = e.touches[0];
-        if (!point || !swipeStart.current || !pull.current) return;
+        if (!point || !swipeStart.current) return;
+        swipeLast.current = { x: point.clientX, y: point.clientY };
+        if (!pull.current) return;
         const dx = point.clientX - swipeStart.current.x;
         const dy = point.clientY - swipeStart.current.y;
         if (Math.abs(dx) > Math.abs(dy) * 1.2) {
@@ -210,7 +216,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       onTouchEnd={(e) => {
         // Horizontal city paging must never also trigger vertical refresh.
         const gesture = swipeStart.current;
-        const touch = e.changedTouches[0];
+        const touch = e.changedTouches[0] ?? swipeLast.current;
         const dx = gesture && touch ? touch.clientX - gesture.x : 0;
         const dy = gesture && touch ? touch.clientY - gesture.y : 0;
         const target = gesture?.eligible
@@ -223,11 +229,20 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           refresh();
         }
         swipeStart.current = null;
+        swipeLast.current = null;
         pull.current = 0;
         setPulling(0);
       }}
       onTouchCancel={() => {
+        const gesture = swipeStart.current;
+        const last = swipeLast.current;
+        const target = gesture?.eligible && last
+          ? citySwipeTarget(places.map((p) => p.id), activeId,
+              last.x - gesture.x, last.y - gesture.y, lang === "ar")
+          : null;
+        if (target) setActive(target);
         swipeStart.current = null;
+        swipeLast.current = null;
         pull.current = 0;
         setPulling(0);
       }}
