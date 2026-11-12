@@ -58,7 +58,7 @@ test("compass/GPS and Android lifecycle/security wiring", () => {
  const manifest = read("project/android/app/src/main/AndroidManifest.xml");
  assert.ok(qibla.includes("تحديث موقعي للقبلة"), "Qibla-specific update label");
  assert.ok(qibla.includes("animate-spin"), "show progress on location update");
- assert.ok(native.includes("protected void onDestroy()"), "release native bridges");
+ assert.ok(native.includes("public void onDestroy()"), "release native bridges with Capacitor visibility");
  assert.ok(native.includes('removeJavascriptInterface("AndroidCompass")'));
  assert.ok(native.includes("main.removeCallbacksAndMessages(null)"), "clear pending compass callbacks");
  assert.ok(manifest.includes('android:allowBackup="false"'), "prevent location backup");
