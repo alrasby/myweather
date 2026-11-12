@@ -52,3 +52,22 @@ test("home cloud atmosphere blends out gradually without a rounded or opaque car
     "hero alpha must fade progressively, not stop at the element boundary");
   assert.ok(hero.includes("transparent 100%"), "scene must reach fully transparent before the next card");
 });
+
+test("refresh keeps cached city data visible and ignores superseded responses", () => {
+  const store = read("project/src/weather/store.ts");
+  assert.ok(store.includes("const generation = ++activeLoadGeneration"), "each request must have its own generation");
+  assert.ok(store.includes("generation !== activeLoadGeneration"), "out-of-order results must be ignored");
+  assert.ok(store.includes("cached?.bundle ?? estimateBundle(place)"), "cached city forecasts should survive a refresh");
+  assert.ok(store.includes("stale: !!get().bundle"), "clearing cache must not blank the currently visible forecast");
+});
+
+test("city navigation and settings controls retain UX without redesign", () => {
+  const home = read("project/src/components/weather/HomeScreen.tsx");
+  const settings = read("project/src/components/weather/SettingsScreen.tsx");
+  assert.ok(!home.includes("scroller.current.scrollTop = 0"), "city swipes should not reset vertical scroll");
+  for (const field of ["rainFrom", "windFrom", "dustFrom"]) {
+    assert.ok(settings.includes(`<Field label={t(lang, "${field}")}>\n          <Chips\n            disabled={!prefs.alerts}`),
+      `${field} must not be keyboard-activatable when alerts are off`);
+  }
+  assert.ok(settings.includes('aria-label={title}'), "switches need accessible names");
+});
