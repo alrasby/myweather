@@ -157,7 +157,7 @@ test("rain/snow hero visuals remain conditional on real weather code and clipped
   assert.ok(sky.includes('plan.precipitation === "snow"'));
   assert.ok(sky.includes('if (plan.precipitation !== "none")'));
   assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen'));
-  assert.ok(css.includes('height: 11.5rem'));
+  assert.ok(css.includes('height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)'));
 });
 
 test("wind zoom transitions reset obsolete trails without changing wind physics", () => {
@@ -306,7 +306,7 @@ test("weather hero uses one atmospheric cloud generator, with precipitation-only
   assert.ok(sky.includes("const density = heroAtmosphere(code, cover, 0).coverage"), "cloud transparency adapts to city WMO and cover");
   assert.ok(sky.includes('if (heroAtmosphere(code, cover, wind).precipitation === "none") return null'), "no empty precip animation in sunny cities");
   assert.ok(sky.includes('plan.precipitation === "snow"'), "snow retains existing weather-specific particle type");
-  assert.ok(css.includes("height: 11.5rem"), "precip stays clipped to upper region");
+  assert.ok(css.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "precip stays clipped to the cloud-deck region");
   assert.ok(css.includes("opacity: var(--wx-cloud-scroll-opacity, 1)"), "sky and precipitation scroll away gradually");
   assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "never composite partial ECMWF cloud tiles over different fallback model");
   assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
