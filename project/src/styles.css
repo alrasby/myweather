@@ -746,3 +746,27 @@ html:not(.light) .wx-settings-card {
 @media (prefers-reduced-motion: reduce) {
   .wx-qibla-refresh .animate-spin { animation-duration: 2.4s; }
 }
+
+/* Samsung-style weather atmosphere, original procedural assets. Confined
+   strictly to the existing home temperature/condition HERO, not the app sky.
+   The foreground content, spacing, backgrounds and other cards are unchanged.
+   Using one transparent canvas avoids a duplicate filter/compositing layer. */
+.temp-under-orb { touch-action: pan-y; }
+.wx-hero-atmosphere {
+  position: absolute;
+  z-index: 0;
+  inset: -0.55rem -0.2rem -0.45rem;
+  overflow: hidden;
+  border-radius: 1.35rem;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 78%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 78%, transparent 100%);
+}
+.wx-hero-atmosphere > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wx-hero-atmosphere > canvas { transition: none; }
+}
