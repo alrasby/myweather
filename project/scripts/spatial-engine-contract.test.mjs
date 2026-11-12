@@ -20,7 +20,7 @@ test("rain never samples estimated bootstrap grids as real rainfall", () => {
   const field = read("project/src/weather/glField.ts");
   const pick = field.split("private pick(): GridField | null {")[1]?.split("  /**")[0];
   assert.ok(pick, "rain selection must exist");
-  assert.ok(pick.includes('!this.detail.id.startsWith("est|")'));
+  assert.ok(pick.includes('!grid.id.startsWith("est|")'), "all rain sources must reject estimated bootstrap data");
   assert.ok(pick.includes("return null;"), "no synthetic fallback for absent rain data");
   assert.ok(field.includes("if (this.kind === 2 && grid.id.startsWith(\"est|\")) continue;"));
 });
