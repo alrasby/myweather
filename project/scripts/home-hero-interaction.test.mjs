@@ -40,8 +40,8 @@ test("saved-city gestures ignore nested horizontal scrollers and preserve vertic
 
 test("home cloud atmosphere blends out gradually without a rounded or opaque card-edge shelf", () => {
   const css = read("project/src/styles.css");
-  const sky = css.match(/\\.sky-clouds\\.is-deck\\s*\\{([^}]+)\\}/)?.[1];
-  const hero = css.match(/\\.wx-hero-atmosphere\\s*\\{([^}]+)\\}/)?.[1];
+  const sky = css.split(".sky-clouds.is-deck {")[1]?.split("}")[0];
+  const hero = css.split(".wx-hero-atmosphere {")[1]?.split("}")[0];
   assert.ok(sky && hero, "global cloud deck and localized hero must exist");
   assert.ok(!sky.includes("#000 0 88%"), "no late sudden deck cutoff");
   assert.ok(sky.includes("0.82") && sky.includes("0.45") && sky.includes("0.12"),
