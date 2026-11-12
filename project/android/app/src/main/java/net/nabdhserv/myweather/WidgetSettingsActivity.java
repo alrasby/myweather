@@ -185,7 +185,8 @@ public class WidgetSettingsActivity extends AppCompatActivity {
         }
         TextView sample = findViewById(R.id.previewLabel);
         if (sample != null) sample.setTextColor(
-            WeatherWidget.isDarkGlass(this, tint, dark) ? Color.WHITE : 0xFF182C44);
+            WeatherWidget.widgetTextColor(this, tint,
+                WeatherWidget.isDarkGlass(this, tint, dark)));
     }
 
     private void paintChips() {
