@@ -221,3 +221,11 @@ test("regression: wind particles reproject to nearest world and reset trails at 
   assert.ok(wind.includes('this.map?.off("movestart", this.onMoveStart)'));
   assert.ok(wind.includes("for (const p of this.particles) p.trail.length = 0"));
 });
+
+test("ECMWF remains visible through short playback seeks; real-data fallback activates only after bounded wait", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(map.includes("const hasRealRain = engine.hasSourceRain()"));
+  assert.ok(map.includes("!engine.playing || !modelRef.current?.isSpatialVisible()"));
+  assert.ok(map.includes("info.playbackWaitingMs >= 1600"));
+  assert.ok(map.includes("setSourceBackedFallback(needFallback)"));
+});
