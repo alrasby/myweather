@@ -284,3 +284,17 @@ test("rain regional fallback starts slightly sooner after release without changi
   assert.ok(map.includes("modelRef.current?.isSpatialVisible()"));
   assert.ok(map.includes("const budget = 4200;"));
 });
+
+test("map raster city labels no longer stretch during pinch and do not steal initial imagery requests", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const labels = read("project/src/weather/rasterZoomLabels.ts");
+  assert.ok(map.includes("manageRasterZoomLabels(map, labelTiles, labels"));
+  assert.ok(map.includes("updateWhenIdle: true, updateWhenZooming: false"), "labels update on settled view only");
+  assert.ok(map.includes('imagery.on("tileload", mountLabels)'), "request satellite imagery before optional label tiles");
+  assert.ok(map.includes('window.setTimeout(mountLabels, 800)'), "bounded initial label delay");
+  assert.ok(map.includes('window.clearTimeout(labelMountTimer)'), "no background callback after map unload");
+  assert.ok(labels.includes('map.on("zoomstart", onZoomStart)'));
+  assert.ok(labels.includes('map.on("zoomend", onZoomEnd)'));
+  assert.ok(labels.includes('layer.isLoading()'), "wait for actual raster labels, not arbitrary timeout");
+  assert.ok(labels.includes('map.on("unload", dispose)'), "event handlers released on map removal");
+});
