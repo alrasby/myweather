@@ -120,6 +120,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         <div className={prefs.alerts ? "" : "pointer-events-none opacity-45"}>
         <Field label={t(lang, "rainFrom")}>
           <Chips
+            disabled={!prefs.alerts}
             value={String(prefs.rainAlert)}
             options={[
               ["0.2", "0.2 mm"],
@@ -131,6 +132,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
         <Field label={t(lang, "windFrom")}>
           <Chips
+            disabled={!prefs.alerts}
             value={String(prefs.windAlert)}
             options={[
               ["30", `30 ${t(lang, "kmh")}`],
@@ -142,6 +144,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
         <Field label={t(lang, "dustFrom")}>
           <Chips
+            disabled={!prefs.alerts}
             value={String(prefs.dustAlert)}
             options={[
               ["80", "80"],
@@ -304,6 +307,7 @@ function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: st
       <button
         type="button"
         role="switch"
+        aria-label={title}
         aria-checked={on}
         disabled={disabled}
         onClick={onClick}
