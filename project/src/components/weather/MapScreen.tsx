@@ -9,7 +9,7 @@ import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { satelliteUnderlayZoom } from "@/weather/satelliteBasemap";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
@@ -285,19 +285,26 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // Avoid that duplicate GPU surface and its possible horizontal seams.
         // At closer zoom, the low-resolution underlay is useful while high-res
         // images arrive after a pan. Mount it only in that case.
-        const underlay = L.tileLayer(imageryUrl, {
-          maxNativeZoom: 5,
-          maxZoom: 16,
-          zIndex: 0,
-          updateWhenIdle: false,
-          updateInterval: 200,
-          keepBuffer: 2,
+        // At z=5 the previous backup was absent; after a long fling a tiny
+        // island of old image tiles could remain against the empty field.
+        // Keep ONE geographically correct, coarser Esri backup at a time.
+        // Native z=4 only for z=5, native z=5 for closer zooms. Never mount
+        // matching z=5 copies of the same satellite tiles.
+        const underlay4 = L.tileLayer(imageryUrl, {
+          maxNativeZoom: 4, maxZoom: 16, zIndex: 0,
+          updateWhenIdle: false, updateInterval: 200, keepBuffer: 2,
+        });
+        const underlay5 = L.tileLayer(imageryUrl, {
+          maxNativeZoom: 5, maxZoom: 16, zIndex: 0,
+          updateWhenIdle: false, updateInterval: 200, keepBuffer: 2,
         });
         const syncUnderlay = () => {
           if (!map) return;
-          const need = needsSatelliteUnderlay(map.getZoom());
-          if (need && !map.hasLayer(underlay)) underlay.addTo(map);
-          else if (!need && map.hasLayer(underlay)) underlay.remove();
+          const target = satelliteUnderlayZoom(map.getZoom());
+          if (target !== 4 && map.hasLayer(underlay4)) map.removeLayer(underlay4);
+          if (target !== 5 && map.hasLayer(underlay5)) map.removeLayer(underlay5);
+          const needed = target === 4 ? underlay4 : target === 5 ? underlay5 : null;
+          if (needed && !map.hasLayer(needed)) needed.addTo(map);
         };
         map.on("zoomend", syncUnderlay);
         syncUnderlay();
