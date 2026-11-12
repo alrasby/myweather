@@ -244,7 +244,7 @@ test("wind flings replenish the VISIBLE viewport rather than keeping an old offs
 test("fallback rain grid cells must not become large blurry polygons after zoom", () => {
   const field = read("project/src/weather/glField.ts");
   const quality = read("project/src/weather/rainRasterQuality.ts");
-  assert.ok(field.includes("usablePrecipitationGrid(grid.lonSpan, grid.cols"));
+  assert.ok(field.includes("usablePrecipitationGrid(") && field.includes("grid.lonSpan, grid.cols"), "verify geographic resolution before drawing fallback");
   assert.ok(field.includes("if (usable(world)) return world;"));
   assert.ok(field.includes("if (usable(this.detail) && this.detailFillsView(this.detail))"));
   assert.ok(quality.includes("pixelsPerCell <= maxCellPixels"));
