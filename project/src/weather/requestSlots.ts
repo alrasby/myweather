@@ -10,7 +10,13 @@ export class RequestSlots {
     abort: () => void;
   }> = [];
 
-  constructor(private readonly maxActive = 5, private readonly maxWaiting = 32) {}
+  private readonly maxActive: number;
+  private readonly maxWaiting: number;
+
+  constructor(maxActive = 5, maxWaiting = 32) {
+    this.maxActive = maxActive;
+    this.maxWaiting = maxWaiting;
+  }
 
   get running(): number { return this.active; }
   get queued(): number { return this.waiting.length; }
