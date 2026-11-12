@@ -319,9 +319,12 @@ html.light {
 
 .sky-clouds.is-deck {
   top: 0;
-  height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 12.7rem + 5mm);
-  -webkit-mask-image: linear-gradient(#000 0 88%, #0000);
-  mask-image: linear-gradient(#000 0 88%, #0000);
+  /* The original opaque 88%-then-fade cutoff formed a visible horizontal
+     cloud shelf immediately before the hourly card. Keep the same scene
+     and frame cadence; feather opacity over the LOWER HALF of the sky. */
+  height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 52%, rgb(0 0 0 / 0.82) 64%, rgb(0 0 0 / 0.45) 78%, rgb(0 0 0 / 0.12) 91%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 52%, rgb(0 0 0 / 0.82) 64%, rgb(0 0 0 / 0.45) 78%, rgb(0 0 0 / 0.12) 91%, transparent 100%);
 }
 
 .credit-glass {
@@ -755,12 +758,16 @@ html:not(.light) .wx-settings-card {
 .wx-hero-atmosphere {
   position: absolute;
   z-index: 0;
-  inset: -0.55rem -0.2rem -0.45rem;
+  /* Extend across the hero's horizontal insets and a little into the gap
+     BEFORE the hourly card. Do not create rounded rectangle corners: this
+     is ambient sky, not a new card. All pixels fade out before the overlay
+     reaches the forecast-card content. */
+  inset: -0.55rem -1rem -1.6rem;
   overflow: hidden;
-  border-radius: 1.35rem;
+  border-radius: 0;
   pointer-events: none;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 78%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 9%, #000 48%, rgb(0 0 0 / 0.85) 60%, rgb(0 0 0 / 0.46) 76%, rgb(0 0 0 / 0.13) 90%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 9%, #000 48%, rgb(0 0 0 / 0.85) 60%, rgb(0 0 0 / 0.46) 76%, rgb(0 0 0 / 0.13) 90%, transparent 100%);
 }
 .wx-hero-atmosphere > canvas {
   display: block;
