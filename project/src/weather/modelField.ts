@@ -1025,7 +1025,8 @@ export class ModelField {
         // Staging helps only when the old image still covers the same zoom.
         // A large move or pinch invalidates previous tile coverage; show new
         // tiles as they decode instead of hiding the screen for 8+ seconds.
-        tileGate.release();
+        // Release a previous, interrupted batch across ALL three variables.
+        frame.tileGates.forEach((gate) => gate.release());
         refreshBatch = (frame.ready || frame.previewReady) &&
           canStageSpatialRefresh(lastCompletedView, rasterView());
         frame.loaded[index] = false;
@@ -1040,13 +1041,17 @@ export class ModelField {
       });
       layer.on("load", () => {
         if (!alive()) return;
-        // Flush the complete set in the same JS task; never animate opacity
-        // per tile or switch to an incompatible coarse model mid-refresh.
-        tileGate.release();
+        // Wait for ALL three variable layers before publishing new raster
+        // tiles of a small, already covered viewport. Releasing each layer
+        // independently was still creating cloud -> rain -> snow stripes.
+        // Large moves bypass staging, so missing old coverage is not hidden.
         refreshBatch = false;
         if (frame.tileCounts[index]! > 0) lastCompletedView = rasterView();
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
+        if (frame.loaded.every(Boolean) || frame.errored.size > 0) {
+          frame.tileGates.forEach((gate) => gate.release());
+        }
         refresh();
       });
       layer.on("tileload", (event) => {
@@ -1069,6 +1074,8 @@ export class ModelField {
         if (err) this.lastError = String(err instanceof Error ? err.message : err).slice(0, 160);
         frame.errorCounts[index] += 1;
         frame.errored.add(index);
+        // Never hold a staged raster indefinitely when any tile errors.
+        frame.tileGates.forEach((gate) => gate.release());
         refresh();
         errors += 1;
         if (errors >= 3) {
