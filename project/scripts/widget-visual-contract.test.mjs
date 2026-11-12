@@ -43,7 +43,11 @@ test("widget offers automatic OS palette and readable monochrome glass presets",
  const manifest = read("project/android/app/src/main/AndroidManifest.xml");
  assert.ok(java.includes('"white".equals(choice)'), "white preset");
  assert.ok(java.includes('"black".equals(choice)'), "black preset");
- assert.ok(java.includes('system_accent1_500'), "system Material You palette");
+ assert.ok(java.includes('system_neutral1_'), "wallpaper-adaptive TEXT palette");
+ assert.ok(java.includes('widgetTextColor(context, tint, dark)'));
+ assert.ok(java.includes('"adaptive".equals(choice) ? "ocean" : choice'), "adaptive must not tint glass");
+ const glyph = read("project/android/app/src/main/java/net/nabdhserv/myweather/WeatherGlyphs.java");
+ assert.ok(glyph.includes('"#2799E0"'), "weather icons remain colored by conditions");
  assert.ok(java.includes('Intent.ACTION_WALLPAPER_CHANGED'), "update when wallpaper changes");
  assert.ok(manifest.includes('android.intent.action.WALLPAPER_CHANGED'));
  for (const id of ["tintAdaptive", "tintWhite", "tintBlack"]) {
