@@ -25,7 +25,7 @@ const gradle = readFileSync(path("project/android/app/build.gradle"), "utf8");
 for (const pattern of [
   /applicationId\s+["']net\.nabdhserv\.myweather["']/,
   /versionCode\s+55\b/,
-  /versionName\s+["']1\.0\.54["']/,
+  /versionName\s+["']1\.0\.0["']/,
 ]) assert.match(gradle, pattern);
 
 const wrapper = readFileSync(path("project/android/gradle/wrapper/gradle-wrapper.properties"), "utf8");
