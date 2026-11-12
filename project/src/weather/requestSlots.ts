@@ -98,12 +98,15 @@ export function raceRequestTimeout<T>(
       reject(error);
     };
     const onAbort = () => fail(new DOMException("aborted", "AbortError"));
+    // Always observe the underlying promise, even if the signal was already
+    // aborted, to avoid unhandled native-plugin rejections after navigation.
+    work.then(complete, fail);
     if (signal?.aborted) {
       onAbort();
       return;
     }
     timer = setTimeout(() => fail(new Error("proxy-timeout")), ms);
     signal?.addEventListener("abort", onAbort, { once: true });
-    work.then(complete, fail);
+    if (signal?.aborted) onAbort();
   });
 }
