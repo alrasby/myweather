@@ -166,7 +166,10 @@ export function WeatherApp() {
 
   return (
     <div className={`relative flex h-dvh flex-col overflow-hidden ${light ? "" : "is-night"}`}>
-      <SkyBackdrop day={daylight} code={code} cover={bundle?.current.cloud ?? 50} phase={moonState(clock).frac} />
+      <SkyBackdrop day={daylight} code={code} cover={bundle?.current.cloud ?? 50}
+        wind={bundle?.current.wind ?? 0} direction={bundle?.current.dir ?? 0}
+        heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}
+        phase={moonState(clock).frac} />
       <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
         <section className={`under-status mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col ${tab === "map" ? "hidden" : ""}`}>
           <div className="min-h-0 flex-1">
