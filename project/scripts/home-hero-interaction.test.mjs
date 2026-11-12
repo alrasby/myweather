@@ -123,3 +123,27 @@ test("Android Auto weather uses trusted Car App templates and the existing forec
   assert.ok(service.includes('ApplicationInfo.FLAG_DEBUGGABLE'));
   assert.ok(!service.includes('import java.net.HttpURLConnection') && !service.includes('import android.webkit.WebView'));
 });
+
+test("saved city paging works on clickable daily rows, including Android touchcancel", () => {
+  const home = read("project/src/components/weather/HomeScreen.tsx");
+  assert.ok(home.includes('style={{ touchAction: "pan-y" }}'));
+  assert.ok(home.includes('const swipeLast = useRef'));
+  assert.ok(home.includes('swipeLast.current = { x: point.clientX, y: point.clientY }'));
+  assert.ok(home.includes('onTouchCancel={() => {'));
+  assert.ok(home.includes('if (target) setActive(target);'));
+  const selector = home.split('const nested = target?.closest(')[1]?.split(';')[0] ?? "";
+  assert.ok(!selector.includes("'button,"), "forecast day buttons must not block city swipe");
+  assert.ok(selector.includes(".overflow-x-auto"), "nested hourly ribbon must handle its own gestures");
+});
+test("cyclic atmospheric cloud field draws over fractional WebView seam", () => {
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  assert.ok(sky.includes('const overlap = 1 / dpr'));
+  assert.ok(sky.includes('ctx.drawImage(field.canvas, x0, 0, dw + overlap, dh)'));
+  assert.ok(sky.includes('ctx.drawImage(field.canvas, x0 + span, 0, dw + overlap, dh)'));
+});
+test("rain spatial failures reduce fallback delay without extra grid budgets", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(map.includes('}, 4500);'));
+  assert.ok(map.includes('modelRef.current?.isSpatialVisible()'));
+  assert.ok(map.includes('const budget = 4200;'));
+});
