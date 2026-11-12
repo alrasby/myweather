@@ -315,3 +315,15 @@ test("weather hero uses one atmospheric cloud generator, with precipitation-only
   assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "never composite partial ECMWF cloud tiles over different fallback model");
   assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
 });
+
+test("home sky renders gently but never competes with weather map tile decoding offscreen", () => {
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  const app = read("project/src/components/weather/WeatherApp.tsx");
+  assert.ok(app.includes('animateClouds={tab === "home" && !placesOpen}'));
+  assert.ok(sky.includes('animate={animateClouds}'));
+  assert.ok(sky.includes("if (!alive || !animate || document.hidden) return"), "no animation under foreground map or hidden tab");
+  assert.ok(sky.includes("window.setTimeout(() => {") && sky.includes("}, 25);"), "bounded 24fps cloud drift, not continuous 60fps repaint");
+  assert.ok(sky.includes('document.addEventListener("visibilitychange", onVisibility)'));
+  assert.ok(sky.includes('document.removeEventListener("visibilitychange", onVisibility)'));
+  assert.ok(sky.includes("pause();") && sky.includes("ro.disconnect();"));
+});
