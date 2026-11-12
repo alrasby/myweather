@@ -269,7 +269,7 @@ test("map painting performs only one viewport projection for each wind/temperatu
 
 test("loaded ECMWF tiles avoid a second rectangular alpha fade on top of frame-level interpolation", () => {
   const css = read("project/src/styles.css");
-  assert.ok(css.includes(".leaflet-wx-clouds-pane .leaflet-tile") && css.includes(".leaflet-wx-model-pane .leaflet-tile"));
+  assert.ok(css.includes("Weather tiles must use Leaflet\'s own loaded-tile opacity"), "native loaded-tile renderer owns opacity");
   assert.ok(!css.includes("transition: opacity 160ms ease-out;"), "remove duplicate tile-level alpha fades");
   assert.ok(!css.includes("transition: opacity 160ms ease-out"), "use only Leaflet and ECMWF frame-level fading");
   assert.ok(css.includes("@media (prefers-reduced-motion: reduce)"), "existing reduced-motion support remains");
