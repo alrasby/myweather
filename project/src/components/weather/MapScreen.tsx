@@ -7,6 +7,7 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
 import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
 import { estimateGrid } from "@/weather/estimate";
@@ -123,6 +124,35 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const diagnosticsOpenRef = useRef(false);
   const diagnosticsTickRef = useRef(0);
   const rainTapRef = useRef({ count: 0, last: 0 });
+  // Catalog-only experiment: isolated from the live weather map.
+  // Key exists solely in transient input state and is cleared on submit.
+  const [pilotKey, setPilotKey] = useState("");
+  const [pilotResult, setPilotResult] = useState<MapTilerPilotCatalog | null>(null);
+  const [pilotStatus, setPilotStatus] = useState("not-run");
+  const pilotRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => pilotRequestRef.current?.abort(), []);
+  const checkPilot = () => {
+    if (!pilotKey.trim() || pilotStatus === "loading") return;
+    const key = pilotKey;
+    setPilotKey("");
+    pilotRequestRef.current?.abort();
+    const ctrl = new AbortController();
+    pilotRequestRef.current = ctrl;
+    setPilotResult(null);
+    setPilotStatus("loading");
+    void inspectMapTilerCatalog(key, ctrl.signal)
+      .then((catalog) => {
+        if (ctrl.signal.aborted) return;
+        setPilotResult(catalog);
+        setPilotStatus("ok");
+      })
+      .catch((error: unknown) => {
+        if (ctrl.signal.aborted) return;
+        // Do not display URL, API key or provider response text.
+        const reason = error instanceof Error ? error.message : "";
+        setPilotStatus(/^maptiler-(?:http-\d{3}|catalog-invalid|key-missing-or-invalid)$/.test(reason) ? reason : "unavailable");
+      });
+  };
   diagnosticsOpenRef.current = weatherDiagnosticsOpen;
   const [kind, setKind] = useState<ShadeKind>(prefs.mapLayer);
   const [playing, setPlaying] = useState(false);
@@ -1057,6 +1087,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "إصدار ECMWF الثابت" : "Pinned ECMWF model run"}: {weatherDiagnostics?.modelRunPinned ? "OK" : "capture fallback"}
             {weatherDiagnostics?.modelRunReferenceTime ? ` · ${weatherDiagnostics.modelRunReferenceTime}` : ""}
           </p>
+          <p>{lang === "ar" ? "استعلامات حجم الملف المشتركة" : "Shared size probes"}: {weatherDiagnostics?.sharedFileProbes ?? 0}
+            {" · "}{lang === "ar" ? "استعلامات نشطة" : "active"}: {weatherDiagnostics?.activeFileProbes ?? 0}
+          </p>
           <p>{lang === "ar" ? "طلبات الشبكة" : "Native reads"}: {weatherDiagnostics?.nativeReads ?? 0}
             {" · "}{lang === "ar" ? "من الذاكرة" : "cache hits"}: {weatherDiagnostics?.cacheHits ?? 0}
           </p>
@@ -1133,6 +1166,38 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 ? ` · idle ${Math.round(weatherDiagnostics.layerTimings[index]!.idleMs! / 1000)}s` : ""}
             </p>
           ))}
+          <div className="mt-2 rounded-md border border-white/15 p-2 text-[0.66rem]">
+            <p className="font-semibold">{lang === "ar" ? "MapTiler Weather — فحص تجريبي للبيانات الوصفية فقط" : "MapTiler Weather — catalog-only experimental probe"}</p>
+            <p className="text-white/65">{lang === "ar"
+              ? "لا يغير الطبقات أو محرك ECMWF. أدخل مفتاحًا عامًا مقيدًا للاختبار؛ لا يُحفظ."
+              : "Does not change ECMWF or imagery. Enter a restricted public test key; it is not saved."}</p>
+            <div className="mt-1 flex gap-1">
+              <input type="password" autoComplete="off" value={pilotKey}
+                onChange={(e) => setPilotKey(e.target.value)}
+                placeholder={lang === "ar" ? "مفتاح MapTiler التجريبي" : "MapTiler test key"}
+                aria-label={lang === "ar" ? "مفتاح MapTiler التجريبي" : "MapTiler test key"}
+                className="min-w-0 flex-1 rounded border border-white/25 bg-transparent px-2 py-1 text-white"
+              />
+              <button type="button" className="rounded border border-white/35 px-2 py-1"
+                disabled={pilotStatus === "loading" || !pilotKey.trim()}
+                onClick={checkPilot}>
+                {lang === "ar" ? "فحص" : "Check"}
+              </button>
+            </div>
+            <p role="status">{pilotStatus === "ok"
+              ? (lang === "ar" ? "تم التحقق من الفهرس" : "Catalog verified")
+              : pilotStatus === "loading" ? (lang === "ar" ? "فحص المصدر..." : "Checking...")
+              : pilotStatus === "not-run" ? (lang === "ar" ? "غير مفعل" : "Not enabled")
+              : pilotStatus}</p>
+            {pilotResult ? (
+              <div>
+                <p>{lang === "ar" ? "المتغيرات المتاحة" : "Catalog variables"}: {pilotResult.variables.length}</p>
+                {pilotResult.variables.filter((v) => /cloud|precip|rain|snow/i.test(v.id)).slice(0, 8).map((v) => (
+                  <p key={v.id}>{v.id}: {v.keyframeCount} frames · {v.firstTime ?? "—"} → {v.lastTime ?? "—"}</p>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <p className="mt-1 text-white/65">{lang === "ar" ? "للمقارنة فقط؛ لا يغير البيانات أو إعدادات الطبقات." : "Comparison only; does not alter forecast values."}</p>
         </div>
       ) : null}
