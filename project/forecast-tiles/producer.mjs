@@ -21,10 +21,14 @@ export function createBrowserProducer(base){
    if(produced>=120){await close();produced=0;}
    const p=await open();
    try{
-    const result=await Promise.race([
-     p.evaluate(({m,r})=>window.__renderReadyTile(m,r),{m:{referenceTime:manifest.referenceTime,validTimes:manifest.validTimes},r:request}),
-     new Promise((_,reject)=>setTimeout(()=>reject(new Error('source-render-deadline')),45000)),
-    ]);
+    let watchdog;
+    let result;
+    try {
+     result=await Promise.race([
+      p.evaluate(({m,r})=>window.__renderReadyTile(m,r),{m:{referenceTime:manifest.referenceTime,validTimes:manifest.validTimes},r:request}),
+      new Promise((_,reject)=>{watchdog=setTimeout(()=>reject(new Error('source-render-deadline')),45000);}),
+     ]);
+    } finally { if(watchdog)clearTimeout(watchdog); }
     produced++;
     return Buffer.from(result);
    }catch(e){await close();throw e;}
