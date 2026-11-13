@@ -31,3 +31,14 @@ test("unloaded model data cannot be cached as a worker raster",()=>{
  assert.throws(()=>new SpatialDatasetKeys().key(
   {...model(new Float32Array([1])),data:null} as never,palette),/identity-missing/);
 });
+
+test("worker registration retains values, scale and key after upstream eviction",async()=>{
+ const {captureSpatialWorkerData}=await import("./spatialDatasetKeys.ts");
+ const keys=new SpatialDatasetKeys(),state=model(new Float32Array([9,10]));
+ const captured=captureSpatialWorkerData(state as never,palette,keys);
+ state.data=null as never;
+ assert.equal(captured.scaleFactor,100);
+ assert.deepEqual([...captured.values],[9,10]);
+ assert.match(captured.dataKey,/^decoded-/);
+ assert.throws(()=>captureSpatialWorkerData(state as never,palette,keys),/source-missing/);
+});

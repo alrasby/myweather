@@ -29,3 +29,11 @@ export class SpatialDatasetKeys {
   return id;
  }
 }
+
+/** Capture the full worker dataset contract before an admission await;
+ * upstream may evict state.data while another forecast hour is loading. */
+export function captureSpatialWorkerData(state:OmUrlState,palette:Palette,keys:SpatialDatasetKeys) {
+ const data=state.data;
+ if(!data?.values)throw new Error("spatial-worker-source-missing");
+ return {dataKey:keys.key(state,palette),values:data.values,scaleFactor:data.scaleFactor};
+}

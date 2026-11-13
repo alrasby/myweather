@@ -13,7 +13,7 @@
  */
 import { getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
 import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission.ts";
-import { SpatialDatasetKeys } from "./spatialDatasetKeys.ts";
+import { SpatialDatasetKeys, captureSpatialWorkerData } from "./spatialDatasetKeys.ts";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
 
 type ReadKey = string;
@@ -55,7 +55,7 @@ export function nextSpatialWorkerJob(
   return first;
 }
 type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable;
-  queuedAt: number; frame: number | null; values: Float32Array; palette: Palette;
+  queuedAt: number; frame: number | null; values: Float32Array; scaleFactor?: number; palette: Palette;
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
@@ -290,19 +290,18 @@ export class SpatialViewportRenderer {
     // Hold the exact decoded array reference BEFORE the admission await.
     // Upstream can evict state.data during a pan or hour change, but already
     // accepted raster jobs must not lose their input or force a legacy tile.
-    const values = state.data.values;
+    const {values,dataKey,scaleFactor} = captureSpatialWorkerData(state,palette,this.datasetKeys);
     // A finite admission wait prevents congestion from silently switching
     // 40+ tiles to a different renderer during the same visible viewport.
     // Leaflet's AbortSignal drops obsolete pans while they are waiting.
     const release = await this.admission.acquire(signal);
     try {
       if (!this.active || signal.aborted) throw new DOMException("Aborted", "AbortError");
-      // Shallow snapshots of one decoded source grid share one registration.
-      // Changed geography/time/variable/palette always produce a new key.
-      const key = this.datasetKeys.key(state, palette);
+      // Decoded identity and scaling were captured before admission;
+      // upstream can retire the state while this tile waits its turn.
       return await new Promise<ImageBitmap>((resolve, reject) => {
-        const job: TileJob = { id: ++this.serial, state, dataKey: key, variable, frame,
-          queuedAt: performance.now(), values, tile, palette, signal,
+        const job: TileJob = { id: ++this.serial, state, dataKey, variable, frame,
+          queuedAt: performance.now(), values, scaleFactor, tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
           const index = this.jobs.indexOf(job);
@@ -350,7 +349,7 @@ export class SpatialViewportRenderer {
           }
           slot.worker.postMessage({ type: "register", key: job.dataKey,
             grid: job.state.dataOptions.domain.grid, ranges: job.state.ranges,
-            values, scaleFactor: job.state.data?.scaleFactor, palette: job.palette });
+            values, scaleFactor: job.scaleFactor, palette: job.palette });
           slot.cache.set(job.dataKey, values.byteLength);
           slot.bytes += values.byteLength;
           this.copied++;
