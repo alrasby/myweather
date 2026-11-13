@@ -376,6 +376,22 @@ test("home sky renders gently but never competes with weather map tile decoding 
   assert.ok(sky.includes('document.removeEventListener("visibilitychange", onVisibility)'));
   assert.ok(sky.includes("pause();") && sky.includes("ro.disconnect();"));
 });
+test("ECMWF viewport renderer reuses decoded data, limits retained states and supports rollback", () => {
+  const model = read("project/src/weather/modelField.ts");
+  const engine = read("project/src/weather/spatialViewportRenderer.ts");
+  const worker = read("project/src/weather/spatialViewportRaster.worker.ts");
+  const screen = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(model.includes("maxStatesWithData: 6"), "three current + three playback states must stay cached");
+  assert.ok(model.includes('new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride)'));
+  assert.ok(model.includes('this.viewportRenderer?.handler ?? omProtocol'));
+  assert.ok(model.includes('this.viewportRenderer?.dispose()'));
+  assert.ok(engine.includes('type: "arrayBuffer"'), "decode OM through official protocol without duplicate first-tile paint");
+  assert.ok(engine.includes("MAX_WORKER_DATA = 24 * 1024 * 1024"), "bounded worker memory");
+  assert.ok(engine.includes('slot.cache.has(job.dataKey)'), "reuse decoded raster data across tiles");
+  assert.ok(worker.includes("GridFactory.create"), "preserve official ECMWF grid interpolation");
+  assert.ok(screen.includes("viewportRenderer.renderP95Ms"), "render timing must be visible to QA");
+});
+
 test("mobile weather displays complete same-run ECMWF layers without per-variable first-paint succession", () => {
   const src = read("project/src/weather/modelField.ts");
   const policy = read("project/src/weather/spatialTilePolicy.ts");

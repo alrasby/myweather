@@ -1220,13 +1220,23 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
               {" · transfer MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
             </p>
+            <p>{"ECMWF renderer: "}{weatherDiagnostics?.viewportRenderer.mode ?? "legacy"}
+              {" · worker tiles "}{weatherDiagnostics?.viewportRenderer.workerTiles ?? 0}
+              {" · dataset copies "}{weatherDiagnostics?.viewportRenderer.datasetCopies ?? 0}
+              {" · fallback tiles "}{weatherDiagnostics?.viewportRenderer.fallbackTiles ?? 0}
+              {" · queued "}{weatherDiagnostics?.viewportRenderer.queued ?? 0}
+            </p>
+            <p>{"Raster worker p50/p95: "}
+              {weatherDiagnostics?.viewportRenderer.renderP50Ms ?? "—"}{" / "}
+              {weatherDiagnostics?.viewportRenderer.renderP95Ms ?? "—"}{" ms"}
+            </p>
             <p>{"SharedArrayBuffer: "}{weatherDiagnostics?.performance.runtime.crossOriginIsolated ? "available" : "unavailable"}
               {" · JS heap: "}{weatherDiagnostics?.performance.runtime.heapUsedMb == null
                 ? "N/A" : `${weatherDiagnostics.performance.runtime.heapUsedMb} MB`}
             </p>
             <p className="text-white/60">{lang === "ar"
-                ? "زمن البلاطة يشمل فك البيانات ورسمها ونقلها؛ لا يمكن فصلهما دون أدوات داخل عامل OM."
-                : "Tile time includes decoding, rendering and delivery; worker-level breakdown is not exposed."}</p>
+                ? "زمن البلاطة الكامل يشمل الجلب وفك البيانات والرسم. زمن عامل الرسم الجديد مقاس منفصل؛ المحرك الاحتياطي لا يتيح هذا الفصل."
+                : "Full tile time includes fetch, decode and paint. Viewport worker timing measures raster painting only; the legacy engine has no separate worker timing."}</p>
           </div>
           <p>{lang === "ar" ? "الإطارات الجاري تجهيزها" : "Decoding forecast frames"}: {weatherDiagnostics?.loadingFrames.join(", ") || "—"}</p>
           {(["cloud", "rain", "snow"] as const).map((name, index) => (

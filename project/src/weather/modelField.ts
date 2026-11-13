@@ -16,6 +16,7 @@ import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
+import { SpatialViewportRenderer, type ViewportRendererStats } from "@/weather/spatialViewportRenderer";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -62,6 +63,7 @@ export type WeatherModelDiagnostics = {
   cacheStored: number;
   cacheRejected: number;
   performance: SpatialPerformanceSnapshot;
+  viewportRenderer: ViewportRendererStats;
   rateLimitedResponses: number;
   rateLimitRemainingMs: number;
   startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
@@ -136,7 +138,12 @@ function modelSettings() {
     cloud_cover_mid: CLOUD,
     cloud_cover_high: CLOUD,
   };
-  return { ...defaultOmProtocolSettings, colorScales };
+  // Three current-hour variables, plus up to three during active playback.
+  // Upstream defaults to TWO cached states; that evicts one of our three
+  // variables every tile and can restart .om Range reads repeatedly.
+  // Six entries retain one complete current/next-hour ECMWF frame pair,
+  // still bounded independently of the native HTTP block cache.
+  return { ...defaultOmProtocolSettings, colorScales, maxStatesWithData: 6 };
 }
 
 function spatialUrl(url: string): boolean {
@@ -482,6 +489,7 @@ export class ModelField {
   // Android WebView lacks SharedArrayBuffer: avoid showing cloud/rain/snow
   // one by one before a complete same-run ECMWF frame is ready.
   private compactSpatialTiles = false;
+  private viewportRenderer: SpatialViewportRenderer | null = null;
   private ready: Promise<void> = Promise.resolve();
   private metadataAbort: AbortController | null = null;
   // First-session readiness timings are read-only and measured on device.
@@ -509,6 +517,13 @@ export class ModelField {
     this.viewportMoving = false;
     this.viewportHoldUntil = 0;
     this.compactSpatialTiles = useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true);
+    // A/B rollback for diagnosing vendor/device-specific worker regressions.
+    // Never assume an experimental custom worker is available in every
+    // Android System WebView. Missing/failed workers use official OM raster.
+    let legacyOverride = false;
+    try { legacyOverride = localStorage.getItem("myweather.ecmwfRenderer") === "legacy"; } catch { /* private storage */ }
+    this.viewportRenderer?.dispose();
+    this.viewportRenderer = new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride);
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -590,7 +605,7 @@ export class ModelField {
     this.moveListener = onMove;
     this.moveEndListener = onMoveEnd;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
-    this.adapter.addProtocol("om", omProtocol, modelSettings());
+    this.adapter.addProtocol("om", this.viewportRenderer?.handler ?? omProtocol, modelSettings());
     this.lastError = null;
     this.pinnedRun = null;
     this.ready = fetch(META, { signal: metadataAbort.signal })
@@ -705,6 +720,10 @@ export class ModelField {
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
+      viewportRenderer: this.viewportRenderer?.snapshot() ?? {
+        mode: "legacy", workerTiles: 0, fallbackTiles: 0, datasetCopies: 0,
+        queued: 0, renderP50Ms: null, renderP95Ms: null,
+      },
       performance: spatialPerformance.snapshot(
         globalThis.crossOriginIsolated === true,
         (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize ?? null,
@@ -750,6 +769,7 @@ export class ModelField {
       this.lastScheduledAt = 0;
       this.fallbackForMissingHour = false;
       this.clear();
+      this.viewportRenderer?.clear();
     }
   }
 
@@ -1245,6 +1265,8 @@ export class ModelField {
     this.onLive = null;
     this.onMiss = null;
     this.clear();
+    this.viewportRenderer?.dispose();
+    this.viewportRenderer = null;
     this.failedUntil.clear();
     this.spatialVisible = false;
     this.lastDisplayedStep = null;
