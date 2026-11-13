@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, pinLoadedSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -136,4 +136,16 @@ test("requested hour beats queued future-hour raster and future work resumes", (
   assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 200, null), { job: 0, slot: 0 });
   slots[1]!.busy = true;
   assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 200, 22), { job: 0, slot: 0 });
+});
+
+test("concurrent upstream state eviction cannot erase a resolved decoded raster",()=>{
+ const values=new Float32Array([10,20]);
+ const state={omFileUrl:"https://example.org/cloud.om",
+  dataOptions:{variable:"cloud_cover"},data:{values,scaleFactor:10}};
+ const fixed=pinLoadedSpatialState(state as never);
+ assert.ok(fixed&&fixed!==state);
+ state.data=null as never;
+ assert.equal(fixed!.data?.values,values);
+ assert.equal(fixed!.data?.scaleFactor,10);
+ assert.equal(pinLoadedSpatialState(state as never),null);
 });

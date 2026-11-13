@@ -148,6 +148,13 @@ export function chooseLoadedSpatialState(
   for (const state of Array.from(states).reverse()) if (valid(state)) return state;
   return null;
 }
+/** Pin a read's data reference before an independent async tile renderer
+ * can observe an upstream state-map eviction. This copies only a small state
+ * object, never the decoded Float32Array. */
+export function pinLoadedSpatialState(state:OmUrlState|null):OmUrlState|null {
+ const data=state?.data;
+ return data?.values ? {...state!,data} : null;
+}
 function paletteOf(settings: OmProtocolSettings, variable: string): Palette | null {
   const scale = settings.colorScales[variable] as RenderableColorScale | undefined;
   if (!scale || scale.type !== "breakpoint" || !scale.breakpoints.length ||
@@ -279,7 +286,7 @@ export class SpatialViewportRenderer {
         const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable);
         const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable);
         if (captured && resolved === captured && !live) this.recovered++;
-        return resolved;
+        return pinLoadedSpatialState(resolved);
       },
     );
   }
