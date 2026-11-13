@@ -2,15 +2,28 @@
 export const LAYERS=Object.freeze(['cloud_cover','precipitation','snowfall_water_equivalent']);
 const SOURCE='https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs';
 const pad=n=>String(n).padStart(2,'0');
-const validDate=v=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(v)&&Number.isFinite(Date.parse(v));
+/** Upstream latest.json may use minute-resolution UTC timestamps and a long forecast horizon.
+ * Accept only unambiguous ISO UTC strings; normalize every published hour. */
+function utcTime(value){
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]00:00)?$/.test(value))return null;
+ const iso=/(?:Z|[+-]00:00)$/.test(value)?value:value+'Z';
+ const ms=Date.parse(iso);
+ return Number.isFinite(ms)?new Date(ms).toISOString():null;
+}
 export function parseModelMetadata(m){
- if(!m||typeof m!=='object'||m.completed===false||!validDate(m.reference_time))throw new Error('model-metadata-invalid');
+ const ref=utcTime(m?.reference_time);
+ if(!m||typeof m!=='object'||m.completed===false||!ref)throw new Error('model-metadata-invalid');
  if(m.variables&&(!Array.isArray(m.variables)||!LAYERS.every(x=>m.variables.includes(x))))throw new Error('model-variables-incomplete');
- const times=m.valid_times;
- if(!Array.isArray(times)||times.length===0||times.length>256||times.some((v,i)=>!validDate(v)||(i&&Date.parse(v)<=Date.parse(times[i-1]))))throw new Error('model-time-invalid');
- const d=new Date(m.reference_time);
+ const sourceTimes=m.valid_times;
+ if(!Array.isArray(sourceTimes)||sourceTimes.length<1||sourceTimes.length>2048)throw new Error('model-time-invalid:length='+String(sourceTimes?.length??'missing'));
+ // Model runs can publish well beyond our 96-hour playback budget; do not
+ // reject a valid entire run just because the client only needs its first 96.
+ const times=sourceTimes.slice(0,96).map(utcTime);
+ if(times.some((v,i)=>!v||(i>0&&Date.parse(v)<=Date.parse(times[i-1]))))
+  throw new Error('model-time-invalid:format='+String(sourceTimes[0]).slice(0,45)+':len='+sourceTimes.length);
+ const d=new Date(ref);
  const runId=''+d.getUTCFullYear()+pad(d.getUTCMonth()+1)+pad(d.getUTCDate())+'T'+pad(d.getUTCHours())+'00Z';
- return Object.freeze({schemaVersion:1,model:'ecmwf_ifs',runId,referenceTime:d.toISOString(),validTimes:Object.freeze(times.slice(0,96)),layers:LAYERS,tileSize:256,maxNativeZoom:8,attribution:'Weather model: ECMWF IFS; spatial data distribution: Open-Meteo',source:SOURCE});
+ return Object.freeze({schemaVersion:1,model:'ecmwf_ifs',runId,referenceTime:ref,validTimes:Object.freeze(times),layers:LAYERS,tileSize:256,maxNativeZoom:8,attribution:'Weather model: ECMWF IFS; spatial data distribution: Open-Meteo',source:SOURCE});
 }
 export function validTile(m,r){
  if(!m||m.runId!==r.runId||!LAYERS.includes(r.layer))return false;

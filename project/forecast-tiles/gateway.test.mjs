@@ -65,3 +65,16 @@ test("one active rendering slot is never oversubscribed when queued clients resu
   assert.ok(snapshot.renderP95Ms>=10);
  }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
 });
+
+test('source UTC minute/second precision is normalized and valid horizon may exceed 256 entries',()=>{
+ const m=parseModelMetadata({...meta,reference_time:'2026-11-13T00:00Z',valid_times:[
+  '2026-11-13T00:00Z','2026-11-13T01:00+00:00','2026-11-13T02:00:00.000Z',
+  ...Array.from({length:360},(_,i)=>new Date(Date.parse('2026-11-13T03:00:00Z')+i*3600000).toISOString()),
+ ]});
+ assert.equal(m.runId,'20261113T0000Z');
+ assert.equal(m.validTimes.length,96);
+ assert.equal(m.validTimes[0],'2026-11-13T00:00:00.000Z');
+ assert.equal(m.validTimes[1],'2026-11-13T01:00:00.000Z');
+ assert.throws(()=>parseModelMetadata({...meta,valid_times:['2026-11-13T01:00Z','2026-11-13T00:00Z']}),/model-time-invalid/);
+ assert.throws(()=>parseModelMetadata({...meta,valid_times:['2026-11-13T00:00+04:00']}),/model-time-invalid/);
+});
