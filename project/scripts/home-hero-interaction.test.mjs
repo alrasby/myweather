@@ -450,3 +450,13 @@ test("rain map playback remains silent while the real ECMWF fallback and diagnos
   assert.ok(engine.includes("weatherWaitSince"), "retain accurate silent playback buffering");
   assert.ok(model.includes("canAdvanceSpatialTime("), "retain real forecast-hour readiness gate");
 });
+
+test("existing cached coastal and inland cities refresh marine tides once on upgrade", () => {
+  const api = read("project/src/weather/api.ts");
+  const store = read("project/src/weather/store.ts");
+  const types = read("project/src/weather/types.ts");
+  assert.ok(api.includes("marineVersion: 1"), "new forecasts record marine model schema");
+  assert.ok(api.includes("cached.bundle.marineVersion === 1"), "legacy cache must be upgraded");
+  assert.ok(store.includes("cached.bundle.marineVersion === 1"), "store short-circuit must honor marine cache upgrade");
+  assert.ok(types.includes("marineVersion?: 1"), "old bundles remain readable");
+});

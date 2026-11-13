@@ -162,6 +162,7 @@ function buildBundle(
     daily: dayRows.filter((row) => Number.isFinite(row.t) && validDailyTemperatures(row.tmax, row.tmin)),
     air,
     marine,
+    marineVersion: 1,
   };
   if (!Number.isFinite(bundle.current.temp)) {
     const now = Date.now();
@@ -501,6 +502,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     daily,
     air: null,
     marine: null,
+    marineVersion: 1,
   };
 }
 
@@ -560,7 +562,8 @@ export function loadWeather(
   }
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
-    const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS;
+    const fresh = !!cached && cached.bundle.marineVersion === 1 &&
+      Date.now() - cached.at < CACHE_TTL_MS;
     if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
     let last: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
