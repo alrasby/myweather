@@ -38,13 +38,14 @@ export function planSpatialRequests(
   visibleRefreshAgeMs = 0,
   playbackActive = false,
   viewportMoving = false,
+  memoryConstrained = false,
 ): { cancel: number[]; start: number | null } {
   // Keep two upcoming hours prepared without decoding more than one
   // incomplete frame at a time. The second lookahead becomes eligible only
   // after both the requested and next forecast are fully available.
   // Second-hour lookahead is worthwhile only during active animation:
   // don't consume network and battery decoding unused hours on a still map.
-  const lookahead = playbackActive && ready.has(requested) && ready.has(requested + 1)
+  const lookahead = playbackActive && !memoryConstrained && ready.has(requested) && ready.has(requested + 1)
     ? requested + 2 : -1;
   // A paused map should decode ONLY the requested forecast hour. Without
   // shared memory, idle-hour prefetch copies huge arrays and delays panning.
