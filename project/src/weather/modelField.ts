@@ -38,6 +38,9 @@ export type WeatherDiagnosticMode = "all" | "cloud" | "rain" | "snow" | "fallbac
 export type WeatherModelDiagnostics = {
   mode: WeatherDiagnosticMode;
   source: "spatial" | "fallback";
+  backend?: "ready-tiles" | "pilot-probing" | "om-on-device";
+  pilotFailure?: string | null;
+  tinyModelObservations?: number;
   frame: number;
   requestedFrame: number;
   displayedFrame: number | null;

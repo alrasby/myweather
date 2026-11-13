@@ -41,3 +41,13 @@ A 30-weight, six-outcome online softmax classifier in `src/weather/tinyTileDeman
 GitHub Actions [live run #43441484552](https://github.com/alrasby/myweather/actions/runs/43441484552) on commit `ad305914` **passed**: Chromium rendered all three genuine ECMWF variables for one NYC tile (z8/x75/y96) from the pinned 2026-11-13T06:00Z model run, valid at 09:00Z. Cold generation: cloud 1378 ms, precipitation 704 ms, snow 220 ms; cached cloud retrieval 2 ms (single sample, not a phone/device benchmark). Three PNG samples and JSON metrics are preserved in the workflow artifact. All are 256x256 and validate as complete raster files. Client device rendering/smoothness, adjacent tile seams, real deployment and high-latitude QA are **not yet proved**.
 
 The gateway also retains the **last verified previous model run** for a bounded grace period during metadata rollover (default 6 hours). Brief upstream metadata failures reuse only the last verified run (default 10-minute stale limit), rather than creating forecast values or immediately breaking active sessions. These fallback paths are independently regression-tested.
+
+## Experimental Android integration — deliberate opt-in (not released)
+
+The Android/map UI remains unchanged by default. The new `ReadyTileModel` delegates to the existing `ModelField` unless an explicit diagnostic opt-in and a safe HTTPS service origin exist. It first probes the strict pinned-run manifest with a 5-second deadline; failed probes, invalid or stale metadata and failed image tiles revert automatically to the original source-backed engine for the entire map session. Both engines do not decode/run at once. Map teardown cancels the pilot and clears image requests.
+
+Only testers with a privately deployed, authenticated-and-rate-limited HTTPS `/v1/` reverse proxy should set these localStorage keys in the app's WebView debugging environment (not on production devices):
+- `myweather.readyTiles.enabled = "1"`
+- `myweather.readyTiles.origin = "https://tiles.your-approved-host.example"`
+
+Do **not** use an arbitrary public tile host or an HTTP address. A full app restart/map remount is required after toggling the pilot. This intentionally does not add a user-facing setting or make a network request on normal installs. Public deployment, load testing, tile/temporal parity and physical Android acceptance still block release.

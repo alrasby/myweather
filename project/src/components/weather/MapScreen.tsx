@@ -7,6 +7,8 @@ import { FieldEngine, type FrameInfo } from "@/weather/glField";
 import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { ReadyTileModel } from "@/weather/readyTileModel";
+import { readReadyTilePilotOrigin } from "@/weather/readyTilePilotConfig";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
 import { shouldKeepSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
@@ -100,7 +102,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
-  if (!modelRef.current) modelRef.current = new ModelField();
+  if (!modelRef.current) {
+    // Explicit diagnostic opt-in only; all normal installs retain the original
+    // source-backed ModelField and can never contact an undeployed tile host.
+    const pilotOrigin = readReadyTilePilotOrigin(typeof localStorage !== "undefined" ? localStorage : null);
+    modelRef.current = pilotOrigin ? new ReadyTileModel(pilotOrigin) : new ModelField();
+  }
   const engineRef = useRef<FieldEngine | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<LeafletNs | null>(null);
@@ -1144,6 +1151,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
+          <p>{lang === "ar" ? "محرك الرسم" : "Raster engine"}: {weatherDiagnostics?.backend ?? "om-on-device"}
+            {weatherDiagnostics?.tinyModelObservations ? ` · AI samples ${weatherDiagnostics.tinyModelObservations}` : ""}
+          </p>
+          {weatherDiagnostics?.pilotFailure ? <p className="text-amber-200">Pilot fallback: {weatherDiagnostics.pilotFailure}</p> : null}
           <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"}</p>
           <p>{lang === "ar" ? "إصدار ECMWF الثابت" : "Pinned ECMWF model run"}: {weatherDiagnostics?.modelRunPinned ? "OK" : "capture fallback"}
             {weatherDiagnostics?.modelRunReferenceTime ? ` · ${weatherDiagnostics.modelRunReferenceTime}` : ""}
