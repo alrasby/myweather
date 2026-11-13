@@ -62,7 +62,7 @@ jobs:
         working-directory: project
         run: |
           node --test forecast-tiles/gateway.test.mjs
-          node --experimental-strip-types --test src/weather/readyTilePlan.test.ts
+          node --experimental-strip-types --test src/weather/readyTilePlan.test.ts src/weather/readyTileClient.test.ts
           npx vite build --config forecast-tiles/vite.config.ts
       # Legacy root weather tests target the replaced net.ts API (requestLane,
       # requestWeight and budget persistence). They must not run against this
