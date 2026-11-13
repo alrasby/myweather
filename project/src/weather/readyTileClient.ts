@@ -72,9 +72,13 @@ export class ReadyTileClient{
    if(this.destroyed||this.incoming!==frame||frame.failed||!frame.loaded.every(Boolean)||frame.counts.some(x=>x===0))return;
    if(frame.timer)clearTimeout(frame.timer);frame.timer=null;
    const old=this.current;this.current=frame;this.incoming=null;
-   frame.layers.forEach(layer=>{const element=layer.getContainer?.();if(element)element.style.transition='opacity 240ms ease-out';layer.setOpacity(.78);});
+   // Only adjacent hours of the SAME pinned ECMWF run may cross-fade.
+   // A large timeline jump must never briefly blend unrelated forecast times.
+   const adjacent=!!old&&Math.abs(old.hour-hour)===1;
+   frame.layers.forEach(layer=>{const element=layer.getContainer?.();if(element&&adjacent)element.style.transition='opacity 240ms ease-out';layer.setOpacity(1);});
    this.onReady(this.manifest.validTimes[hour]!);
-   if(old){this.retiring=old;this.oldTimer=setTimeout(()=>{this.disposeFrame(old);this.retiring=null;this.oldTimer=null;},280);}
+   if(old&&adjacent){this.retiring=old;this.oldTimer=setTimeout(()=>{this.disposeFrame(old);this.retiring=null;this.oldTimer=null;},280);}
+   else if(old)this.disposeFrame(old);
   };
   for(const [index,variable] of LAYERS.entries()){
    const pane=index===0?'wx-clouds':'wx-model';
