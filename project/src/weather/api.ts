@@ -5,6 +5,7 @@ import { metRainRate, isRecentObservation, validDailyTemperatures } from "@/weat
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
+import { parseMarineSnapshot } from "@/weather/marineTides";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -224,32 +225,17 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<WeatherB
   const url = new URL("https://marine-api.open-meteo.com/v1/marine");
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
+  // One real marine request supplies both the wave and the sea-level curve.
   url.searchParams.set("current", "wave_height");
-  url.searchParams.set("forecast_days", "1");
-  url.searchParams.set("timezone", "auto");
-  // Do not accidentally select inland cells for coastal towns.
+  url.searchParams.set("hourly", "sea_level_height_msl");
+  url.searchParams.set("forecast_days", "3");
+  url.searchParams.set("past_days", "1");
+  url.searchParams.set("timeformat", "unixtime");
+  url.searchParams.set("timezone", "UTC");
   url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
-  // Network/API failures are not evidence that a formerly coastal town is inland.
   if (!res.ok) return null;
-  const json = (await res.json()) as { latitude?: number; longitude?: number; current?: { wave_height?: number } };
-  const wave = json.current?.wave_height;
-  // A successful sea-grid response can identify the coast even when wave height
-  // is missing. Bound the distance to avoid marking far-inland towns as coastal.
-  const gridLat = json.latitude;
-  const gridLon = json.longitude;
-  if (!(typeof gridLat === "number" && Number.isFinite(gridLat) &&
-        typeof gridLon === "number" && Number.isFinite(gridLon))) return null;
-  let nearSea = false;
-  {
-    const dLat = (gridLat - place.lat) * Math.PI / 180;
-    const dLon = (gridLon - place.lon) * Math.PI / 180;
-    const lat1 = place.lat * Math.PI / 180;
-    const lat2 = gridLat * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-    nearSea = 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(a))) <= 30;
-  }
-  return { coastal: nearSea, wave: nearSea && typeof wave === "number" && Number.isFinite(wave) ? wave : null };
+  return parseMarineSnapshot(await res.json(), place.lat, place.lon);
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
@@ -529,7 +515,14 @@ async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Weathe
     }
   }
   try {
-    return await fetchMet(place, signal);
+    // Marine availability is independent of the weather provider: if the
+    // primary forecast fails, do not silently lose tide eligibility/data.
+    const [bundle, marine] = await Promise.all([
+      fetchMet(place, signal),
+      fetchMarine(place, signal).catch(() => null),
+    ]);
+    bundle.marine = marine;
+    return bundle;
   } catch (err) {
     if (aborted(err, signal)) throw err;
     throw primary instanceof Error ? primary : err;
@@ -577,7 +570,11 @@ export function loadWeather(
         // Preserve known coastal eligibility if the secondary forecast provider
         // does not include marine data or the separate marine API is offline.
         if (bundle.marine == null && cached?.bundle.marine?.coastal) {
-          bundle.marine = { coastal: true, wave: null };
+          // A brief Marine outage must not reclassify a known coastal city as
+          // inland. Reuse only still-relevant ACTUAL sea-level samples.
+          const oldTide = cached.bundle.marine.tide;
+          bundle.marine = { coastal: true, wave: null,
+            tide: oldTide && Date.now() - oldTide.fetchedAt < 6 * 3600000 ? oldTide : null };
         }
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };

@@ -104,6 +104,8 @@ export type AirQuality = {
 export type MarineSnap = {
   coastal: boolean;
   wave: number | null;
+  /** Actual Open-Meteo sea_level_height_msl samples; MSL, not chart datum. */
+  tide?: { fetchedAt: number; points: { t: number; level: number }[] } | null;
 };
 
 export type WeatherBundle = {

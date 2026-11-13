@@ -1,7 +1,8 @@
 import { Droplets, Eye, Gauge, Leaf, RefreshCw, SunMedium, Sunrise, Sunset } from "lucide-react";
 import type { ReactNode } from "react";
 import { MoonDisc } from "@/components/weather/SkyBackdrop";
-import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress, tideForecast } from "@/weather/astro";
+import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress } from "@/weather/astro";
+import { modelTideForecast } from "@/weather/marineTides";
 import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
 import {
@@ -47,6 +48,7 @@ export function DetailCards({
 
   return (
     <div className="mt-3 space-y-3">
+      {coastal ? <TideCard bundle={bundle} place={place} lang={lang} now={now} /> : null}
       <article className="wx-card grid grid-cols-3 divide-x divide-line py-4 text-center rtl:divide-x-reverse">
         <Stat icon={<Droplets className="size-4" />} label={t(lang, "humidity")} value={formatPercent(bundle.current.humidity, lang)} />
         <Stat icon={<SunMedium className="size-4" />} label={t(lang, "uv")} value={formatNumber(uv, lang, 1)} />
@@ -123,7 +125,6 @@ export function DetailCards({
         </article>
       </div>
 
-      {coastal ? <TideCard bundle={bundle} place={place} lang={lang} now={now} /> : null}
     </div>
   );
 }
@@ -338,7 +339,11 @@ function TideCard({
   lang: Lang;
   now: number;
 }) {
-  const tide = tideForecast(place.lat, place.lon, now);
+  const tidePoints = bundle.marine?.tide?.points ?? null;
+  const tide = modelTideForecast(tidePoints, now);
+  const available = tide.points.length >= 6 &&
+    bundle.marine?.tide?.fetchedAt != null &&
+    now - bundle.marine.tide.fetchedAt < 8 * 3600000;
   const wave = bundle.marine?.wave;
   const pts = tide.points;
   const levels = pts.map((p) => p.level);
@@ -360,15 +365,21 @@ function TideCard({
         <h2 className="text-sm font-semibold text-fg">{t(lang, "tide")}</h2>
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
         <p className="mt-1 text-[0.66rem] text-muted">{lang === "ar"
-          ? "تقدير فلكي غير مُعاير لمحطة ساحلية؛ لا يُستخدم للملاحة"
-          : "Uncalibrated astronomical estimate; not for navigation"}</p>
+          ? "توقع ارتفاع سطح البحر من Open-Meteo Marine (مرجع متوسط سطح البحر)؛ دقته الساحلية محدودة، ولا يُستخدم للملاحة."
+          : "Modelled sea level from Open-Meteo Marine (global mean sea level); limited coastal accuracy, not for navigation."}</p>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
-        <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? formatSignedMeters(tide.nextLow.level, lang) : "—"} />
-        <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
-      </div>
-      <div dir="ltr">
+      {available ? (
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
+          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? formatSignedMeters(tide.nextLow.level, lang) : "—"} />
+          <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-muted" role="note">{lang === "ar"
+          ? "لا تتوفر بيانات مد وجزر موثوقة لهذا الموقع حاليًا. اسحب لتحديث التوقعات."
+          : "Tide data is unavailable for this location right now. Pull to refresh forecasts."}</p>
+      )}
+      {available ? <div dir="ltr">
         <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={t(lang, "tide")}>
           <path d={d} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
           {nowX ? <line x1={nowX.x} x2={nowX.x} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
@@ -385,8 +396,8 @@ function TideCard({
               <circle key={p.t} cx={p.x} cy={p.y} r="3.2" fill="currentColor" />
             ))}
         </svg>
-      </div>
-      <ul className="mt-2 space-y-1">
+      </div> : null}
+      {available ? <ul className="mt-2 space-y-1">
         {tide.events.map((ev) => (
           <li key={`${ev.kind}-${ev.t}`} className="flex items-center justify-between text-sm">
             <span className="text-muted">{ev.kind === "high" ? t(lang, "tideHigh") : t(lang, "tideLow")}</span>
@@ -395,7 +406,7 @@ function TideCard({
             </span>
           </li>
         ))}
-      </ul>
+      </ul> : null}
     </article>
   );
 }
