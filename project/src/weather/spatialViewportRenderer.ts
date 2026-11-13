@@ -46,7 +46,7 @@ export function nextSpatialWorkerJob(
   return first;
 }
 type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable;
-  queuedAt: number; palette: Palette;
+  queuedAt: number; values: Float32Array; palette: Palette;
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
@@ -265,6 +265,10 @@ export class SpatialViewportRenderer {
   private async render(state: OmUrlState, palette: Palette, tile: RasterTask,
     variable: SpatialVariable, signal: AbortSignal): Promise<ImageBitmap> {
     if (!this.active || !state.data?.values) throw new Error("worker-disabled");
+    // Hold the exact decoded array reference BEFORE the admission await.
+    // Upstream can evict state.data during a pan or hour change, but already
+    // accepted raster jobs must not lose their input or force a legacy tile.
+    const values = state.data.values;
     // A finite admission wait prevents congestion from silently switching
     // 40+ tiles to a different renderer during the same visible viewport.
     // Leaflet's AbortSignal drops obsolete pans while they are waiting.
@@ -275,7 +279,7 @@ export class SpatialViewportRenderer {
       if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
       return await new Promise<ImageBitmap>((resolve, reject) => {
         const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable,
-          queuedAt: performance.now(), tile, palette, signal,
+          queuedAt: performance.now(), values, tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
           const index = this.jobs.indexOf(job);
@@ -307,8 +311,9 @@ export class SpatialViewportRenderer {
       const slot = this.slots[next.slot]!;
       const job = this.jobs.splice(next.job, 1)[0]!;
       if (job.signal.aborted) { job.onAbort(); continue; }
-      const values = job.state.data?.values;
-      if (!values) { job.reject(new Error("model-data-evicted")); continue; }
+      // This is the exact array held when the job was admitted; reading
+      // state.data again after waiting would race upstream's LRU eviction.
+      const values = job.values;
       try {
         if (!slot.cache.has(job.dataKey)) {
           while (slot.bytes + values.byteLength > MAX_WORKER_DATA && slot.cache.size) {

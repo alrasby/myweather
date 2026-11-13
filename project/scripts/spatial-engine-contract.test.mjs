@@ -82,4 +82,6 @@ test("raster model state resolution and bounded cache locality are protected", (
   assert.ok(src.includes("nowMs - oldest.queuedAt >= 550"));
   assert.ok(src.includes("datasetReuses: this.reused"));
   assert.ok(src.includes("capturedReadRecoveries: this.recovered"));
+  assert.ok(src.includes("const values = state.data.values;"));
+  assert.ok(src.includes("const values = job.values;"));
 });
