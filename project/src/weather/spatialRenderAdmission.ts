@@ -7,8 +7,10 @@
  * raster buffers. Aborted Leaflet requests leave the queue immediately. */
 export type AdmissionFailure = "saturated" | "deadline" | "closed";
 export class SpatialAdmissionError extends Error {
-  constructor(readonly reason: AdmissionFailure) {
+  readonly reason: AdmissionFailure;
+  constructor(reason: AdmissionFailure) {
     super(`spatial-worker-admission-${reason}`);
+    this.reason = reason;
     this.name = "SpatialAdmissionError";
   }
 }
@@ -20,13 +22,15 @@ export class SpatialRenderAdmission {
   private waiters: Waiter[] = [];
   private closed = false;
   private peak = 0;
-  constructor(
-    private readonly capacity = 40,
-    private readonly maxWaiting = 64,
-    private readonly deadlineMs = 15_000,
-  ) {
+  private readonly capacity: number;
+  private readonly maxWaiting: number;
+  private readonly deadlineMs: number;
+  constructor(capacity = 40, maxWaiting = 64, deadlineMs = 15_000) {
     if (capacity < 1 || maxWaiting < 0 || deadlineMs < 1)
       throw new Error("invalid-spatial-render-admission");
+    this.capacity = capacity;
+    this.maxWaiting = maxWaiting;
+    this.deadlineMs = deadlineMs;
   }
 
   get waiting(): number { return this.waiters.length; }

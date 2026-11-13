@@ -12,7 +12,7 @@
  * No dependency patches, alternative weather providers or fabricated pixels.
  */
 import { getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
-import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission";
+import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission.ts";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
 
 type ReadKey = string;
