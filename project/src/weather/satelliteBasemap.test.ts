@@ -16,7 +16,6 @@ test("Android raster seam mitigation excludes other browsers and low density scr
   assert.equal(needsRasterSeamGuard("Mozilla/5.0 (Linux; Android 16)", 1), false);
   assert.equal(needsRasterSeamGuard("Mozilla/5.0 (Macintosh; Intel Mac OS X)", 3), false);
 });
-\n
 test("satellite parent remains until detailed imagery finishes after zooming out", () => {
   assert.equal(shouldKeepSatelliteParent(5, true), true);
   assert.equal(shouldKeepSatelliteParent(4, false), true);
