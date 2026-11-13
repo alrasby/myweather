@@ -1388,6 +1388,11 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink"
                 onClick={() => {
                   const next = !playing;
+                  // A deliberate playback start can prepare one genuine global
+                  // rain/snow fallback ahead of the first hourly boundary.
+                  // The current ECMWF renderer remains primary and no fake
+                  // forecast pixels are introduced.
+                  if (next && kind === 2) rainPlaybackQuickRef.current?.();
                   setPlaying(next);
                   engineRef.current?.setPlaying(next);
                 }}
