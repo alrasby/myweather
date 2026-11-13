@@ -3,9 +3,8 @@ import {createServer} from 'node:http';
 import {mkdir,readFile,rename,writeFile,unlink} from 'node:fs/promises';
 import {join,dirname} from 'node:path';
 import {parseModelMetadata,tilePath,validTile} from './contracts.mjs';
+import {validPng} from './pngIntegrity.mjs';
 const META='https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/latest.json';
-const PNG=Buffer.from([137,80,78,71,13,10,26,10]);
-const validPng=b=>Buffer.isBuffer(b)&&b.length>24&&b.length<=1048576&&b.subarray(0,8).equals(PNG);
 const fail=(status,msg)=>Object.assign(new Error(msg),{status});
 export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
  const r=await fetch(META,{signal:AbortSignal.timeout(12000)});
@@ -13,7 +12,10 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
 },maxActive=2,maxWaiting=24,manifestTtlMs=300000,now=()=>Date.now()}){
  if(typeof renderTile!=='function'||!cacheDir||!Number.isInteger(maxActive)||maxActive<1||!Number.isInteger(maxWaiting)||maxWaiting<0)throw new Error('invalid-tile-gateway');
  let active=0,manifest=null,due=0,refreshing=null;
- const waiters=[],inflight=new Map(),stats={cacheHits:0,generated:0,failures:0};
+ const cacheMs=[],renderMs=[];
+ const record=(list,ms)=>{list.push(Math.round(ms));if(list.length>120)list.shift();};
+ const p95=list=>list.length?[...list].sort((a,b)=>a-b)[Math.ceil(list.length*.95)-1]:null;
+ const waiters=[],inflight=new Map(),stats={cacheHits:0,generated:0,failures:0,maxObservedActive:0};
  async function catalog(){
   if(manifest&&now()<due)return manifest;
   if(!refreshing)refreshing=Promise.resolve().then(fetchMetadata).then(parseModelMetadata).then(m=>{
@@ -22,22 +24,28 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
   return refreshing;
  }
  async function limited(fn){
-  if(active>=maxActive){
+  if(active<maxActive&&waiters.length===0){active++;}
+  else {
    if(waiters.length>=maxWaiting)throw fail(503,'tile-render-busy');
-   await new Promise(r=>waiters.push(r));
+   // Existing active permit is transferred to this waiter on completion;
+   // do NOT increment again or a racing request can exceed the hard budget.
+   await new Promise(resolve=>waiters.push(resolve));
   }
-  active++;try{return await fn();}finally{active--;waiters.shift()?.();}
+  stats.maxObservedActive=Math.max(stats.maxObservedActive,active);
+  try{return await fn();}
+  finally{if(waiters.length)waiters.shift()();else active--;}
  }
  async function getTile(m,r){
   const relative=tilePath(m,r),full=join(cacheDir,relative);
-  try{const b=await readFile(full);if(validPng(b)){stats.cacheHits++;return b;}}
+  try{const began=performance.now(),b=await readFile(full);if(validPng(b)){stats.cacheHits++;record(cacheMs,performance.now()-began);return b;}}
   catch(e){if(e?.code!=='ENOENT')throw e;}
   if(inflight.has(relative))return inflight.get(relative);
   const task=limited(async()=>{
-   try{const b=await readFile(full);if(validPng(b)){stats.cacheHits++;return b;}}
+   try{const began=performance.now(),b=await readFile(full);if(validPng(b)){stats.cacheHits++;record(cacheMs,performance.now()-began);return b;}}
    catch(e){if(e?.code!=='ENOENT')throw e;}
-   const b=await renderTile(m,r);
+   const began=performance.now(),b=await renderTile(m,r);
    if(!validPng(b))throw fail(502,'invalid-source-raster');
+   record(renderMs,performance.now()-began);
    await mkdir(dirname(full),{recursive:true});
    const tmp=full+'.'+process.pid+'.'+Math.random().toString(16).slice(2)+'.tmp';
    try{await writeFile(tmp,b,{flag:'wx'});await rename(tmp,full);}
@@ -54,7 +62,7 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
   if(req.method!=='GET')return send(405,JSON.stringify({error:'method-not-allowed'}));
   const path=(req.url||'').split('?')[0];
   try{
-   if(path==='/v1/health')return send(200,JSON.stringify({ready:!!manifest,...stats,active,waiting:waiters.length}));
+   if(path==='/v1/health')return send(200,JSON.stringify({ready:!!manifest,...stats,active,waiting:waiters.length,cacheP95Ms:p95(cacheMs),renderP95Ms:p95(renderMs)}));
    if(path==='/v1/manifest.json')return send(200,JSON.stringify(await catalog()));
    const match=/^\/v1\/tiles\/([0-9]{8}T[0-9]{4}Z)\/(\d{1,3})\/(cloud_cover|precipitation|snowfall_water_equivalent)\/(\d{1,2})\/(\d{1,4})\/(\d{1,4})\.png$/.exec(path);
    if(!match)return send(404,JSON.stringify({error:'not-found'}));

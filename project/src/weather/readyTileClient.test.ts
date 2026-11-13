@@ -49,6 +49,8 @@ test('failed or obsolete frame never publishes invented or partial weather',()=>
   client.show(1);L.tiles[3]!.fire('tileerror');
   loaded(L.tiles.slice(3,6));assert.equal(client.displayedHour,0);
   client.prefetch(0,1,0,true,false);assert.ok(images.length>0&&images.length<=8);
+  const before=images.length;client.prefetch(0,1,0,true,false);
+  assert.equal(images.length,before,"repeat viewport must reuse already started real tile fetches");
   client.prefetch(0,1,0,true,true);assert.equal(client.displayedHour,0);
   assert.equal(published.length,1);
  }finally{client.destroy();}

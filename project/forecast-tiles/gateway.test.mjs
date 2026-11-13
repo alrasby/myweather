@@ -4,10 +4,11 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createTileGateway} from './gateway.mjs';
+import {makeTestPng} from './testPng.mjs';
 import {parseModelMetadata,tilePath,tileBounds,pinnedTileUrl} from './contracts.mjs';
 const t='2026-11-13T00:00:00.000Z';
 const meta={reference_time:t,valid_times:[t,'2026-11-13T01:00:00.000Z'],variables:['cloud_cover','precipitation','snowfall_water_equivalent'],completed:true};
-const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.alloc(32,1)]);
+const png=makeTestPng();
 const r={runId:'20261113T0000Z',timeIndex:1,layer:'precipitation',z:2,x:3,y:1};
 test('pinned real model run, UTC, bounds, 3 meteorological variables and tile validation',()=>{
  const m=parseModelMetadata(meta);
@@ -44,4 +45,23 @@ test('never cache false or corrupted weather images',async()=>{
  api.server.listen(0,'127.0.0.1');await new Promise(q=>api.server.once('listening',q));
  try{const url='http://127.0.0.1:'+api.server.address().port+'/v1/tiles/20261113T0000Z/1/cloud_cover/2/1/1.png';assert.equal((await fetch(url)).status,502);}
  finally{await new Promise(q=>api.server.close(q));await rm(dir,{recursive:true,force:true});}
+});
+
+test("one active rendering slot is never oversubscribed when queued clients resume",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"mw-tiles-queue-"));
+ let active=0,peak=0;
+ const api=createTileGateway({cacheDir:dir,fetchMetadata:async()=>meta,maxActive:1,maxWaiting:2,
+  renderTile:async()=>{active++;peak=Math.max(peak,active);
+   await new Promise(done=>setTimeout(done,15));active--;return png;}});
+ api.server.listen(0,"127.0.0.1");await new Promise(done=>api.server.once("listening",done));
+ try{
+  const base="http://127.0.0.1:"+api.server.address().port;
+  const urls=[0,1,2].map(x=>base+"/v1/tiles/20261113T0000Z/1/cloud_cover/2/"+x+"/1.png");
+  const responses=await Promise.all(urls.map(url=>fetch(url)));
+  assert.deepEqual(responses.map(r=>r.status),[200,200,200]);
+  assert.equal(peak,1);
+  const snapshot=await(await fetch(base+"/v1/health")).json();
+  assert.equal(snapshot.maxObservedActive,1);
+  assert.ok(snapshot.renderP95Ms>=10);
+ }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
 });

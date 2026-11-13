@@ -42,7 +42,7 @@ export class ReadyTileClient{
  private readonly intelligence=new TinyTileDemandModel();
  private previous: {x:number;y:number;z:number;hour:number;signals:TileSignals}|null=null;
  get intelligenceSamples():number{return this.intelligence.observations;}
- private prefetched:HTMLImageElement[]=[];
+ private prefetched=new Map<string,HTMLImageElement>();
  private readonly L:LeafletLike;
  private readonly map:MapLike;
  private readonly base:string;
@@ -59,7 +59,7 @@ export class ReadyTileClient{
  get displayedHour():number|null{return this.current?.hour??null;}
  isReady(hour:number):boolean{return this.current?.hour===hour||!!this.incoming&&this.incoming.hour===hour&&this.incoming.loaded.every(Boolean)&&!this.incoming.failed;}
  private disposeFrame(f:Frame|null){if(!f)return;if(f.timer)clearTimeout(f.timer);for(const layer of f.layers)layer.remove();}
- private clearPredictor(){for(const img of this.prefetched)img.src='';this.prefetched=[];}
+ private clearPredictor(){for(const img of this.prefetched.values())img.src='';this.prefetched.clear();}
  /** Publish only after all three valid real-data image layers finish. */
  show(hour:number){
   if(this.destroyed||Date.now()<this.failedUntil||!Number.isInteger(hour)||hour<0||hour>=this.manifest.validTimes.length)return;
@@ -106,7 +106,7 @@ export class ReadyTileClient{
  }
  /** Forecast-demand predictor warms authentic next-hour PNG URLs only. */
  prefetch(hour:number,movingX:number,movingY:number,playing:boolean,dataSaver:boolean){
-  this.clearPredictor();if(this.destroyed||dataSaver||hour<0||hour>=this.manifest.validTimes.length)return;
+  if(this.destroyed||dataSaver||hour<0||hour>=this.manifest.validTimes.length){this.clearPredictor();return;}
   const center=this.map.getCenter(),z=Math.max(0,Math.min(this.manifest.maxNativeZoom,Math.floor(this.map.getZoom()))),n=2**z;
   const x=Math.floor((center.lng+180)/360*n),lat=Math.max(-85.05,Math.min(85.05,center.lat))*Math.PI/180;
   const y=Math.floor((1-Math.asinh(Math.tan(lat))/Math.PI)/2*n);
@@ -128,9 +128,15 @@ export class ReadyTileClient{
   else if(suggestion==='south')movingY=1;
   else if(suggestion==='north')movingY=-1;
   else if(suggestion==='still')movingX=movingY=0;
+  const wanted=new Set<string>();
   for(const p of planReadyTilePrefetch({z,x,y,hour,count:this.manifest.validTimes.length,movingX,movingY,playing,dataSaver})){
-   this.prefetched.push(this.prefetchImages(readyTileUrl(this.base,this.manifest,{hour:p.hour,layer:p.layer,z:p.z,x:p.x,y:p.y})));
+   const url=readyTileUrl(this.base,this.manifest,{hour:p.hour,layer:p.layer,z:p.z,x:p.x,y:p.y});
+   wanted.add(url);
+   if(!this.prefetched.has(url))this.prefetched.set(url,this.prefetchImages(url));
   }
+  // Keep shared work alive through nearby gestures; cancel obsolete requests.
+  for(const [url,image] of this.prefetched)if(!wanted.has(url)){image.src='';this.prefetched.delete(url);}
+
  }
  destroy(){if(this.destroyed)return;this.destroyed=true;this.intelligence.reset();this.previous=null;this.clearPredictor();if(this.oldTimer)clearTimeout(this.oldTimer);this.oldTimer=null;this.disposeFrame(this.retiring);this.retiring=null;this.disposeFrame(this.incoming);this.disposeFrame(this.current);this.current=null;this.incoming=null;}
 }
