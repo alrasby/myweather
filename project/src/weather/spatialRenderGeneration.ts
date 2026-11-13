@@ -8,10 +8,17 @@ export class SpatialRenderGeneration {
   private started = new Set<number>();
   private finished = new Set<number>();
   get id(): number { return this.epoch; }
-  begin(): number {
+  /** Advance to a new viewport while ADOPTING unfinished Leaflet tile
+   * queues. A map moveend can fire after 'loading' but before a layer emits
+   * 'load'; discarding its token would leave that layer permanently pending
+   * despite every tile having rendered successfully. Only currently
+   * unfinished layers are carried; completed tiles remain visible and are
+   * not counted as work in this generation. */
+  begin(inFlight: readonly number[] = []): number {
     this.epoch++;
     this.started.clear();
     this.finished.clear();
+    for (const index of inFlight) this.started.add(index);
     return this.epoch;
   }
   loading(index: number): number {

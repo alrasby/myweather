@@ -380,10 +380,13 @@ test("one viewport generation publishes consistent model layers and retains sate
   const src = read("project/src/weather/modelField.ts");
   const generation = read("project/src/weather/spatialRenderGeneration.ts");
   const map = read("project/src/components/weather/MapScreen.tsx");
-  assert.ok(src.includes("frame.renderGeneration.begin()"));
-  assert.ok(src.includes("frame.renderGeneration.loaded(index, layerGeneration)"));
+  assert.ok(src.includes("frame.renderGeneration.begin(incomplete)"),
+    "a gesture must adopt unfinished layers rather than dropping their load events");
+  assert.ok(src.includes("frame.layerGeneration[index] = adopted"));
+  assert.ok(src.includes("frame.renderGeneration.loaded(index, frame.layerGeneration[index]!)"));
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"));
-  assert.ok(generation.includes("this.started.clear();"));
+  assert.ok(generation.includes("for (const index of inFlight) this.started.add(index)"));
+  assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
   assert.ok(map.includes("shouldKeepSatelliteParent(map.getZoom(), detailedReady)"));
   assert.ok(map.includes('imagery.on("load", () => { detailedReady = true; syncUnderlay(); })'));
 });

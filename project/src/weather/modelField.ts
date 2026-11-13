@@ -74,6 +74,8 @@ type AnyLayer = {
   addTo: (map: LeafletMap) => AnyLayer;
   remove: () => void;
   on: (event: string, fn: (ev?: { tile?: HTMLElement }) => void) => void;
+  /** Leaflet GridLayer's authoritative current-queue loading state. */
+  isLoading?: () => boolean;
   setOpacity?: (opacity: number) => void;
   bringToFront?: () => void;
 };
@@ -463,7 +465,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -596,7 +598,12 @@ export class ModelField {
         frame.tileGates.forEach((gate) => gate.release());
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
-        frame.renderGeneration.begin();
+        // A Leaflet layer can remain in flight throughout a pan. Rebase
+        // that layer's eventual 'load' event into the new viewport instead
+        // of invalidating it forever and keeping ECMWF hidden by fallback.
+        const incomplete = frame.loaded.flatMap((done, index) => done ? [] : [index]);
+        const adopted = frame.renderGeneration.begin(incomplete);
+        for (const index of incomplete) frame.layerGeneration[index] = adopted;
       }
       if (!this.visible || !this.frames.get(this.base)?.ready) return;
       // GridLayer's 'loading' may be emitted after this moveend callback.
@@ -933,6 +940,7 @@ export class ModelField {
       snowStartTimer: undefined as number | undefined,
       tileGates: Array.from({ length: SPATIAL_LAYER_COUNT }, () => new SpatialTileReveal()),
       renderGeneration: new SpatialRenderGeneration(),
+      layerGeneration: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       revealTimer: undefined as number | undefined,
     };
     this.frames.set(step, frame);
@@ -1026,6 +1034,27 @@ export class ModelField {
     // tiles arrive, but terminate after a prolonged idle or bounded total time.
     const checkProgress = () => {
       if (!alive() || frame.ready) return;
+      // Leaflet may finish its active tile queue while a moveend has
+      // invalidated the former generation's load callback. Recover only
+      // when real tiles for THIS layer were delivered and GridLayer reports
+      // no pending tile requests. Never fabricate an ECMWF completion.
+      let recovered = false;
+      for (const [index, layer] of made.entries()) {
+        if (frame.loaded[index] || frame.layerLastTileAt[index] === 0 ||
+            layer.isLoading?.() !== false) continue;
+        const token = frame.layerGeneration[index]!;
+        if (!frame.renderGeneration.loaded(index, token)) continue;
+        frame.loaded[index] = true;
+        frame.layerFinishedAt[index] = Date.now();
+        recovered = true;
+      }
+      if (recovered) {
+        if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
+          frame.tileGates.forEach((gate) => gate.release());
+        }
+        refresh();
+      }
+      if (frame.ready) return;
       if (spatialFrameTimedOut(Date.now(), startedAt, lastProgressAt)) {
         giveUp();
         return;
@@ -1042,7 +1071,6 @@ export class ModelField {
       const tileStart = new WeakMap<object, number>();
       const tileGate = frame.tileGates[index]!;
       let refreshBatch = false;
-      let layerGeneration = frame.renderGeneration.id;
       let lastCompletedView: SpatialRasterView | null = null;
       layer.on("tileloadstart", (event) => {
         if (!alive() || !event?.tile) return;
@@ -1064,7 +1092,7 @@ export class ModelField {
         // tiles as they decode instead of hiding the screen for 8+ seconds.
         // A new loading generation supersedes the old state for this
         // particular variable, even if other variables still show old tiles.
-        layerGeneration = frame.renderGeneration.loading(index);
+        frame.layerGeneration[index] = frame.renderGeneration.loading(index);
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
         refreshBatch = (frame.ready || frame.previewReady) &&
@@ -1080,7 +1108,7 @@ export class ModelField {
         refresh();
       });
       layer.on("load", () => {
-        if (!alive() || !frame.renderGeneration.loaded(index, layerGeneration)) return;
+        if (!alive() || !frame.renderGeneration.loaded(index, frame.layerGeneration[index]!)) return;
         // Publish one generation only after every layer with new work
         // settles. A short coalescing window catches overlapping 'loading'
         // events from Leaflet's three independent raster grids.
