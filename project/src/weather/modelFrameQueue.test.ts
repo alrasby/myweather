@@ -80,6 +80,11 @@ test("a genuinely failed spatial hour may continue only via explicit fallback", 
   assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set([16]), new Set()), true);
 });
 
+test("non-isolated Android limits speculative decode to the immediately following forecast hour", () => {
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8,9]), new Set(), new Set(), false, 0, true, false, true), { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8]), new Set(), new Set(), false, 0, true, false, true), { cancel: [], start: 9 });
+});
+
 test("second-hour lookahead starts only when current and next are complete", () => {
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set(), false, 0, true),
