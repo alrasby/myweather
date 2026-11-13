@@ -37,6 +37,7 @@ export class ReadyTileClient{
  private retiring:Frame|null=null;
  private oldTimer:ReturnType<typeof setTimeout>|null=null;
  private destroyed=false;
+ private failedUntil=0;
  private prefetched:HTMLImageElement[]=[];
  private readonly L:LeafletLike;
  private readonly map:MapLike;
@@ -57,15 +58,22 @@ export class ReadyTileClient{
  private clearPredictor(){for(const img of this.prefetched)img.src='';this.prefetched=[];}
  /** Publish only after all three valid real-data image layers finish. */
  show(hour:number){
-  if(this.destroyed||!Number.isInteger(hour)||hour<0||hour>=this.manifest.validTimes.length)return;
+  if(this.destroyed||Date.now()<this.failedUntil||!Number.isInteger(hour)||hour<0||hour>=this.manifest.validTimes.length)return;
   if(this.current?.hour===hour||this.incoming?.hour===hour)return;
   this.disposeFrame(this.incoming);this.incoming=null;
   if(this.retiring){if(this.oldTimer)clearTimeout(this.oldTimer);this.disposeFrame(this.retiring);this.retiring=null;this.oldTimer=null;}
   const frame:Frame={hour,layers:[],loaded:[false,false,false],counts:[0,0,0],timer:null,failed:false};
   this.incoming=frame;
   const fail=()=>{
-   if(this.destroyed||this.incoming!==frame)return;
-   frame.failed=true;this.disposeFrame(frame);this.incoming=null;
+   if(this.destroyed)return;
+   // A new viewport can fail AFTER the previously complete layer was shown.
+   // Do not retain invalid ECMWF tiles or overlay them on a different fallback.
+   if(this.current===frame){
+    this.failedUntil=Date.now()+12000;this.disposeFrame(frame);this.current=null;this.onMiss();return;
+   }
+   if(this.incoming!==frame)return;
+   frame.failed=true;this.failedUntil=Date.now()+12000;
+   this.disposeFrame(frame);this.incoming=null;
    if(!this.current)this.onMiss();
   };
   const complete=()=>{
