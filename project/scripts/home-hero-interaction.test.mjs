@@ -460,3 +460,21 @@ test("existing cached coastal and inland cities refresh marine tides once on upg
   assert.ok(store.includes("cached.bundle.marineVersion === 1"), "store short-circuit must honor marine cache upgrade");
   assert.ok(types.includes("marineVersion?: 1"), "old bundles remain readable");
 });
+
+test("tidal detail card stays below weather detail cards and is hidden without actual sea data",()=>{
+ const sky=read("project/src/components/weather/SkyCards.tsx");
+ const tide=read("project/src/weather/marineTides.ts");
+ const anchor=sky.indexOf('export function DetailCards(');
+ const detailEnd=sky.indexOf('\nfunction Stat(',anchor);
+ const detail=sky.slice(anchor,detailEnd);
+ const cards=detail.indexOf('<div className="grid grid-cols-2 gap-3">');
+ const placement=detail.indexOf('{showTides ? <TideCard');
+ assert.ok(cards>=0&&placement>cards,"TideCard must follow pressure/visibility details");
+ assert.equal(detail.split('<TideCard').length-1,1,"only one tide card placement");
+ assert.ok(detail.includes('hasDisplayableCoastalTide(bundle.marine, now)'),
+  "never show for inland places or missing real sea-level data");
+ assert.ok(!sky.includes('Tide data is unavailable for this location right now'),
+  "do not surface a misleading error to a non-coastal city");
+ assert.ok(tide.includes('marineGridDistanceKm('),
+  "retain nearest marine source cell sanity check");
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {marineGridDistanceKm,modelTideForecast,parseMarineSnapshot} from "./marineTides.ts";
+import {marineGridDistanceKm,modelTideForecast,parseMarineSnapshot,hasDisplayableCoastalTide} from "./marineTides.ts";
 
 const coastalCities=[
  ["Dubai",25.2048,55.2708,25.24,55.27],
@@ -23,6 +23,7 @@ test("all four user-requested shoreline cities match nearby marine model cells",
   const marine=parseMarineSnapshot(response(gridLat,gridLon),lat,lon,now);
   assert.equal(marine?.coastal,true,name);
   assert.ok(marine?.tide?.points.length,name);
+  assert.equal(hasDisplayableCoastalTide(marine,now),true,name);
   assert.equal(marine?.wave,1.2,name);
  }
 });
@@ -56,4 +57,17 @@ test("missing, corrupt and stale sea-level time series cannot invent tide events
 });
 test("dateline distance uses shortest geographic path",()=>{
  assert.ok(marineGridDistanceKm(0,179.8,0,-179.8)<45);
+});
+
+test("inland or unavailable marine data hides tide card without exposing error copy",()=>{
+ const coast=parseMarineSnapshot(response(25.24,55.27),25.2048,55.2708,now);
+ assert.equal(hasDisplayableCoastalTide(null,now),false);
+ assert.equal(hasDisplayableCoastalTide({coastal:false,wave:null,tide:coast?.tide},now),false);
+ assert.equal(hasDisplayableCoastalTide({coastal:true,wave:1,tide:null},now),false);
+ assert.equal(hasDisplayableCoastalTide({coastal:true,wave:1,tide:coast?.tide},now),true);
+ assert.equal(hasDisplayableCoastalTide(coast,now+8*hour),false,"expired predictions are hidden");
+ assert.equal(hasDisplayableCoastalTide(coast,now-hour),false,"future fetch stamps are not accepted");
+ const justInland=parseMarineSnapshot(response(25.24,55.27),25.4,55.27,now);
+ assert.equal(justInland?.coastal,false,"distant sea-grid cells cannot classify nearby inland towns as sea coast");
+ assert.equal(hasDisplayableCoastalTide(justInland,now),false);
 });

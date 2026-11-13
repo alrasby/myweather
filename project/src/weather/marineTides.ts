@@ -32,7 +32,7 @@ export function parseMarineSnapshot(raw:unknown,lat:number,lon:number,now=Date.n
  if(!finite(src.latitude)||!finite(src.longitude))return null;
  // The nearest SEA model cell can be quite remote for an inland city.
  // A successful API call alone is not evidence of coastal eligibility.
- const coastal=marineGridDistanceKm(lat,lon,src.latitude,src.longitude)<=30;
+ const coastal=marineGridDistanceKm(lat,lon,src.latitude,src.longitude)<=20;
  if(!coastal)return {coastal:false,wave:null,tide:null};
  const wave=finite(src.current?.wave_height)&&src.current.wave_height>=0
    ?src.current.wave_height:null;
@@ -78,4 +78,22 @@ export function modelTideForecast(points:readonly TidePoint[]|null|undefined,now
  return {points:show,events:events.slice(0,4),
   nextHigh:events.find(e=>e.kind==="high")??null,
   nextLow:events.find(e=>e.kind==="low")??null,currentLevel};
+}
+
+/** Show the whole marine card only when source-backed recent, coherent
+ * sea-level samples exist. Lack of a Marine response is not an error to
+ * display to an inland user. This check is intentionally city-name agnostic.
+ */
+export function hasDisplayableCoastalTide(marine:MarineSnap|null|undefined,now:number):boolean{
+ const tide=marine?.tide;
+ if(marine?.coastal!==true||!tide||!Number.isFinite(now)||
+    !Number.isFinite(tide.fetchedAt)||now-tide.fetchedAt<0||
+    now-tide.fetchedAt>=8*3600000||!Array.isArray(tide.points))return false;
+ let recent=0,forward=false;
+ for(const p of tide.points){
+  if(!Number.isFinite(p.t)||!Number.isFinite(p.level))continue;
+  if(p.t>=now-3*3600000&&p.t<=now+24*3600000)recent++;
+  if(p.t>=now+6*3600000&&p.t<=now+24*3600000)forward=true;
+ }
+ return recent>=6&&forward;
 }
