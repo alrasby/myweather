@@ -401,7 +401,12 @@ test("ECMWF viewport renderer reuses decoded data, limits retained states and su
   assert.ok(model.includes('this.viewportRenderer?.handler ?? omProtocol'));
   assert.ok(model.includes('this.viewportRenderer?.dispose()'));
   assert.ok(engine.includes('type: "arrayBuffer"'), "decode OM through official protocol without duplicate first-tile paint");
-  assert.ok(engine.includes("MAX_WORKER_DATA = 24 * 1024 * 1024"), "bounded worker memory");
+  assert.ok(engine.includes("resolveCurrentSpatialState("),
+    "always validate current viewport before selecting cached model states");
+  assert.ok(!engine.includes("private pendingData = new Map"),
+    "do not duplicate upstream's .om request coalescing across invalid viewport bounds");
+  assert.ok(engine.includes("MAX_WORKER_DATA = 32 * 1024 * 1024"),
+    "bounded worker memory must cover the full Gaussian ECMWF IFS grid");
   assert.ok(engine.includes("this.admission.acquire(signal)"),
     "worker congestion must wait instead of immediately switching to legacy raster");
   assert.ok(engine.includes("peakWaiting: this.admission.peakWaiting"),

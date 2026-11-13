@@ -1,9 +1,12 @@
 /** Bounded, reversible ECMWF raster backend for non-isolated Android WebView.
  *
  * Open-Meteo still performs all .om range reads and variable derivations.
- * We request an arrayBuffer/empty vector once to load each real variable
- * WITHOUT painting a redundant first raster tile. Its decoded state is
- * copied once to a persistent viewport worker, then used for multiple tiles.
+ * We request an arrayBuffer/empty vector through upstream for EVERY requested
+ * viewport before selecting its decoded state. This is a cheap no-raster
+ * operation after the first read, but critically verifies that the data
+ * covers the latest map bounds (an older shortcut reused an obsolete state).
+ * Its decoded state is copied once to a persistent viewport worker and
+ * reused across several tiles.
  * A worker or memory failure fails over to the official OM raster renderer.
  *
  * No dependency patches, alternative weather providers or fabricated pixels.
@@ -39,7 +42,13 @@ export function classifyViewportFailure(error: unknown): ViewportFallbackReason 
     return "workerFailure";
   return "other";
 }
-const MAX_WORKER_DATA = 24 * 1024 * 1024;
+// ECMWF IFS HRES uses a reduced Gaussian grid of up to 6,599,680
+// Float32 values (26,398,720 bytes = 25.18 MiB). The old 24 MiB
+// cutoff rejected full-latitude-band data and forced legacy rendering
+// on >100 tiles during a single real-device test. 32 MiB covers the
+// COMPLETE provider grid with only +8 MiB possible per worker.
+export const MAX_WORKER_DATA = 32 * 1024 * 1024;
+export const ECMWF_IFS_FULL_GRID_BYTES = 6_599_680 * Float32Array.BYTES_PER_ELEMENT;
 const MAX_PENDING_TILES = 40;
 const RENDER_DEADLINE_MS = 20000;
 const tileSuffix = /\/(\d+)\/(\d+)\/(\d+)$/;
@@ -70,6 +79,17 @@ export function shouldUseViewportWorker(native: boolean, isolated: boolean, work
   legacyOverride: boolean): boolean {
   return native && !isolated && workerSupported && !legacyOverride;
 }
+
+/** Do not trust any previously cached model variable until upstream has
+ * checked the current bounds and (if needed) fetched the NEW viewport.
+ * Exported as a pure async seam so stale-state reuse is regression-tested. */
+export async function resolveCurrentSpatialState<T>(
+  ensureCurrentBounds: () => Promise<unknown>,
+  readState: () => T | null,
+): Promise<T | null> {
+  await ensureCurrentBounds();
+  return readState();
+}
 function paletteOf(settings: OmProtocolSettings, variable: string): Palette | null {
   const scale = settings.colorScales[variable] as RenderableColorScale | undefined;
   if (!scale || scale.type !== "breakpoint" || !scale.breakpoints.length ||
@@ -82,8 +102,6 @@ export class SpatialViewportRenderer {
   private jobs: TileJob[] = [];
   private serial = 0;
   private stateIds = new WeakMap<OmUrlState, string>();
-  private pendingData = new Map<ReadKey, { promise: Promise<OmUrlState | null>;
-    controller: AbortController; subscribers: number; finished: boolean }>();
   private samples: number[] = [];
   private copied = 0;
   private completed = 0;
@@ -128,7 +146,7 @@ export class SpatialViewportRenderer {
     const palette = parsed && paletteOf(config, parsed.variable);
     if (!parsed || !palette) return omProtocol(params, abort, settings);
     try {
-      const state = await this.ensureDataset(parsed, abort.signal, config);
+      const state = await this.ensureDataset(parsed, abort, config);
       if (abort.signal.aborted) return { data: new ArrayBuffer(0) };
       if (!state?.data?.values) {
         this.fallback("missingData");
@@ -154,47 +172,32 @@ export class SpatialViewportRenderer {
   }
 
   private async ensureDataset(parsed: NonNullable<ReturnType<typeof parseSpatialRasterTile>>,
-    signal: AbortSignal, config: OmProtocolSettings): Promise<OmUrlState | null> {
-    const locate = () => {
-      const states = getProtocolInstance(config).stateByKey;
-      for (const state of states.values()) {
-        if (state.omFileUrl === parsed.file && state.dataOptions.variable === parsed.variable &&
-            state.data?.values) return state;
-      }
-      return null;
-    };
-    const loaded = locate();
-    if (loaded) return loaded;
-    let entry = this.pendingData.get(parsed.key);
-    if (!entry) {
-      const controller = new AbortController();
-      // ArrayBuffer requests with no arrows/contours draw no tile in upstream
-      // but still decode the SAME .om variable and cache the decoded state.
-      const pending = { controller, subscribers: 0, finished: false,
-        promise: Promise.resolve(null as OmUrlState | null) };
-      pending.promise = omProtocol(
+    controller: AbortController, config: OmProtocolSettings): Promise<OmUrlState | null> {
+    // Upstream parseRequest() reads updateCurrentBounds(), then
+    // getOrCreateState() verifies boundsIncluded() and replaces a stale
+    // spatial data window. The earlier custom shortcut checked file/variable
+    // ONLY: it could paint old-area NaNs/transparent rectangles after a pan.
+    // Calling arrayBuffer with no vectors/contours never paints a redundant
+    // raster tile, and upstream ensureData() already deduplicates concurrent
+    // .om reads by state + AbortSignal. Do NOT re-implement that cache here.
+    return resolveCurrentSpatialState(
+      () => omProtocol(
         { url: `${parsed.key}/${parsed.tile.z}/${parsed.tile.x}/${parsed.tile.y}`, type: "arrayBuffer" },
         controller, config,
-      ).then(() => locate()).finally(() => {
-        pending.finished = true;
-        if (this.pendingData.get(parsed.key) === pending) this.pendingData.delete(parsed.key);
-      });
-      this.pendingData.set(parsed.key, pending);
-      entry = pending;
-    }
-    entry.subscribers++;
-    let rejectAbort: (() => void) | null = null;
-    const aborted = new Promise<never>((_, reject) => {
-      rejectAbort = () => reject(new DOMException("Aborted", "AbortError"));
-      if (signal.aborted) rejectAbort();
-      else signal.addEventListener("abort", rejectAbort, { once: true });
-    });
-    try { return await Promise.race([entry.promise, aborted]); }
-    finally {
-      if (rejectAbort) signal.removeEventListener("abort", rejectAbort);
-      entry.subscribers--;
-      if (entry.subscribers <= 0 && !entry.finished) entry.controller.abort();
-    }
+      ),
+      () => {
+        if (controller.signal.aborted) return null;
+        // The upstream request has now validated the current viewport.
+        // Choose the most recent loaded matching state, never a previous
+        // stale entry captured before the new bounds were parsed.
+        const states = getProtocolInstance(config).stateByKey;
+        for (const state of Array.from(states.values()).reverse()) {
+          if (state.omFileUrl === parsed.file && state.dataOptions.variable === parsed.variable &&
+              state.data?.values) return state;
+        }
+        return null;
+      },
+    );
   }
 
   private async render(state: OmUrlState, palette: Palette, tile: RasterTask, signal: AbortSignal): Promise<ImageBitmap> {

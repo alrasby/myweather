@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -42,4 +42,31 @@ test("worker backpressure and data/memory failure categories are independently o
   assert.equal(classifyViewportFailure(new SpatialAdmissionError("closed")), "workerFailure");
   assert.equal(classifyViewportFailure(new Error("viewport-worker-timeout")), "workerFailure");
   assert.equal(classifyViewportFailure(new Error("unclassified-protocol-error")), "other");
+});
+
+test("full reduced-Gaussian ECMWF IFS model data fits the bounded new raster worker", () => {
+  assert.equal(ECMWF_IFS_FULL_GRID_BYTES, 26_398_720);
+  assert.ok(ECMWF_IFS_FULL_GRID_BYTES > 24 * 1024 * 1024,
+    "24 MiB used to route full real-data fields to legacy rendering");
+  assert.equal(MAX_WORKER_DATA, 32 * 1024 * 1024);
+  assert.ok(ECMWF_IFS_FULL_GRID_BYTES < MAX_WORKER_DATA);
+  assert.ok(MAX_WORKER_DATA <= 32 * 1024 * 1024, "worker memory must remain bounded");
+});
+
+test("viewport data state is resolved AFTER upstream validates the new map bounds", async () => {
+  const oldState = { name: "stale-north-atlantic-window" };
+  const newState = { name: "latest-europe-window" };
+  let state = oldState;
+  const calls: string[] = [];
+  const selected = await resolveCurrentSpatialState(
+    async () => { calls.push("upstream-data-revalidated"); state = newState; },
+    () => { calls.push("lookup"); return state; },
+  );
+  assert.equal(selected, newState);
+  assert.deepEqual(calls, ["upstream-data-revalidated", "lookup"]);
+  await assert.rejects(
+    resolveCurrentSpatialState(async () => { throw new Error("source-failed"); }, () => oldState),
+    /source-failed/,
+    "a failed current viewport must never silently reuse stale data",
+  );
 });

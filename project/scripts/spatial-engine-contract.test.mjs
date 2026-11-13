@@ -44,3 +44,13 @@ test("performance details stay inside existing hidden diagnostics and preserve m
   assert.ok(map.includes("rateLimitedResponses"));
   assert.ok(map.includes("engine.canAdvanceRainTime"));
 });
+
+test("ECMWF viewport cannot reuse data from a different pan/zoom window", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  assert.ok(src.includes("resolveCurrentSpatialState("));
+  assert.ok(src.includes("getOrCreateState() verifies boundsIncluded()"));
+  assert.ok(!src.includes("if (loaded) return loaded;"),
+    "cached model data cannot bypass updated viewport boundaries");
+  assert.ok(!src.includes("this.pendingData.get(parsed.key)"),
+    "dataset coalescing by a URL alone must not cross viewport bounds");
+});
