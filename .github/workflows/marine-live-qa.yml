@@ -1,0 +1,25 @@
+name: Coastal Tide Marine — Live QA
+on:
+  push:
+    branches:
+      - feature/ready-weather-tiles-smart-pipeline-20261113
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: marine-coastal-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  four-coastal-cities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run genuine four-city Open-Meteo Marine coverage probe
+        run: node --experimental-strip-types scripts/marine-live-qa.mjs
