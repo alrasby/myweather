@@ -120,7 +120,7 @@ test("raster queue preserves hot forecast data without starving earlier hours", 
   assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 650), { job: 0, slot: 0 });
   assert.deepEqual(nextSpatialWorkerJob(jobs.slice(0, 1), slots, 200), { job: 0, slot: 0 });
 });
-\n
+
 test("requested hour beats queued future-hour raster and future work resumes", () => {
   const slots = [
     { variable: "cloud_cover" as const, busy: false },
