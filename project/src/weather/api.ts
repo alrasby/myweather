@@ -574,7 +574,7 @@ export function loadWeather(
         const bundle = await fetchForecast(place, opts?.signal);
         // Preserve known coastal eligibility if the secondary forecast provider
         // does not include marine data or the separate marine API is offline.
-        if (bundle.marine == null && cached?.bundle.marineVersion === 2 && cached.bundle.marine?.coastal) {
+        if (bundle.marine == null && cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal) {
           // A brief Marine outage must not reclassify a known coastal city as
           // inland. Reuse only still-relevant ACTUAL sea-level samples.
           const oldTide = cached.bundle.marine.tide;
