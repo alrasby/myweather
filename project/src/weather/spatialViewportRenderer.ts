@@ -256,7 +256,7 @@ export class SpatialViewportRenderer {
         const states = Array.from(getProtocolInstance(config).stateByKey.values());
         const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable);
         const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable);
-        if (resolved === captured && !live) this.recovered++;
+        if (captured && resolved === captured && !live) this.recovered++;
         return resolved;
       },
     );
