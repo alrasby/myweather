@@ -11,7 +11,8 @@ export function parseReadyManifest(raw:unknown):ReadyManifest{
  const pad=(n:number)=>String(n).padStart(2,'0');
  const id=''+ref.getUTCFullYear()+pad(ref.getUTCMonth()+1)+pad(ref.getUTCDate())+'T'+pad(ref.getUTCHours())+'00Z';
  if(m.runId!==id)throw new Error('ready-run-id-mismatch');
- if(!Array.isArray(m.layers)||m.layers.length!==3||!LAYERS.every(x=>m.layers.includes(x)))throw new Error('ready-manifest-incomplete');
+ const layers=m.layers;
+ if(!Array.isArray(layers)||layers.length!==3||!LAYERS.every(x=>layers.includes(x)))throw new Error('ready-manifest-incomplete');
  const times=m.validTimes;
  if(!Array.isArray(times)||!times.length||times.length>96||times.some((t,i)=>typeof t!=='string'||!Number.isFinite(Date.parse(t))||i>0&&Date.parse(t)<=Date.parse(times[i-1])))throw new Error('ready-manifest-time-invalid');
  if(m.tileSize!==256||!Number.isInteger(m.maxNativeZoom)||(m.maxNativeZoom as number)<0||(m.maxNativeZoom as number)>8)throw new Error('ready-manifest-tile-invalid');
