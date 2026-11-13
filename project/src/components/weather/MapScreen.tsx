@@ -1199,6 +1199,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           </p>
           <p>{lang === "ar" ? "وقت النموذج المطلوب" : "Requested model time"}: {weatherDiagnostics?.requestedValidTime ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المعروض" : "Displayed model time"}: {weatherDiagnostics?.displayedValidTime ?? "—"}</p>
+          {(weatherDiagnostics?.compositedFrames?.length ?? 0) > 1 ? (
+            <p>{lang === "ar" ? "مزج ساعتين حقيقيتين" : "Source-backed hour blend"}: {
+              weatherDiagnostics?.compositedFrames?.map((entry) =>
+                `${entry.frame}: ${Math.round(entry.opacity * 100)}%`).join(" · ")
+            }</p>
+          ) : null}
           {weatherDiagnostics?.error ? (
             <p className="my-1 break-words text-amber-200" role="status">
               {lang === "ar" ? "الخطأ" : "Error"}: {weatherDiagnostics.error}

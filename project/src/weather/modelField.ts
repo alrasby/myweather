@@ -3,7 +3,7 @@ import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariable
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
-import { SpatialTileReveal, canStageSpatialRefresh, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
+import { SpatialTileReveal, canStageSpatialRefresh, softenSpatialTileArrival, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
@@ -46,6 +46,9 @@ export type WeatherModelDiagnostics = {
   displayedFrame: number | null;
   requestedValidTime: string | null;
   displayedValidTime: string | null;
+  /** Source-backed frames participating in an authentic temporal blend. */
+  compositedFrames?: { frame: number; validTime: string; opacity: number }[];
+  blendFraction?: number;
   holdingPreviousFrame: boolean;
   loaded: boolean[];
   tileCounts: number[];
@@ -709,9 +712,10 @@ export class ModelField {
   diagnostics(): WeatherModelDiagnostics {
     // Report the frame actually dominating the display, not merely the hour
     // being requested. The requested frame may still be pending/loading.
-    const displayed = [...this.frames.entries()]
-      .filter(([, frame]) => frame.ready && frame.opacity > 0.01)
-      .sort((a, b) => b[1].opacity - a[1].opacity)[0]?.[0] ?? null;
+    const contributors = [...this.frames.entries()]
+      .filter(([step, frame]) => frame.ready && frame.opacity > 0.01 && this.times[step] != null)
+      .sort((a, b) => b[1].opacity - a[1].opacity);
+    const displayed = contributors[0]?.[0] ?? null;
     const frame = this.frames.get(this.base) ?? this.frames.get(this.base + 1);
     return {
       mode: this.diagnosticMode,
@@ -722,6 +726,12 @@ export class ModelField {
       requestedValidTime: this.times[this.base] != null ? new Date(this.times[this.base]).toISOString() : null,
       displayedValidTime: this.spatialVisible && displayed !== null && this.times[displayed] != null
         ? new Date(this.times[displayed]).toISOString() : null,
+      compositedFrames: this.spatialVisible
+        ? contributors.map(([step, item]) => ({
+            frame: step, validTime: new Date(this.times[step]!).toISOString(),
+            opacity: Number(item.opacity.toFixed(3)),
+          })) : [],
+      blendFraction: Number(this.blend.toFixed(3)),
       holdingPreviousFrame: this.holdingPreviousFrame,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
@@ -1139,6 +1149,12 @@ export class ModelField {
       });
       layer.on("tileload", (event) => {
         if (!alive()) return;
+        // Never gate the entire viewport again: the strict barrier caused a
+        // 32.8s first-frame regression on the tested Android WebView. Soften
+        // only genuine newly decoded overlay tiles on large pan/zoom updates.
+        softenSpatialTileArrival(event?.tile as SpatialTileNode | undefined,
+          frame.ready && frame.opacity > 0.15 && !refreshBatch,
+          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
         const since = event?.tile ? tileStart.get(event.tile) : undefined;
         if (since !== undefined) {
           spatialPerformance.tile(index, performance.now() - since, true);

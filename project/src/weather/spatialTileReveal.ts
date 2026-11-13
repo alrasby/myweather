@@ -6,7 +6,27 @@
  * entire new batch when the layer emits 'load' for that viewport. Initial
  * paints retain their existing cloud-first fast path; no extra raster copies.
  */
-export type SpatialTileNode = { style: { visibility: string } };
+export type SpatialTileNode = {
+  style: { visibility: string };
+  animate?: (keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+    options?: KeyframeAnimationOptions) => Animation;
+};
+
+/** Soften the appearance of an independently decoded real tile. This is
+ * strictly a short compositor-opacity animation, not a weather-data filter.
+ * Never defer the tile request or hold a whole viewport on slow Android. */
+export function softenSpatialTileArrival(tile: SpatialTileNode | undefined,
+  allowed: boolean, reducedMotion = false): boolean {
+  if (!allowed || reducedMotion || !tile || tile.style.visibility === "hidden" ||
+      typeof tile.animate !== "function") return false;
+  try {
+    tile.animate([{ opacity: 0.2 }, { opacity: 1 }],
+      { duration: 190, easing: "ease-out" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export class SpatialTileReveal {
   private held = new Map<SpatialTileNode, string>();
