@@ -1,6 +1,7 @@
 /** Dedicated off-device Chromium producer; only source-backed .om data may become raster pixels. */
 import {defaultOmProtocolSettings,omProtocol,updateCurrentBounds} from '@openmeteo/weather-map-layer';
-import {parseModelMetadata,pinnedTileUrl,tileBounds,validTile} from './contracts.mjs';
+import {parseModelMetadata,pinnedTileUrl,validTile} from './contracts.mjs';
+import {metaTileBounds} from './metatiles.mjs';
 const RAIN={type:'breakpoint' as const,unit:'mm/h',breakpoints:[.12,.4,.9,1.8,3.5,7,12,20],colors:[[176,214,248,0],[72,158,236,.65],[22,104,214,.83],[14,158,86,.88],[190,206,22,.91],[255,176,0,.94],[224,58,26,.96],[132,34,176,.97]]};
 const SNOW={type:'breakpoint' as const,unit:'mm/h',breakpoints:[.08,.25,.7,1.6],colors:[[213,229,249,0],[154,204,251,.74],[226,243,255,.90],[249,253,255,.95]]};
 const CLOUD={type:'breakpoint' as const,unit:'%',breakpoints:[55,70,82,90,96,100],colors:[[255,255,255,0],[255,255,255,0],[249,252,255,.11],[248,251,255,.31],[244,249,255,.54],[244,249,255,.68]]};
@@ -9,8 +10,8 @@ type Request={runId:string;timeIndex:number;layer:'cloud_cover'|'precipitation'|
 async function generate(data:{referenceTime:string;validTimes:string[]},request:Request):Promise<number[]>{
  const manifest=parseModelMetadata({reference_time:data.referenceTime,valid_times:data.validTimes});
  if(!validTile(manifest,request))throw new Error('render-request-invalid');
- const b=tileBounds(request),lp=Math.max(.05,(b.east-b.west)*.1),ap=Math.max(.05,(b.north-b.south)*.1);
- updateCurrentBounds([Math.max(-180,b.west-lp),Math.max(-85.0511,b.south-ap),Math.min(180,b.east+lp),Math.min(85.0511,b.north+ap)]);
+ // Reuse the SAME upstream decoded window for neighboring real tiles.
+ updateCurrentBounds(metaTileBounds(request));
  const ctrl=new AbortController();
  const result=await omProtocol({url:pinnedTileUrl(manifest,request),type:'image'},ctrl,config);
  const bitmap=result.data;

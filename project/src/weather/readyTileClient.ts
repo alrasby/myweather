@@ -1,5 +1,6 @@
 /** QA candidate: display immutable ready-made ECMWF PNGs, never decode .om on phone. */
 import {planReadyTilePrefetch} from './readyTilePlan.ts';
+import {TinyTileDemandModel, type TileSignals, type TileAction} from './tinyTileDemandModel.ts';
 export type ReadyLayer='cloud_cover'|'precipitation'|'snowfall_water_equivalent';
 const LAYERS:readonly ReadyLayer[]=['cloud_cover','precipitation','snowfall_water_equivalent'];
 export type ReadyManifest={schemaVersion:1;model:'ecmwf_ifs';runId:string;referenceTime:string;validTimes:readonly string[];layers:readonly ReadyLayer[];tileSize:256;maxNativeZoom:number};
@@ -38,6 +39,9 @@ export class ReadyTileClient{
  private oldTimer:ReturnType<typeof setTimeout>|null=null;
  private destroyed=false;
  private failedUntil=0;
+ private readonly intelligence=new TinyTileDemandModel();
+ private previous: {x:number;y:number;z:number;hour:number;signals:TileSignals}|null=null;
+ get intelligenceSamples():number{return this.intelligence.observations;}
  private prefetched:HTMLImageElement[]=[];
  private readonly L:LeafletLike;
  private readonly map:MapLike;
@@ -106,9 +110,27 @@ export class ReadyTileClient{
   const center=this.map.getCenter(),z=Math.max(0,Math.min(this.manifest.maxNativeZoom,Math.floor(this.map.getZoom()))),n=2**z;
   const x=Math.floor((center.lng+180)/360*n),lat=Math.max(-85.05,Math.min(85.05,center.lat))*Math.PI/180;
   const y=Math.floor((1-Math.asinh(Math.tan(lat))/Math.PI)/2*n);
+  const signals:TileSignals={movingX,movingY,playing};
+  const prev=this.previous;
+  if(prev&&prev.z===z){
+   // Only relative *tile* motion; no coordinates or history stored.
+   const dx=((x-prev.x+n+n/2)%n)-n/2,dy=y-prev.y;
+   let actual:TileAction='still';
+   if(playing&&hour>prev.hour)actual='nextHour';
+   else if(Math.abs(dx)>=Math.abs(dy)&&dx!==0)actual=dx>0?'east':'west';
+   else if(dy!==0)actual=dy>0?'south':'north';
+   this.intelligence.observe(prev.signals,actual);
+  }
+  this.previous={x,y,z,hour,signals};
+  const suggestion=this.intelligence.predict(signals);
+  if(suggestion==='east')movingX=1;
+  else if(suggestion==='west')movingX=-1;
+  else if(suggestion==='south')movingY=1;
+  else if(suggestion==='north')movingY=-1;
+  else if(suggestion==='still')movingX=movingY=0;
   for(const p of planReadyTilePrefetch({z,x,y,hour,count:this.manifest.validTimes.length,movingX,movingY,playing,dataSaver})){
    this.prefetched.push(this.prefetchImages(readyTileUrl(this.base,this.manifest,{hour:p.hour,layer:p.layer,z:p.z,x:p.x,y:p.y})));
   }
  }
- destroy(){if(this.destroyed)return;this.destroyed=true;this.clearPredictor();if(this.oldTimer)clearTimeout(this.oldTimer);this.oldTimer=null;this.disposeFrame(this.retiring);this.retiring=null;this.disposeFrame(this.incoming);this.disposeFrame(this.current);this.current=null;this.incoming=null;}
+ destroy(){if(this.destroyed)return;this.destroyed=true;this.intelligence.reset();this.previous=null;this.clearPredictor();if(this.oldTimer)clearTimeout(this.oldTimer);this.oldTimer=null;this.disposeFrame(this.retiring);this.retiring=null;this.disposeFrame(this.incoming);this.disposeFrame(this.current);this.current=null;this.incoming=null;}
 }

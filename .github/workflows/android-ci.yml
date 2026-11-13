@@ -61,8 +61,8 @@ jobs:
       - name: Verify isolated ECMWF ready-tile gateway, predictor and renderer bundle
         working-directory: project
         run: |
-          node --test forecast-tiles/gateway.test.mjs
-          node --experimental-strip-types --test src/weather/readyTilePlan.test.ts src/weather/readyTileClient.test.ts
+          node --test forecast-tiles/gateway.test.mjs forecast-tiles/metatiles.test.mjs
+          node --experimental-strip-types --test src/weather/readyTilePlan.test.ts src/weather/readyTileClient.test.ts src/weather/tinyTileDemandModel.test.ts
           npx vite build --config forecast-tiles/vite.config.ts
       # Legacy root weather tests target the replaced net.ts API (requestLane,
       # requestWeight and budget persistence). They must not run against this
