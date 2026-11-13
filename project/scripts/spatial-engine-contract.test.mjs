@@ -54,3 +54,16 @@ test("ECMWF viewport cannot reuse data from a different pan/zoom window", () => 
   assert.ok(!src.includes("this.pendingData.get(parsed.key)"),
     "dataset coalescing by a URL alone must not cross viewport bounds");
 });
+
+
+test("GitHub Android CI actually runs all custom ECMWF worker functional tests", () => {
+  const ci = read(".github/workflows/android-ci.yml");
+  for (const testFile of [
+    "spatialRasterColor.test.ts",
+    "spatialRenderAdmission.test.ts",
+    "spatialRenderGeneration.test.ts",
+    "spatialViewportRenderer.test.ts",
+  ]) {
+    assert.ok(ci.includes("src/weather/" + testFile), testFile + " must run in CI");
+  }
+});
