@@ -455,10 +455,10 @@ test("existing cached coastal and inland cities refresh marine tides once on upg
   const api = read("project/src/weather/api.ts");
   const store = read("project/src/weather/store.ts");
   const types = read("project/src/weather/types.ts");
-  assert.ok(api.includes("marineVersion: 2"), "new forecasts record marine model schema");
-  assert.ok(api.includes("cached.bundle.marineVersion === 2"), "legacy cache must be upgraded");
-  assert.ok(store.includes("cached.bundle.marineVersion === 2"), "store short-circuit must honor marine cache upgrade");
-  assert.ok(types.includes("marineVersion?: 1 | 2"), "old bundles remain readable");
+  assert.ok(api.includes("marineVersion: 3"), "new forecasts record marine model schema");
+  assert.ok(api.includes("cached.bundle.marineVersion === 3"), "legacy cache must be upgraded");
+  assert.ok(store.includes("cached.bundle.marineVersion === 3"), "store short-circuit must honor marine cache upgrade");
+  assert.ok(types.includes("marineVersion?: 1 | 2 | 3"), "old bundles remain readable");
 });
 
 test("tidal detail card stays below weather detail cards and is hidden without actual sea data",()=>{
@@ -482,6 +482,6 @@ test("tidal detail card stays below weather detail cards and is hidden without a
 test("old coastal classifications cannot flash a stale tide card during upgrade",()=>{
  const sky=read("project/src/components/weather/SkyCards.tsx");
  const api=read("project/src/weather/api.ts");
- assert.ok(sky.includes("bundle.marineVersion === 2 && hasDisplayableCoastalTide("));
- assert.ok(api.includes("cached?.bundle.marineVersion === 2 && cached.bundle.marine?.coastal"));
+ assert.ok(sky.includes("bundle.marineVersion === 3 && hasDisplayableCoastalTide("));
+ assert.ok(api.includes("cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal"));
 });

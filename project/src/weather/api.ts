@@ -6,6 +6,7 @@ import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
 import { parseMarineSnapshot } from "@/weather/marineTides";
+import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -162,7 +163,7 @@ function buildBundle(
     daily: dayRows.filter((row) => Number.isFinite(row.t) && validDailyTemperatures(row.tmax, row.tmin)),
     air,
     marine,
-    marineVersion: 2,
+    marineVersion: 3,
   };
   if (!Number.isFinite(bundle.current.temp)) {
     const now = Date.now();
@@ -236,7 +237,8 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<WeatherB
   url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
   if (!res.ok) return null;
-  return parseMarineSnapshot(await res.json(), place.lat, place.lon);
+  const [raw,shoreKm]=await Promise.all([res.json(),coastalDistanceKm(place.lat,place.lon)]);
+  return parseMarineSnapshot(raw,place.lat,place.lon,Date.now(),shoreKm);
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
@@ -502,7 +504,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     daily,
     air: null,
     marine: null,
-    marineVersion: 2,
+    marineVersion: 3,
   };
 }
 
@@ -562,7 +564,7 @@ export function loadWeather(
   }
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
-    const fresh = !!cached && cached.bundle.marineVersion === 2 &&
+    const fresh = !!cached && cached.bundle.marineVersion === 3 &&
       Date.now() - cached.at < CACHE_TTL_MS;
     if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
     let last: unknown;

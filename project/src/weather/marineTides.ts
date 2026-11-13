@@ -3,6 +3,7 @@
  * It is NOT chart datum, a calibrated tide gauge or navigation-grade data.
  * This module deliberately NEVER invents an astronomical tide signal. */
 import type {MarineSnap} from "./types";
+import {COASTAL_CITY_MAX_KM,MAX_OFFSHORE_MODEL_CELL_KM} from "./coastline.ts";
 
 export type TidePoint={t:number;level:number};
 export type TideExtreme=TidePoint&{kind:"high"|"low"};
@@ -25,14 +26,17 @@ export function marineGridDistanceKm(lat:number,lon:number,gridLat:number,gridLo
  const h=Math.sin(dLat/2)**2+Math.cos(a)*Math.cos(b)*Math.sin(dLon/2)**2;
  return 12742*Math.asin(Math.min(1,Math.sqrt(h)));
 }
-export function parseMarineSnapshot(raw:unknown,lat:number,lon:number,now=Date.now()):MarineSnap|null{
+export function parseMarineSnapshot(raw:unknown,lat:number,lon:number,now=Date.now(),shoreKm=Infinity):MarineSnap|null{
  if(!raw||typeof raw!=="object")return null;
  const src=raw as {latitude?:unknown;longitude?:unknown;current?:{wave_height?:unknown};
    hourly?:{time?:unknown;sea_level_height_msl?:unknown}};
  if(!finite(src.latitude)||!finite(src.longitude))return null;
  // The nearest SEA model cell can be quite remote for an inland city.
  // A successful API call alone is not evidence of coastal eligibility.
- const coastal=marineGridDistanceKm(lat,lon,src.latitude,src.longitude)<=20;
+ // A real shoreline is independent of the 0.08-degree marine model grid.
+ // Muscat's nearest sea-level model cell is 22.66 km offshore.
+ const coastal=shoreKm<=COASTAL_CITY_MAX_KM&&
+   marineGridDistanceKm(lat,lon,src.latitude,src.longitude)<=MAX_OFFSHORE_MODEL_CELL_KM;
  if(!coastal)return {coastal:false,wave:null,tide:null};
  const wave=finite(src.current?.wave_height)&&src.current.wave_height>=0
    ?src.current.wave_height:null;

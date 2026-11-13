@@ -42,7 +42,7 @@ export function DetailCards({
   const lunar = moonRiseSet(place.lat, place.lon, now);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
-  const showTides = bundle.marineVersion === 2 && hasDisplayableCoastalTide(bundle.marine, now);
+  const showTides = bundle.marineVersion === 3 && hasDisplayableCoastalTide(bundle.marine, now);
   const pressureUnit = useWeather((s) => s.prefs.pressure);
   const windUnit = useWeather((s) => s.prefs.wind);
 

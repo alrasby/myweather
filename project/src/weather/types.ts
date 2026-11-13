@@ -119,7 +119,7 @@ export type WeatherBundle = {
   air: AirQuality | null;
   marine: MarineSnap | null;
   /** Cache migration marker: legacy bundles did not request tide series. */
-  marineVersion?: 1 | 2;
+  marineVersion?: 1 | 2 | 3;
 };
 
 /** شبكة Open-Meteo: كل مصفوفة بطول hours*rows*cols، الصف 0 = الجنوب. */

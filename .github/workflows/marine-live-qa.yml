@@ -21,5 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Run genuine four-city Open-Meteo Marine coverage probe
+      - name: Compile actual global shoreline index for locality QA
+        run: node scripts/build-shoreline.mjs
+      - name: Run genuine five-city Open-Meteo Marine coverage probe
         run: node --experimental-strip-types scripts/marine-live-qa.mjs
