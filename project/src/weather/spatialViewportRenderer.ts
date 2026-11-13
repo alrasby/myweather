@@ -13,6 +13,7 @@
  */
 import { getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
 import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission.ts";
+import { SpatialDatasetKeys } from "./spatialDatasetKeys.ts";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
 
 type ReadKey = string;
@@ -158,7 +159,7 @@ export class SpatialViewportRenderer {
   private slots: Slot[] = [];
   private jobs: TileJob[] = [];
   private serial = 0;
-  private stateIds = new WeakMap<OmUrlState, string>();
+  private readonly datasetKeys = new SpatialDatasetKeys();
   private samples: number[] = [];
   private readSamples: number[] = [];
   private workerQueueSamples: number[] = [];
@@ -296,10 +297,11 @@ export class SpatialViewportRenderer {
     const release = await this.admission.acquire(signal);
     try {
       if (!this.active || signal.aborted) throw new DOMException("Aborted", "AbortError");
-      let key = this.stateIds.get(state);
-      if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
+      // Shallow snapshots of one decoded source grid share one registration.
+      // Changed geography/time/variable/palette always produce a new key.
+      const key = this.datasetKeys.key(state, palette);
       return await new Promise<ImageBitmap>((resolve, reject) => {
-        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable, frame,
+        const job: TileJob = { id: ++this.serial, state, dataKey: key, variable, frame,
           queuedAt: performance.now(), values, tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
