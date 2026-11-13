@@ -351,8 +351,9 @@ test("visible ECMWF viewport interrupts obsolete prefetch and stages nonblocking
   assert.ok(src.includes('frame.snowStartTimer = window.setTimeout(mountSnow, 650)'));
   assert.ok(src.includes('made[0]!.on("tileload", mountSnow)'));
   assert.ok(scheduler.includes("visibleRefreshAgeMs < grace"));
-  assert.ok(src.includes("const ready = spatialFrameReadyDuringRefresh("),
-    "keep previously rendered ECMWF field while only a viewport refresh is pending");
+  assert.ok(src.includes("spatialFrameReadyDuringRefresh(frame.ready, frame.loaded") &&
+    src.includes("frame.fullViewportRefresh") && src.includes("frame.visualCommitted"),
+    "keep old ECMWF only for overlapping refreshes; hide incomplete large-area patches");
   assert.ok(src.includes("const preview = !fallbackForHour && !cooldown"),
     "never overlay an incompatible fallback beneath partial ECMWF weather");
 });
