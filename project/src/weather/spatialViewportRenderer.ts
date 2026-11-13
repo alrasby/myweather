@@ -17,11 +17,25 @@ import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@open
 
 type ReadKey = string;
 type RasterTask = { z: number; x: number; y: number; size: number };
-type TileJob = { id: number; state: OmUrlState; dataKey: string; palette: Palette;
+export const SPATIAL_WORKER_VARIABLES = ["cloud_cover", "precipitation", "snowfall_water_equivalent"] as const;
+type SpatialVariable = typeof SPATIAL_WORKER_VARIABLES[number];
+// Three resident ECMWF fields, but at most two active raster jobs.
+export const MAX_ACTIVE_SPATIAL_WORKERS = 2;
+export function nextSpatialWorkerJob(
+  jobs: readonly { variable: SpatialVariable }[],
+  slots: readonly { variable: SpatialVariable; busy: boolean }[],
+): { job: number; slot: number } | null {
+  for (let i = 0; i < jobs.length; i++) {
+    const slot = slots.findIndex(s => !s.busy && s.variable === jobs[i]!.variable);
+    if (slot >= 0) return { job: i, slot };
+  }
+  return null;
+}
+type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable; palette: Palette;
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
-type Slot = { worker: Worker; cache: Map<string, number>; busy: TileJob | null;
+type Slot = { worker: Worker; variable: SpatialVariable; cache: Map<string, number>; busy: TileJob | null;
   bytes: number; watchdog?: ReturnType<typeof setTimeout> };
 type Reply = { type: "rendered"; id: number; bitmap: ImageBitmap; durationMs: number } |
   { type: "error"; id: number; error: string };
@@ -31,6 +45,7 @@ export type ViewportFallbackReasons = Record<ViewportFallbackReason, number>;
 export type ViewportRendererStats = {
   mode: "worker-cache" | "legacy";
   workerTiles: number; fallbackTiles: number; datasetCopies: number;
+  datasetEvictions: number; workerSlots: number;
   queued: number; peakWaiting: number; reasons: ViewportFallbackReasons;
   renderP50Ms: number | null; renderP95Ms: number | null;
 };
@@ -104,6 +119,7 @@ export class SpatialViewportRenderer {
   private stateIds = new WeakMap<OmUrlState, string>();
   private samples: number[] = [];
   private copied = 0;
+  private evicted = 0;
   private completed = 0;
   private fallbackCount = 0;
   private reasons: ViewportFallbackReasons = {
@@ -118,9 +134,12 @@ export class SpatialViewportRenderer {
   constructor(enable: boolean) {
     if (!enable || typeof Worker === "undefined") return;
     try {
-      for (let i = 0; i < 2; i++) {
+      // Real-device QA: 189 large variable copies for 308 tiles, no worker
+      // fallback. Two 32 MiB workers cannot retain all three IFS variables.
+      // Retain a separate variable per worker while keeping CPU at two jobs.
+      for (const variable of SPATIAL_WORKER_VARIABLES) {
         const worker = new Worker(new URL("./spatialViewportRaster.worker.ts", import.meta.url), { type: "module" });
-        const slot: Slot = { worker, cache: new Map(), busy: null, bytes: 0 };
+        const slot: Slot = { worker, variable, cache: new Map(), busy: null, bytes: 0 };
         worker.onmessage = (event: MessageEvent<Reply>) => this.receive(slot, event.data);
         worker.onerror = () => this.disable(new Error("viewport-worker-error"));
         worker.onmessageerror = () => this.disable(new Error("viewport-worker-message"));
@@ -135,6 +154,7 @@ export class SpatialViewportRenderer {
   snapshot(): ViewportRendererStats {
     return { mode: this.active ? "worker-cache" : "legacy", workerTiles: this.completed,
       fallbackTiles: this.fallbackCount, datasetCopies: this.copied,
+      datasetEvictions: this.evicted, workerSlots: this.slots.length,
       queued: this.jobs.length + this.admission.waiting,
       peakWaiting: this.admission.peakWaiting, reasons: { ...this.reasons },
       renderP50Ms: pctl(this.samples, 0.5), renderP95Ms: pctl(this.samples, 0.95) };
@@ -156,7 +176,7 @@ export class SpatialViewportRenderer {
         this.fallback("oversizedData");
         return omProtocol(params, abort, config);
       }
-      const bitmap = await this.render(state, palette, parsed.tile, abort.signal);
+      const bitmap = await this.render(state, palette, parsed.tile, parsed.variable as SpatialVariable, abort.signal);
       if (abort.signal.aborted) { bitmap.close(); return { data: new ArrayBuffer(0) }; }
       return { data: bitmap };
     } catch (error) {
@@ -200,7 +220,8 @@ export class SpatialViewportRenderer {
     );
   }
 
-  private async render(state: OmUrlState, palette: Palette, tile: RasterTask, signal: AbortSignal): Promise<ImageBitmap> {
+  private async render(state: OmUrlState, palette: Palette, tile: RasterTask,
+    variable: SpatialVariable, signal: AbortSignal): Promise<ImageBitmap> {
     if (!this.active || !state.data?.values) throw new Error("worker-disabled");
     // A finite admission wait prevents congestion from silently switching
     // 40+ tiles to a different renderer during the same visible viewport.
@@ -211,7 +232,7 @@ export class SpatialViewportRenderer {
       let key = this.stateIds.get(state);
       if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
       return await new Promise<ImageBitmap>((resolve, reject) => {
-        const job: TileJob = { id: ++this.serial, state, dataKey: key!, tile, palette, signal,
+        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable, tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
           const index = this.jobs.indexOf(job);
@@ -232,12 +253,15 @@ export class SpatialViewportRenderer {
   }
   private pump() {
     if (!this.active) return;
-    for (const slot of this.slots) {
-      if (slot.busy || this.jobs.length === 0) continue;
-      // Prefer a decoded dataset already resident in this worker.
-      let index = this.jobs.findIndex(job => slot.cache.has(job.dataKey));
-      if (index < 0) index = 0;
-      const job = this.jobs.splice(index, 1)[0]!;
+    let activeCount = this.slots.filter(slot => slot.busy !== null).length;
+    while (activeCount < MAX_ACTIVE_SPATIAL_WORKERS && this.jobs.length > 0) {
+      // Oldest runnable tile wins; no model-variable data is evicted merely
+      // because a different layer had a free worker. CPU budget is unchanged.
+      const next = nextSpatialWorkerJob(this.jobs,
+        this.slots.map(slot => ({ variable: slot.variable, busy: slot.busy !== null })));
+      if (!next) break;
+      const slot = this.slots[next.slot]!;
+      const job = this.jobs.splice(next.job, 1)[0]!;
       if (job.signal.aborted) { job.onAbort(); continue; }
       const values = job.state.data?.values;
       if (!values) { job.reject(new Error("model-data-evicted")); continue; }
@@ -248,6 +272,7 @@ export class SpatialViewportRenderer {
             slot.bytes -= slot.cache.get(old)!;
             slot.cache.delete(old);
             slot.worker.postMessage({ type: "evict", key: old });
+            this.evicted++;
           }
           slot.worker.postMessage({ type: "register", key: job.dataKey,
             grid: job.state.dataOptions.domain.grid, ranges: job.state.ranges,
@@ -261,8 +286,8 @@ export class SpatialViewportRenderer {
           slot.cache.set(job.dataKey, bytes);
         }
         slot.busy = job;
+        activeCount++;
         job.started = true;
-        // A broken worker must never leave an active tile pending forever.
         slot.watchdog = setTimeout(() => this.disable(new Error("viewport-worker-timeout")),
           RENDER_DEADLINE_MS);
         slot.worker.postMessage({ type: "render", id: job.id, key: job.dataKey, ...job.tile });
@@ -270,6 +295,7 @@ export class SpatialViewportRenderer {
         job.signal.removeEventListener("abort", job.onAbort);
         job.reject(new Error("viewport-worker-send"));
         this.disable(new Error("viewport-worker-send"));
+        return;
       }
     }
   }

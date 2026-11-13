@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -69,4 +69,26 @@ test("viewport data state is resolved AFTER upstream validates the new map bound
     /source-failed/,
     "a failed current viewport must never silently reuse stale data",
   );
+});
+
+test("three resident variables are scheduled fairly with two active render jobs", () => {
+  assert.deepEqual([...SPATIAL_WORKER_VARIABLES],
+    ["cloud_cover", "precipitation", "snowfall_water_equivalent"]);
+  assert.equal(MAX_ACTIVE_SPATIAL_WORKERS, 2);
+  assert.equal(MAX_WORKER_DATA * SPATIAL_WORKER_VARIABLES.length, 96 * 1048576);
+  const slots = [
+    { variable: "cloud_cover" as const, busy: true },
+    { variable: "precipitation" as const, busy: false },
+    { variable: "snowfall_water_equivalent" as const, busy: false },
+  ];
+  const jobs = [
+    { variable: "cloud_cover" as const },
+    { variable: "snowfall_water_equivalent" as const },
+    { variable: "precipitation" as const },
+  ];
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots), { job: 1, slot: 2 });
+  slots[2]!.busy = true;
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots), { job: 2, slot: 1 });
+  slots[1]!.busy = true;
+  assert.equal(nextSpatialWorkerJob(jobs, slots), null);
 });

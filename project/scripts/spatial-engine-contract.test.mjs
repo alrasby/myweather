@@ -67,3 +67,10 @@ test("GitHub Android CI actually runs all custom ECMWF worker functional tests",
     assert.ok(ci.includes("src/weather/" + testFile), testFile + " must run in CI");
   }
 });
+
+test("worker cache keeps ECMWF variables resident without increasing active raster CPU", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  assert.ok(src.includes("for (const variable of SPATIAL_WORKER_VARIABLES)"));
+  assert.ok(src.includes("activeCount < MAX_ACTIVE_SPATIAL_WORKERS"));
+  assert.ok(src.includes("datasetEvictions: this.evicted"));
+});
