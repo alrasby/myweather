@@ -20,3 +20,8 @@ test("pilot rejects expired or far-future run but accepts bounded valid UTC peri
  assert.equal(pilotManifestIsUsable({referenceTime:"2026-11-01T06:00:00Z",validTimes:["2026-11-01T06:00:00Z"]},now),false);
  assert.equal(pilotManifestIsUsable({referenceTime:"2026-11-14T06:00:00Z",validTimes:["2026-11-14T06:00:00Z"]},now),false);
 });
+
+test("manifest rejects a requested forecast beyond its published last UTC time",()=>{
+ const at=Date.parse("2026-11-15T06:00:00Z");
+ assert.equal(pilotManifestIsUsable({referenceTime:"2026-11-13T06:00:00Z",validTimes:["2026-11-13T06:00:00Z","2026-11-15T08:00:00Z"]},at),true);
+});

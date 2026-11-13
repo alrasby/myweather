@@ -106,7 +106,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     // Explicit diagnostic opt-in only; all normal installs retain the original
     // source-backed ModelField and can never contact an undeployed tile host.
     const pilotOrigin = readReadyTilePilotOrigin(typeof localStorage !== "undefined" ? localStorage : null);
-    modelRef.current = pilotOrigin ? new ReadyTileModel(pilotOrigin) : new ModelField();
+    modelRef.current = pilotOrigin ? new ReadyTileModel(pilotOrigin,prefs.dataSaver) : new ModelField();
   }
   const engineRef = useRef<FieldEngine | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -456,6 +456,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   }, [prefs.mapLayer]);
 
   useEffect(() => {
+    if (modelRef.current instanceof ReadyTileModel) modelRef.current.setDataSaver(prefs.dataSaver);
     const engine = engineRef.current;
     if (!engine || !ready) return;
     const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : prefs.particles === "med" ? 300 : 240;

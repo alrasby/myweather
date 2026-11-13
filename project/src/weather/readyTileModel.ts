@@ -21,15 +21,18 @@ export class ReadyTileModel extends ModelField {
  private livePilot=false;
  private requestedMs=0;
  private playbackPilot=false;
+ private dataSaverPilot=false;
  private sourceFallbackPilot=false;
  private diagnosticPilot:WeatherDiagnosticMode="all";
  private lastPrefetch=0;
  private pilotError:string|null=null;
  private moveHandler:(()=>void)|null=null;
- constructor(origin:string){super();this.origin=origin;}
+ constructor(origin:string,dataSaver=false){super();this.origin=origin;this.dataSaverPilot=dataSaver;}
+ setDataSaver(enabled:boolean){this.dataSaverPilot=enabled;}
  private hourAt(timeMs:number):number|null{
   const times=this.manifest?.validTimes;
-  if(!times?.length||!Number.isFinite(timeMs))return null;
+  if(!times?.length||!Number.isFinite(timeMs)||
+    timeMs>Date.parse(times[times.length-1]!))return null;
   let i=0;
   while(i+1<times.length&&Date.parse(times[i+1]!)<=timeMs)i++;
   return i;
@@ -63,9 +66,16 @@ export class ReadyTileModel extends ModelField {
   this.lastPrefetch=at;
   const hour=this.hourAt(this.requestedMs);
   if(hour==null)return;
-  client.prefetch(hour,0,0,this.playbackPilot,false);
+  client.prefetch(hour,0,0,this.playbackPilot,this.dataSaverPilot);
  }
  attach(L:unknown,map:LeafletMap){
+  // The pilot bypasses ModelField.attach: create the map panes previously
+  // owned by the official engine, before any ready PNG image layer is added.
+  for(const [name,z] of [["wx-clouds","245"],["wx-model","260"]] as const){
+   const pane=map.getPane(name)??map.createPane(name);
+   pane.style.zIndex=z;
+   pane.style.pointerEvents="none";
+  }
   this.generation++;
   this.controller?.abort();
   this.client?.destroy();
