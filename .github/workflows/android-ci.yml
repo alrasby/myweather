@@ -2,7 +2,7 @@ name: Android CI
 on:
   pull_request:
   push:
-    branches: [main, feature/android-auto-weather-20261112, perf/spatial-engine-diagnostics-20261112, fix/home-sky-gps-spatial-playback-20261112, fix/map-render-source-coherence-20261112, fix/map-particle-coverage-precip-fidelity-20261112, fix/map-gentle-tiles-efficient-viewport-20261112, fix/map-final-zoom-label-loading-20261112, fix/cloud-unification-and-weather-tile-consistency-20261112, fix/hero-precipitation-and-spatial-coverage-20261112]
+    branches: [main, feature/android-auto-weather-20261112, perf/spatial-engine-diagnostics-20261112, fix/home-sky-gps-spatial-playback-20261112, fix/map-render-source-coherence-20261112, fix/map-particle-coverage-precip-fidelity-20261112, fix/map-gentle-tiles-efficient-viewport-20261112, fix/map-final-zoom-label-loading-20261112, fix/cloud-unification-and-weather-tile-consistency-20261112, fix/hero-precipitation-and-spatial-coverage-20261112, feature/ready-weather-tiles-smart-pipeline-20261113]
   workflow_dispatch:
 permissions:
   contents: read
