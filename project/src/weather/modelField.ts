@@ -3,8 +3,8 @@ import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariable
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
-import { SpatialTileReveal, canStageSpatialRefresh, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
-import { spatialRevealDecision } from "@/weather/spatialVisualGate";
+import { SpatialTileReveal, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
+import { spatialRevealDecision, visualViewportReady } from "@/weather/spatialVisualGate";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
@@ -469,7 +469,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; fullViewportRefresh: boolean; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; fullViewportRefresh: boolean; visualCommitted: boolean; visualTimeout?: number; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -885,6 +885,7 @@ export class ModelField {
     const frame = this.frames.get(step);
     if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
     if (frame?.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+    if (frame?.visualTimeout !== undefined) window.clearTimeout(frame.visualTimeout);
     frame?.tileGates.forEach((gate) => gate.release());
     this.frames.delete(step);
     this.loading.delete(step);
@@ -952,6 +953,8 @@ export class ModelField {
       snowStartTimer: undefined as number | undefined,
       tileGates: Array.from({ length: SPATIAL_LAYER_COUNT }, () => new SpatialTileReveal()),
       fullViewportRefresh: false,
+      visualCommitted: false,
+      visualTimeout: undefined as number | undefined,
       renderGeneration: new SpatialRenderGeneration(),
       layerGeneration: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       revealTimer: undefined as number | undefined,
@@ -969,7 +972,13 @@ export class ModelField {
       // Preserve the last fully rendered spatial frame while Leaflet refreshes
       // the visible viewport; do not expose the low-resolution global fallback
       // every time a cloud/rain/snow tile queue enters "loading".
-      const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
+      const completeViewport = visualViewportReady(
+        frame.loaded, frame.tileCounts,
+        frame.loaded.map((_, idx) => frame.errored.has(idx) ? 1 : 0),
+      );
+      const ready = frame.fullViewportRefresh
+        ? frame.visualCommitted && completeViewport
+        : spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
       // Keep current genuine fallback until all three ECMWF layers finish,
       // rather than visibly replacing them in three separate passes.
       const preview = !frame.fullViewportRefresh && !this.compactSpatialTiles &&
@@ -1006,7 +1015,11 @@ export class ModelField {
       // early-exit would leave that newly finished layer at opacity=0.
       if (ready && !frame.ready && frame.opacity > 0.98) frame.opacity = 0.975;
       frame.ready = ready;
-      if (ready && frame.loaded.every(Boolean)) frame.fullViewportRefresh = false;
+      if (ready && frame.loaded.every(Boolean)) {
+        frame.fullViewportRefresh = false;
+        if (frame.visualTimeout !== undefined) window.clearTimeout(frame.visualTimeout);
+        frame.visualTimeout = undefined;
+      }
       this.orderKey = "";
       if (ready) {
         if (step === this.base && this.firstCompleteReadyMs === null) {
@@ -1046,6 +1059,21 @@ export class ModelField {
     };
     // A spatial frame may require dozens of range reads. Continue while real
     // tiles arrive, but terminate after a prolonged idle or bounded total time.
+    const commitVisualGeneration = () => {
+      if (!frame.renderGeneration.ready() || !frame.loaded.every(Boolean) || frame.errored.size) return;
+      if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+      const expected = frame.renderGeneration.id;
+      frame.revealTimer = window.setTimeout(() => {
+        frame.revealTimer = undefined;
+        if (!alive() || expected !== frame.renderGeneration.id ||
+            !frame.renderGeneration.ready() || !frame.loaded.every(Boolean) || frame.errored.size) return;
+        frame.visualCommitted = true;
+        frame.tileGates.forEach((gate) => gate.release());
+        // A large viewport should be made visible only after the short
+        // coalescing window proves every genuine ECMWF layer has settled.
+        refresh();
+      }, 85);
+    };
     const checkProgress = () => {
       if (!alive() || frame.ready) return;
       // Leaflet may finish its active tile queue while a moveend has
@@ -1064,7 +1092,7 @@ export class ModelField {
       }
       if (recovered) {
         if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
-          frame.tileGates.forEach((gate) => gate.release());
+          commitVisualGeneration();
         }
         refresh();
       }
@@ -1110,6 +1138,17 @@ export class ModelField {
         );
         if (decision === "hide-incomplete" && !frame.fullViewportRefresh) {
           frame.fullViewportRefresh = true;
+          frame.visualCommitted = false;
+          if (frame.visualTimeout !== undefined) window.clearTimeout(frame.visualTimeout);
+          frame.visualTimeout = window.setTimeout(() => {
+            frame.visualTimeout = undefined;
+            if (!alive() || !frame.fullViewportRefresh || frame.ready) return;
+            this.failedUntil.set(step, Date.now() + 15_000);
+            this.lastError = "ECMWF viewport rendering timeout";
+            this.discardFrame(step);
+            this.applyOpacity();
+            this.pump();
+          }, 14_000);
           frame.ready = false;
           frame.previewReady = false;
           frame.previewMask = 0;
@@ -1124,6 +1163,7 @@ export class ModelField {
         // A new loading generation supersedes the old state for this
         // particular variable, even if other variables still show old tiles.
         frame.layerGeneration[index] = frame.renderGeneration.loading(index);
+        frame.visualCommitted = false;
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
         refreshBatch = !frame.fullViewportRefresh &&
@@ -1149,14 +1189,7 @@ export class ModelField {
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
         if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
-          if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
-          const expected = frame.renderGeneration.id;
-          frame.revealTimer = window.setTimeout(() => {
-            frame.revealTimer = undefined;
-            if (alive() && expected === frame.renderGeneration.id && frame.renderGeneration.ready()) {
-              frame.tileGates.forEach((gate) => gate.release());
-            }
-          }, 85);
+          commitVisualGeneration();
         }
         refresh();
       });

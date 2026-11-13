@@ -15,3 +15,9 @@ test("valid source-backed 3-layer viewport is only published after all three rea
  assert.equal(visualViewportReady([true,true,true],[4,4,4],[0,1,0]),false);
  assert.equal(visualViewportReady([true,true,true],[4,0,4],[0,0,0]),false);
 });
+
+test("tiles cannot be shown as an all-layer forecast with one missing source or a failed image",()=>{
+ assert.equal(visualViewportReady([true,true,true],[1,1,1],[0,0,0]),true);
+ assert.equal(visualViewportReady([true,true,true],[1,1,1],[0,0,1]),false);
+ assert.equal(spatialRevealDecision(true,v,{...v,west:80,east:90}),"hide-incomplete");
+});

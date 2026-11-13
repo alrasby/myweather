@@ -321,10 +321,14 @@ test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite
   assert.ok(src.includes('layer.on("load", () => {') &&
     src.includes("frame.tileGates.forEach((gate) => gate.release())"));
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
-    "stage release must wait for the whole ECMWF viewport or a tile error");
+    "stage release waits for all three ECMWF layers");
+  assert.ok(src.includes("frame.visualCommitted = true") &&
+    src.includes("visualViewportReady("),
+    "large pan waits for a coalesced complete model before publishing");
   assert.ok(src.includes('layer.on("tileunload", (event)'));
-  assert.ok(src.includes("canStageSpatialRefresh(lastCompletedView, rasterView())"),
-    "stage only same-zoom small-area updates; show new pixels immediately on large pans");
+  assert.ok(src.includes('spatialRevealDecision(frame.ready || frame.previewReady,') &&
+    src.includes('frame.fullViewportRefresh = true'),
+    "small pans stage tiles while large pans hide incomplete model coverage rather than showing patches");
   assert.ok(src.includes("frame.tileGates.forEach((gate) => gate.release());"),
     "previous held tiles cannot survive an invalidated viewport");
   assert.ok(src.includes('map.on("move", onMove)'));
@@ -429,7 +433,8 @@ test("mobile weather displays complete same-run ECMWF layers without per-variabl
   assert.ok(policy.includes("COMPACT_SPATIAL_TILE_SIZE = 1024"));
   assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
   assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
-  assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
+  assert.ok(src.includes("const preview = !frame.fullViewportRefresh && !this.compactSpatialTiles &&"),
+    "large viewport refresh cannot expose a partial cloud rectangle");
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
     "small viewport reveals must be synchronized across all 3 layers");
   assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
