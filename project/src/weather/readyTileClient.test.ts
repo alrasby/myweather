@@ -29,7 +29,7 @@ test('strict source manifest, run and safe tile URLs',()=>{
  assert.throws(()=>parseReadyManifest({...manifest,validTimes:[manifest.validTimes[1],manifest.validTimes[0]]}));
  assert.throws(()=>parseReadyManifest({...manifest,runId:'20261112T0000Z'}));
 });
-test('complete three-layer source frame publishes atomically and switches UTC hour',()=>{
+test('complete three-layer source frame publishes atomically and switches UTC hour',async()=>{
  const {L,map,published,client}=make();
  try{
   client.show(0);assert.equal(L.tiles.length,3);assert.equal(map.layers.size,3);
@@ -39,6 +39,10 @@ test('complete three-layer source frame publishes atomically and switches UTC ho
   assert.deepEqual(published,[manifest.validTimes[0]]);
   client.show(1);assert.equal(L.tiles.length,6);assert.equal(client.displayedHour,0);
   loaded(L.tiles.slice(3,6));assert.equal(client.displayedHour,1);
+  assert.ok(L.tiles.slice(3,6).every(tile=>tile.opacity===0),'new authentic hour starts transparent for GPU fade');
+  await new Promise(done=>setTimeout(done,35));
+  assert.ok(L.tiles.slice(3,6).every(tile=>tile.opacity===1),'new hour becomes visible');
+  assert.ok(L.tiles.slice(0,3).every(tile=>tile.opacity===0),'old hour fades away');
   assert.deepEqual(published,[manifest.validTimes[0],manifest.validTimes[1]]);
  }finally{client.destroy();assert.equal(map.layers.size,0);}
 });

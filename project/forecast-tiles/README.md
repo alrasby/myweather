@@ -27,3 +27,11 @@ AI is a bounded demand predictor for **real image URL priority** only. It never 
 
 ## Lightweight on-device intelligence (prototype)
 A 30-weight, six-outcome online softmax classifier in `src/weather/tinyTileDemandModel.ts` learns relative gesture/forecast-hour demand in memory. It abstains until 16 observations, has bounded work and weight magnitudes, and is reset on teardown. It does not store user locations, send analytics, call any AI API, alter forecast values, or draw invented pixels. The deterministic prefetch remains the fallback; **better cache hit rate is a hypothesis requiring A/B device measurement**. A dedicated 2x2/4x4 geographic metatile groups neighboring off-device renders into shared upstream data windows; the original raster interpolation and palettes are unchanged. No Neural Super Resolution or optical flow is used, because those could create misleading atmospheric features.
+
+## Real visual improvements (QA)
+
+- Pairwise opacity cross-fade is scheduled only when **both adjacent complete ECMWF hours** exist, with a reduced-motion bypass. Large timeline jumps replace atomically, not by blending physically unrelated times.
+- The headless renderer serves its local script entry with COOP/COEP headers to permit SharedArrayBuffer between **server-side** Open-Meteo workers when its upstream resources support CORS. Disable with `TILE_RENDER_ISOLATION=0` if a source fails isolation checks.
+- A complete PNG validator checks chunks, dimensions, CRC and bounded decoded image data before immutable caching; invalid provider responses fail closed. Rendering uses geographic 4x4/2x2 metatiles.
+- Cache hits/render p95 are exposed by the prototype health endpoint; on-device model has only ephemeral weights and never affects meteorological image pixels.
+- Cross-fades, seams, simulated failures, and real observed Android frame rates still require visual QA. No machine-learned super-resolution, fake precipitation or synthetic cloud texture is permitted.

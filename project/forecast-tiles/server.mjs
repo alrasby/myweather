@@ -22,7 +22,14 @@ const server=createServer(async(req,res)=>{
  try{
   const data=await readFile(target);
   const ext=extname(target),type=ext==='.js'?'text/javascript':ext==='.wasm'?'application/wasm':ext==='.css'?'text/css':'text/html';
-  res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+  res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
+   // Isolate the headless raster page so OM workers may share data without
+   // cloning whole forecast arrays per tile. Revert by environment flag if
+   // a provider resource has not opted into compatible CORS/CORP.
+   ...(process.env.TILE_RENDER_ISOLATION==='0'?{}:{
+    'Cross-Origin-Opener-Policy':'same-origin',
+    'Cross-Origin-Embedder-Policy':'require-corp',
+   })});
   res.end(data);
  }catch{res.writeHead(404);res.end();}
 });

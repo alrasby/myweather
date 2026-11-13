@@ -37,6 +37,7 @@ export class ReadyTileClient{
  private incoming:Frame|null=null;
  private retiring:Frame|null=null;
  private oldTimer:ReturnType<typeof setTimeout>|null=null;
+ private fadeTimer:ReturnType<typeof setTimeout>|null=null;
  private destroyed=false;
  private failedUntil=0;
  private readonly intelligence=new TinyTileDemandModel();
@@ -65,6 +66,7 @@ export class ReadyTileClient{
   if(this.destroyed||Date.now()<this.failedUntil||!Number.isInteger(hour)||hour<0||hour>=this.manifest.validTimes.length)return;
   if(this.current?.hour===hour||this.incoming?.hour===hour)return;
   this.disposeFrame(this.incoming);this.incoming=null;
+  if(this.fadeTimer){clearTimeout(this.fadeTimer);this.fadeTimer=null;}
   if(this.retiring){if(this.oldTimer)clearTimeout(this.oldTimer);this.disposeFrame(this.retiring);this.retiring=null;this.oldTimer=null;}
   const frame:Frame={hour,layers:[],loaded:[false,false,false],counts:[0,0,0],timer:null,failed:false};
   this.incoming=frame;
@@ -73,7 +75,11 @@ export class ReadyTileClient{
    // A new viewport can fail AFTER the previously complete layer was shown.
    // Do not retain invalid ECMWF tiles or overlay them on a different fallback.
    if(this.current===frame){
-    this.failedUntil=Date.now()+12000;this.disposeFrame(frame);this.current=null;this.onMiss();return;
+    this.failedUntil=Date.now()+12000;
+    if(this.fadeTimer)clearTimeout(this.fadeTimer);this.fadeTimer=null;
+    if(this.oldTimer)clearTimeout(this.oldTimer);this.oldTimer=null;
+    this.disposeFrame(this.retiring);this.retiring=null;
+    this.disposeFrame(frame);this.current=null;this.onMiss();return;
    }
    if(this.incoming!==frame)return;
    frame.failed=true;this.failedUntil=Date.now()+12000;
@@ -84,13 +90,33 @@ export class ReadyTileClient{
    if(this.destroyed||this.incoming!==frame||frame.failed||!frame.loaded.every(Boolean)||frame.counts.some(x=>x===0))return;
    if(frame.timer)clearTimeout(frame.timer);frame.timer=null;
    const old=this.current;this.current=frame;this.incoming=null;
-   // Only adjacent hours of the SAME pinned ECMWF run may cross-fade.
-   // A large timeline jump must never briefly blend unrelated forecast times.
-   const adjacent=!!old&&Math.abs(old.hour-hour)===1;
-   frame.layers.forEach(layer=>{const element=layer.getContainer?.();if(element&&adjacent)element.style.transition='opacity 240ms ease-out';layer.setOpacity(1);});
+   // Only adjacent hours from the same pinned forecast run may blend.
+   // GPU fades both complete authentic frames; no pixel generation or optical flow.
+   const reduceMotion=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+   const adjacent=!!old&&Math.abs(old.hour-hour)===1&&!reduceMotion;
+   if(old&&adjacent){
+    for(const layer of [...old.layers,...frame.layers]){
+     const element=layer.getContainer?.();
+     if(element)element.style.transition='opacity 240ms ease-out';
+    }
+    // Separate layout ticks ensure the browser actually sees opacity 0 -> 1.
+    this.fadeTimer=setTimeout(()=>{
+     this.fadeTimer=null;
+     if(this.destroyed||this.current!==frame)return;
+     frame.layers.forEach(layer=>layer.setOpacity(1));
+     old.layers.forEach(layer=>layer.setOpacity(0));
+    },16);
+    this.retiring=old;
+    this.oldTimer=setTimeout(()=>{
+     this.disposeFrame(old);
+     if(this.retiring===old)this.retiring=null;
+     this.oldTimer=null;
+    },300);
+   }else{
+    frame.layers.forEach(layer=>layer.setOpacity(1));
+    if(old)this.disposeFrame(old);
+   }
    this.onReady(this.manifest.validTimes[hour]!);
-   if(old&&adjacent){this.retiring=old;this.oldTimer=setTimeout(()=>{this.disposeFrame(old);this.retiring=null;this.oldTimer=null;},280);}
-   else if(old)this.disposeFrame(old);
   };
   for(const [index,variable] of LAYERS.entries()){
    const pane=index===0?'wx-clouds':'wx-model';
@@ -138,5 +164,5 @@ export class ReadyTileClient{
   for(const [url,image] of this.prefetched)if(!wanted.has(url)){image.src='';this.prefetched.delete(url);}
 
  }
- destroy(){if(this.destroyed)return;this.destroyed=true;this.intelligence.reset();this.previous=null;this.clearPredictor();if(this.oldTimer)clearTimeout(this.oldTimer);this.oldTimer=null;this.disposeFrame(this.retiring);this.retiring=null;this.disposeFrame(this.incoming);this.disposeFrame(this.current);this.current=null;this.incoming=null;}
+ destroy(){if(this.destroyed)return;this.destroyed=true;if(this.fadeTimer)clearTimeout(this.fadeTimer);this.fadeTimer=null;this.intelligence.reset();this.previous=null;this.clearPredictor();if(this.oldTimer)clearTimeout(this.oldTimer);this.oldTimer=null;this.disposeFrame(this.retiring);this.retiring=null;this.disposeFrame(this.incoming);this.disposeFrame(this.current);this.current=null;this.incoming=null;}
 }
