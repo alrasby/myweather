@@ -1,0 +1,26 @@
+# MyWeather ready ECMWF tile service — isolated QA prototype
+
+This is an **off-device source-backed PNG forecast pipeline**. It has NOT been verified against live ECMWF .om in a real hosted Chromium session or on physical Android. It is intentionally not activated in the shipping application.
+
+## Linux host
+
+From project/ run:
+
+1. npm ci
+2. npx vite build --config forecast-tiles/vite.config.ts
+3. npx playwright install --with-deps chromium
+4. TILE_CACHE_DIR=/var/cache/myweather-tiles node forecast-tiles/server.mjs
+
+Service binds to localhost:8788. Reverse-proxy ONLY /v1/ through HTTPS; never expose /__render/. Apply public rate limits and a disk capacity cap.
+
+- GET /v1/manifest.json — current pinned model run, UTC times and variables
+- GET /v1/tiles/{runId}/{timeIndex}/{layer}/{z}/{x}/{y}.png — immutable source-backed PNG
+- GET /v1/health — cache counters
+
+Chromium runs the original Open-Meteo .om decoder off the phone. One page serializes render requests. The 2-slot bounded gateway deduplicates, validates and caches PNG; it rejects arbitrary model URLs, invalid time/layer coordinates and artificial images.
+
+## Required acceptance gates
+
+Verify a live ECMWF run, precipitation rate normalization, full dry/transparent images, seams, dateline/high-latitude behavior, model-run rollover, provider throttling, browser crash recovery, p50/p95 cold and warm latency, storage and network costs, licensing and attribution. Do not switch on Android or merge without real-device proof. For production volume, deploy persistent cache and CDN or object storage with prewarming.
+
+AI is a bounded demand predictor for **real image URL priority** only. It never generates fictitious weather patterns, clouds or high-resolution forecast values.
