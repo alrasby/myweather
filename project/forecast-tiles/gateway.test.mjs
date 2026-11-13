@@ -78,3 +78,41 @@ test('source UTC minute/second precision is normalized and valid horizon may exc
  assert.throws(()=>parseModelMetadata({...meta,valid_times:['2026-11-13T01:00Z','2026-11-13T00:00Z']}),/model-time-invalid/);
  assert.throws(()=>parseModelMetadata({...meta,valid_times:['2026-11-13T00:00+04:00']}),/model-time-invalid/);
 });
+
+test("pinned old ECMWF run remains coherent during a model rollover and expires on schedule",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"mw-tiles-rolling-"));
+ let t=1000,next=false,generated=0;
+ const newer={...meta,reference_time:"2026-11-13T06:00:00Z",
+  valid_times:["2026-11-13T06:00:00Z","2026-11-13T07:00:00Z"]};
+ const api=createTileGateway({cacheDir:dir,manifestTtlMs:50,retiredRunMs:120000,now:()=>t,
+  fetchMetadata:async()=>next?newer:meta,renderTile:async()=>{generated++;return png;}});
+ api.server.listen(0,"127.0.0.1");await new Promise(done=>api.server.once("listening",done));
+ const base="http://127.0.0.1:"+api.server.address().port;
+ try{
+  assert.equal((await(await fetch(base+"/v1/manifest.json")).json()).runId,r.runId);
+  const oldUrl=base+"/v1/tiles/"+tilePath(parseModelMetadata(meta),r);
+  assert.equal((await fetch(oldUrl)).status,200);
+  t+=60;next=true;
+  assert.equal((await(await fetch(base+"/v1/manifest.json")).json()).runId,"20261113T0600Z");
+  assert.equal((await fetch(oldUrl)).status,200,"old pinned run remains addressable after rollover");
+  assert.equal(generated,1,"old completed image is reused, not regenerated");
+  t+=120001;
+  assert.equal((await fetch(oldUrl)).status,404,"expired pinned run cannot silently appear as a newer hour");
+ }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
+});
+test("a short source outage reuses only verified metadata and eventually fails closed",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"mw-tiles-stale-"));
+ let t=2000,outage=false;
+ const api=createTileGateway({cacheDir:dir,manifestTtlMs:10,staleManifestMs:500,now:()=>t,
+  fetchMetadata:async()=>{if(outage)throw new Error("unavailable");return meta;},
+  renderTile:async()=>png});
+ api.server.listen(0,"127.0.0.1");await new Promise(done=>api.server.once("listening",done));
+ const base="http://127.0.0.1:"+api.server.address().port;
+ try{
+  assert.equal((await fetch(base+"/v1/manifest.json")).status,200);
+  t+=20;outage=true;
+  assert.equal((await fetch(base+"/v1/manifest.json")).status,200);
+  t+=600;
+  assert.equal((await fetch(base+"/v1/manifest.json")).status,503);
+ }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
+});

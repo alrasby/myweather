@@ -9,9 +9,13 @@ const fail=(status,msg)=>Object.assign(new Error(msg),{status});
 export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
  const r=await fetch(META,{signal:AbortSignal.timeout(12000)});
  if(!r.ok)throw new Error('model-metadata-http-'+r.status);return r.json();
-},maxActive=2,maxWaiting=24,manifestTtlMs=300000,now=()=>Date.now()}){
- if(typeof renderTile!=='function'||!cacheDir||!Number.isInteger(maxActive)||maxActive<1||!Number.isInteger(maxWaiting)||maxWaiting<0)throw new Error('invalid-tile-gateway');
- let active=0,manifest=null,due=0,refreshing=null;
+},maxActive=2,maxWaiting=24,manifestTtlMs=300000,
+retiredRunMs=6*60*60*1000,staleManifestMs=10*60*1000,now=()=>Date.now()}){
+ if(typeof renderTile!=='function'||!cacheDir||!Number.isInteger(maxActive)||maxActive<1||!Number.isInteger(maxWaiting)||maxWaiting<0||!Number.isFinite(retiredRunMs)||retiredRunMs<0||!Number.isFinite(staleManifestMs)||staleManifestMs<0)throw new Error('invalid-tile-gateway');
+ let active=0,manifest=null,due=0,refreshing=null,lastGoodAt=0;
+ const retired=new Map();
+ const prune=()=>{for(const [id,p] of retired)if(now()>=p.expires)retired.delete(id);};
+
  const cacheMs=[],renderMs=[];
  const record=(list,ms)=>{list.push(Math.round(ms));if(list.length>120)list.shift();};
  const p95=list=>list.length?[...list].sort((a,b)=>a-b)[Math.ceil(list.length*.95)-1]:null;
@@ -19,12 +23,23 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
  async function catalog(){
   if(manifest&&now()<due)return manifest;
   if(!refreshing)refreshing=Promise.resolve().then(fetchMetadata).then(parseModelMetadata).then(m=>{
-   manifest=m;due=now()+manifestTtlMs;return m;
+   prune();
+   // During a pinned-run rollover, keep at most one immediately preceding
+   // real ECMWF run available to existing map sessions for a bounded grace.
+   if(manifest&&manifest.runId!==m.runId&&retiredRunMs>0){
+    retired.clear();
+    retired.set(manifest.runId,{manifest,expires:now()+retiredRunMs});
+   }
+   manifest=m;lastGoodAt=now();due=now()+manifestTtlMs;return m;
   }).catch(error=>{
-   // No credentials or response bodies are logged. CI can distinguish
-   // transport problems from wrong source schema without masking failures.
    const code=String(error?.cause?.code??error?.code??'').slice(0,60);
    console.warn('ECMWF_METADATA_QA_ERROR',String(error?.message??'unknown').slice(0,140),code);
+   // Serve the last verified immutable run briefly while upstream metadata
+   // is unavailable; never guess a new model run or its forecast values.
+   if(manifest&&now()-lastGoodAt<=staleManifestMs){
+    due=now()+Math.min(30000,staleManifestMs-(now()-lastGoodAt));
+    return manifest;
+   }
    throw error;
   }).finally(()=>{refreshing=null;});
   return refreshing;
@@ -68,14 +83,17 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
   if(req.method!=='GET')return send(405,JSON.stringify({error:'method-not-allowed'}));
   const path=(req.url||'').split('?')[0];
   try{
-   if(path==='/v1/health')return send(200,JSON.stringify({ready:!!manifest,...stats,active,waiting:waiters.length,cacheP95Ms:p95(cacheMs),renderP95Ms:p95(renderMs)}));
+   if(path==='/v1/health')return send(200,JSON.stringify({ready:!!manifest,...stats,active,waiting:waiters.length,retainedRuns:retired.size,cacheP95Ms:p95(cacheMs),renderP95Ms:p95(renderMs)}));
    if(path==='/v1/manifest.json')return send(200,JSON.stringify(await catalog()));
    const match=/^\/v1\/tiles\/([0-9]{8}T[0-9]{4}Z)\/(\d{1,3})\/(cloud_cover|precipitation|snowfall_water_equivalent)\/(\d{1,2})\/(\d{1,4})\/(\d{1,4})\.png$/.exec(path);
    if(!match)return send(404,JSON.stringify({error:'not-found'}));
    const m=await catalog();
    const r={runId:match[1],timeIndex:Number(match[2]),layer:match[3],z:Number(match[4]),x:Number(match[5]),y:Number(match[6])};
-   if(!validTile(m,r))return send(404,JSON.stringify({error:'tile-not-in-current-run'}));
-   return send(200,await getTile(m,r),'image/png','public, max-age=31536000, immutable');
+   prune();
+   const older=retired.get(r.runId);
+   const selected=validTile(m,r)?m:(older&&now()<older.expires&&validTile(older.manifest,r)?older.manifest:null);
+   if(!selected)return send(404,JSON.stringify({error:'tile-run-unavailable'}));
+   return send(200,await getTile(selected,r),'image/png','public, max-age=31536000, immutable');
   }catch(e){
    stats.failures++;
    const status=Number.isInteger(e?.status)?e.status:503;

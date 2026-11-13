@@ -35,3 +35,9 @@ A 30-weight, six-outcome online softmax classifier in `src/weather/tinyTileDeman
 - A complete PNG validator checks chunks, dimensions, CRC and bounded decoded image data before immutable caching; invalid provider responses fail closed. Rendering uses geographic 4x4/2x2 metatiles.
 - Cache hits/render p95 are exposed by the prototype health endpoint; on-device model has only ephemeral weights and never affects meteorological image pixels.
 - Cross-fades, seams, simulated failures, and real observed Android frame rates still require visual QA. No machine-learned super-resolution, fake precipitation or synthetic cloud texture is permitted.
+
+## Verified live raster QA (13 November 2026)
+
+GitHub Actions [live run #43441484552](https://github.com/alrasby/myweather/actions/runs/43441484552) on commit `ad305914` **passed**: Chromium rendered all three genuine ECMWF variables for one NYC tile (z8/x75/y96) from the pinned 2026-11-13T06:00Z model run, valid at 09:00Z. Cold generation: cloud 1378 ms, precipitation 704 ms, snow 220 ms; cached cloud retrieval 2 ms (single sample, not a phone/device benchmark). Three PNG samples and JSON metrics are preserved in the workflow artifact. All are 256x256 and validate as complete raster files. Client device rendering/smoothness, adjacent tile seams, real deployment and high-latitude QA are **not yet proved**.
+
+The gateway also retains the **last verified previous model run** for a bounded grace period during metadata rollover (default 6 hours). Brief upstream metadata failures reuse only the last verified run (default 10-minute stale limit), rather than creating forecast values or immediately breaking active sessions. These fallback paths are independently regression-tested.
