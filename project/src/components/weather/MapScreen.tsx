@@ -9,7 +9,7 @@ import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
+import { shouldKeepSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -302,12 +302,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           updateInterval: 200,
           keepBuffer: 2,
         });
+        let detailedReady = false;
         const syncUnderlay = () => {
           if (!map) return;
-          const need = needsSatelliteUnderlay(map.getZoom());
-          if (need && !map.hasLayer(underlay)) underlay.addTo(map);
-          else if (!need && map.hasLayer(underlay)) underlay.remove();
+          const keep = shouldKeepSatelliteParent(map.getZoom(), detailedReady);
+          if (keep && !map.hasLayer(underlay)) underlay.addTo(map);
+          else if (!keep && map.hasLayer(underlay)) underlay.remove();
         };
+        map.on("zoomstart", () => { detailedReady = false; syncUnderlay(); });
         map.on("zoomend", syncUnderlay);
         syncUnderlay();
         const imagery = L.tileLayer(imageryUrl, {
@@ -318,6 +320,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
+        imagery.on("loading", () => { detailedReady = false; syncUnderlay(); });
+        imagery.on("load", () => { detailedReady = true; syncUnderlay(); });
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";

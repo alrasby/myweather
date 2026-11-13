@@ -17,6 +17,7 @@ import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
 import { SpatialViewportRenderer, type ViewportRendererStats } from "@/weather/spatialViewportRenderer";
+import { SpatialRenderGeneration } from "@/weather/spatialRenderGeneration";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -462,7 +463,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[] }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -589,6 +590,14 @@ export class ModelField {
       onMove();
       this.viewportMoving = false;
       origin = null;
+      // Every pan/zoom begins a new viewport generation. Old completed
+      // cloud/rain/snow events must not authorize a new raster reveal.
+      for (const frame of this.frames.values()) {
+        frame.tileGates.forEach((gate) => gate.release());
+        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+        frame.revealTimer = undefined;
+        frame.renderGeneration.begin();
+      }
       if (!this.visible || !this.frames.get(this.base)?.ready) return;
       // GridLayer's 'loading' may be emitted after this moveend callback.
       // Give it time to request the newly visible viewport before prefetch
@@ -856,6 +865,7 @@ export class ModelField {
     this.pendingTimers.delete(step);
     const frame = this.frames.get(step);
     if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
+    if (frame?.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
     frame?.tileGates.forEach((gate) => gate.release());
     this.frames.delete(step);
     this.loading.delete(step);
@@ -922,6 +932,8 @@ export class ModelField {
       layerFinishedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       snowStartTimer: undefined as number | undefined,
       tileGates: Array.from({ length: SPATIAL_LAYER_COUNT }, () => new SpatialTileReveal()),
+      renderGeneration: new SpatialRenderGeneration(),
+      revealTimer: undefined as number | undefined,
     };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
@@ -1030,6 +1042,7 @@ export class ModelField {
       const tileStart = new WeakMap<object, number>();
       const tileGate = frame.tileGates[index]!;
       let refreshBatch = false;
+      let layerGeneration = frame.renderGeneration.id;
       let lastCompletedView: SpatialRasterView | null = null;
       layer.on("tileloadstart", (event) => {
         if (!alive() || !event?.tile) return;
@@ -1049,8 +1062,11 @@ export class ModelField {
         // Staging helps only when the old image still covers the same zoom.
         // A large move or pinch invalidates previous tile coverage; show new
         // tiles as they decode instead of hiding the screen for 8+ seconds.
-        // Release a previous, interrupted batch across ALL three variables.
-        frame.tileGates.forEach((gate) => gate.release());
+        // A new loading generation supersedes the old state for this
+        // particular variable, even if other variables still show old tiles.
+        layerGeneration = frame.renderGeneration.loading(index);
+        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+        frame.revealTimer = undefined;
         refreshBatch = (frame.ready || frame.previewReady) &&
           canStageSpatialRefresh(lastCompletedView, rasterView());
         frame.loaded[index] = false;
@@ -1064,17 +1080,23 @@ export class ModelField {
         refresh();
       });
       layer.on("load", () => {
-        if (!alive()) return;
-        // Wait for ALL three variable layers before publishing new raster
-        // tiles of a small, already covered viewport. Releasing each layer
-        // independently was still creating cloud -> rain -> snow stripes.
-        // Large moves bypass staging, so missing old coverage is not hidden.
+        if (!alive() || !frame.renderGeneration.loaded(index, layerGeneration)) return;
+        // Publish one generation only after every layer with new work
+        // settles. A short coalescing window catches overlapping 'loading'
+        // events from Leaflet's three independent raster grids.
         refreshBatch = false;
         if (frame.tileCounts[index]! > 0) lastCompletedView = rasterView();
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
-        if (frame.loaded.every(Boolean) || frame.errored.size > 0) {
-          frame.tileGates.forEach((gate) => gate.release());
+        if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
+          if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+          const expected = frame.renderGeneration.id;
+          frame.revealTimer = window.setTimeout(() => {
+            frame.revealTimer = undefined;
+            if (alive() && expected === frame.renderGeneration.id && frame.renderGeneration.ready()) {
+              frame.tileGates.forEach((gate) => gate.release());
+            }
+          }, 85);
         }
         refresh();
       });
@@ -1099,6 +1121,8 @@ export class ModelField {
         frame.errorCounts[index] += 1;
         frame.errored.add(index);
         // Never hold a staged raster indefinitely when any tile errors.
+        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+        frame.revealTimer = undefined;
         frame.tileGates.forEach((gate) => gate.release());
         refresh();
         errors += 1;

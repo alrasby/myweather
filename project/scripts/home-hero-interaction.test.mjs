@@ -376,6 +376,18 @@ test("home sky renders gently but never competes with weather map tile decoding 
   assert.ok(sky.includes('document.removeEventListener("visibilitychange", onVisibility)'));
   assert.ok(sky.includes("pause();") && sky.includes("ro.disconnect();"));
 });
+test("one viewport generation publishes consistent model layers and retains satellite parent tiles", () => {
+  const src = read("project/src/weather/modelField.ts");
+  const generation = read("project/src/weather/spatialRenderGeneration.ts");
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(src.includes("frame.renderGeneration.begin()"));
+  assert.ok(src.includes("frame.renderGeneration.loaded(index, layerGeneration)"));
+  assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"));
+  assert.ok(generation.includes("this.started.clear();"));
+  assert.ok(map.includes("shouldKeepSatelliteParent(map.getZoom(), detailedReady)"));
+  assert.ok(map.includes('imagery.on("load", () => { detailedReady = true; syncUnderlay(); })'));
+});
+
 test("ECMWF viewport renderer reuses decoded data, limits retained states and supports rollback", () => {
   const model = read("project/src/weather/modelField.ts");
   const engine = read("project/src/weather/spatialViewportRenderer.ts");
