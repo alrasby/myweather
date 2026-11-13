@@ -46,6 +46,10 @@ async function stop(){
 try{
  await ready();
  const metadataResponse=await fetchBounded('/v1/manifest.json',25000);
+ if(metadataResponse.status!==200){
+   const detail=await metadataResponse.text();
+   console.error('ECMWF_MANIFEST_STATUS',metadataResponse.status,'body',detail.slice(0,400));
+  }
  assert.equal(metadataResponse.status,200,'ECMWF live manifest unavailable');
  const manifest=await metadataResponse.json();
  assert.equal(manifest.model,'ecmwf_ifs');
