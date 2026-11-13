@@ -4,7 +4,17 @@
  * This reduces duplicate GPU compositing on Chrome/Android, where tile seams
  * may appear at the boundaries between separately transformed images.
  */
-export function needsSatelliteUnderlay(zoom: number, nativeZoom = 5): boolean {
+export const SATELLITE_UNDERLAY_NATIVE_ZOOM = 4;
+/** Retain the parent imagery while the detailed base layer is loading,
+ * including when zooming OUT to z4. Removing it on zoomend exposed vertical
+ * dark gaps before Esri's detail tiles had arrived. */
+export function shouldKeepSatelliteParent(zoom: number, detailReady: boolean): boolean {
+  return !detailReady || needsSatelliteUnderlay(zoom);
+}
+export function needsSatelliteUnderlay(
+  zoom: number,
+  nativeZoom = SATELLITE_UNDERLAY_NATIVE_ZOOM,
+): boolean {
   return Number.isFinite(zoom) && zoom > nativeZoom;
 }
 

@@ -1,6 +1,29 @@
 /** Maximum time a refreshed visible viewport can defer *starting* the
  * next forecast. Continuous panning must not starve animation forever. */
-export const SPATIAL_PREFETCH_GRACE_MS = 2500;
+// Device QA: 95th-percentile weather-tile completion exceeded 8 seconds
+// while transport itself was under 2 seconds. Protect current viewport
+// decoding before beginning a second model hour. Both limits are bounded
+// to avoid stalling animation or offline provider failure indefinitely.
+export const SPATIAL_PREFETCH_GRACE_MS = 8500;
+export const SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS = 5000;
+
+/** Avoid cancelling an expensive native forecast decode for every tiny pan.
+ * A real viewport shift (>35% of either dimension) or zoom invalidates
+ * speculative work. Longitude is periodic across the dateline. */
+export type SpatialViewCenter = { lat: number; lng: number; zoom: number };
+export function significantSpatialMove(
+  origin: SpatialViewCenter,
+  current: SpatialViewCenter,
+  latSpan: number,
+  lonSpan: number,
+): boolean {
+  if (![origin.lat, origin.lng, origin.zoom, current.lat, current.lng, current.zoom, latSpan, lonSpan]
+    .every(Number.isFinite) || latSpan <= 0 || lonSpan <= 0) return true;
+  const lonShift = Math.abs((((current.lng - origin.lng) % 360) + 540) % 360 - 180);
+  return Math.abs(current.zoom - origin.zoom) >= 0.75 ||
+    Math.abs(current.lat - origin.lat) >= latSpan * 0.35 ||
+    lonShift >= Math.min(360, lonSpan) * 0.35;
+}
 
 /** Limit ECMWF decoding to one incomplete forecast hour at a time.
  * Prioritize the requested frame and visible tiles, but give the following
@@ -14,6 +37,7 @@ export function planSpatialRequests(
   currentViewportRefreshing = false,
   visibleRefreshAgeMs = 0,
   playbackActive = false,
+  viewportMoving = false,
 ): { cancel: number[]; start: number | null } {
   // Keep two upcoming hours prepared without decoding more than one
   // incomplete frame at a time. The second lookahead becomes eligible only
@@ -22,22 +46,25 @@ export function planSpatialRequests(
   // don't consume network and battery decoding unused hours on a still map.
   const lookahead = playbackActive && ready.has(requested) && ready.has(requested + 1)
     ? requested + 2 : -1;
-  const candidates = [requested, requested + 1, lookahead].filter(
+  // A paused map should decode ONLY the requested forecast hour. Without
+  // shared memory, idle-hour prefetch copies huge arrays and delays panning.
+  // Active playback still primes its next hour for smooth animation.
+  const candidates = [requested, playbackActive ? requested + 1 : -1, lookahead].filter(
     (step) => step >= 0 && step < total && !ready.has(step) && !blocked.has(step),
   );
-  // Existing in-flight prefetch is not cancelled just because Leaflet
-  // briefly restarts a viewport tile queue. Doing that on every pan caused
-  // expensive native HTTP churn. Defer only NEW prefetch during the grace
-  // interval; after the deadline allow it even if map movement never stops.
-  // A missing requested frame is always more important than prefetch.
-  const prefetch = requested + 1;
-  // During playback the next time step matters more than a background
-  // pan refresh; do not stall prefetch for an extra 2.5 seconds.
-  const deferred = !playbackActive && currentViewportRefreshing && ready.has(requested) &&
-    visibleRefreshAgeMs < SPATIAL_PREFETCH_GRACE_MS &&
-    loading.size === 0;
+  // The visible viewport has precedence over future forecast hours, even
+  // when prefetch was already in flight. A real new pan cancels speculation
+  // once via ModelField.movestart, while this deterministic policy prevents
+  // the cancelled frame from immediately restarting on a tile event.
+  // Playback gets a shorter bound so its next hour cannot starve.
+  const grace = playbackActive ? SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS : SPATIAL_PREFETCH_GRACE_MS;
+  const deferred = ready.has(requested) &&
+    (viewportMoving || (currentViewportRefreshing && visibleRefreshAgeMs < grace));
   const desired = deferred ? null : candidates[0] ?? null;
-  const cancel = [...loading].filter((step) => step !== desired);
+  // Don't abort an in-flight speculative hour for a *small* gesture. Only
+  // large pans/zoom discard it in ModelField; otherwise retain its cached
+  // ranges, while blocking additional work until visible tiles settle.
+  const cancel = deferred ? [] : [...loading].filter((step) => step !== desired);
   return {
     cancel,
     start: desired !== null && !loading.has(desired) ? desired : null,

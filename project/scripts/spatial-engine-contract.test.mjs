@@ -44,3 +44,53 @@ test("performance details stay inside existing hidden diagnostics and preserve m
   assert.ok(map.includes("rateLimitedResponses"));
   assert.ok(map.includes("engine.canAdvanceRainTime"));
 });
+
+test("ECMWF viewport cannot reuse data from a different pan/zoom window", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  assert.ok(src.includes("resolveCurrentSpatialState("));
+  assert.ok(src.includes("getOrCreateState() verifies boundsIncluded()"));
+  assert.ok(!src.includes("if (loaded) return loaded;"),
+    "cached model data cannot bypass updated viewport boundaries");
+  assert.ok(!src.includes("this.pendingData.get(parsed.key)"),
+    "dataset coalescing by a URL alone must not cross viewport bounds");
+});
+
+
+test("GitHub Android CI actually runs all custom ECMWF worker functional tests", () => {
+  const ci = read(".github/workflows/android-ci.yml");
+  for (const testFile of [
+    "spatialRasterColor.test.ts",
+    "spatialRenderAdmission.test.ts",
+    "spatialRenderGeneration.test.ts",
+    "spatialViewportRenderer.test.ts",
+  ]) {
+    assert.ok(ci.includes("src/weather/" + testFile), testFile + " must run in CI");
+  }
+});
+
+test("worker cache keeps ECMWF variables resident without increasing active raster CPU", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  assert.ok(src.includes("for (const variable of SPATIAL_WORKER_VARIABLES)"));
+  assert.ok(src.includes("activeCount < MAX_ACTIVE_SPATIAL_WORKERS"));
+  assert.ok(src.includes("datasetEvictions: this.evicted"));
+});
+
+test("raster model state resolution and bounded cache locality are protected", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  assert.ok(src.includes("postReadCallback: recordRead"));
+  assert.ok(src.includes("chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable)"));
+  assert.ok(src.includes("nowMs - oldest.queuedAt >= 550"));
+  assert.ok(src.includes("datasetReuses: this.reused"));
+  assert.ok(src.includes("capturedReadRecoveries: this.recovered"));
+  assert.ok(src.includes("const values = state.data.values;"));
+  assert.ok(src.includes("const values = job.values;"));
+});
+
+test("ECMWF viewport raster keeps visible-frame priority and separate read/queue timing", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  const model = read("project/src/weather/modelField.ts");
+  assert.ok(src.includes("performance.now(), this.currentFrame()"));
+  assert.ok(model.includes("() => this.base"));
+  assert.ok(src.includes("readP95Ms: pctl(this.readSamples, 0.95)"));
+  assert.ok(src.includes("workerQueueP95Ms: pctl(this.workerQueueSamples, 0.95)"));
+});

@@ -14,7 +14,7 @@ test("weather animation is behind the upper cards, not a child of scrolling temp
   assert.ok(sky.includes("heroWeather ? <HeroPrecipitation"), "retain only weather-driven precipitation in sky scene");
   assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}'));
   assert.ok(style.includes(".wx-hero-atmosphere") && style.includes("pointer-events: none;"));
-  assert.ok(style.includes("height: 11.5rem"), "precipitation remains bounded above the cards");
+  assert.ok(style.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "precipitation follows the cloud deck, not half the screen");
 });
 
 test("hero weather scene is bounded to low frame rate, pauses outside viewport and supports accessibility", () => {
@@ -44,7 +44,9 @@ test("upper sky fades softly behind cards with no scrolling shelf or full-screen
   assert.ok(sky && hero, "ambient cloud deck and localized precipitation must exist");
   assert.ok(sky.includes("0.82") && sky.includes("0.45") && sky.includes("0.12"));
   assert.ok(hero.includes("position: absolute") && hero.includes("pointer-events: none"));
-  assert.ok(hero.includes("height: 11.5rem"), "weather is restricted to upper hero band");
+  assert.ok(hero.includes("top: 0;"), "rain/snow start at the cloud ceiling, not halfway down the screen");
+  assert.ok(hero.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "weather is restricted to cloud-deck height");
+  assert.ok(hero.includes("rgb(0 0 0 / 0.36) 5%") && hero.includes("#000 19%"), "upper rain/snow materializes smoothly through the cloud deck");
   assert.ok(!hero.includes("inset: -0.55rem"), "hero is no longer glued to the scrolling temperature card");
   assert.ok(hero.includes("0.73") && hero.includes("0.27") && hero.includes("0.07"));
   assert.ok(hero.includes("transparent 100%"), "feather both ends of the atmosphere");
@@ -155,7 +157,7 @@ test("rain/snow hero visuals remain conditional on real weather code and clipped
   assert.ok(sky.includes('plan.precipitation === "snow"'));
   assert.ok(sky.includes('if (plan.precipitation !== "none")'));
   assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen'));
-  assert.ok(css.includes('height: 11.5rem'));
+  assert.ok(css.includes('height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)'));
 });
 
 test("wind zoom transitions reset obsolete trails without changing wind physics", () => {
@@ -304,10 +306,51 @@ test("weather hero uses one atmospheric cloud generator, with precipitation-only
   assert.ok(sky.includes("const density = heroAtmosphere(code, cover, 0).coverage"), "cloud transparency adapts to city WMO and cover");
   assert.ok(sky.includes('if (heroAtmosphere(code, cover, wind).precipitation === "none") return null'), "no empty precip animation in sunny cities");
   assert.ok(sky.includes('plan.precipitation === "snow"'), "snow retains existing weather-specific particle type");
-  assert.ok(css.includes("height: 11.5rem"), "precip stays clipped to upper region");
+  assert.ok(css.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "precip stays clipped to the cloud-deck region");
   assert.ok(css.includes("opacity: var(--wx-cloud-scroll-opacity, 1)"), "sky and precipitation scroll away gradually");
   assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "never composite partial ECMWF cloud tiles over different fallback model");
   assert.ok(!model.includes("coldCloudPreview"), "no mixed-source first-paint exception");
+});
+
+test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite floor", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const src = read("project/src/weather/modelField.ts");
+  const queue = read("project/src/weather/modelFrameQueue.ts");
+  const satellite = read("project/src/weather/satelliteBasemap.ts");
+  assert.ok(src.includes('tileGate.hold(event.tile as SpatialTileNode)'));
+  assert.ok(src.includes('layer.on("load", () => {') &&
+    src.includes("frame.tileGates.forEach((gate) => gate.release())"));
+  assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
+    "stage release must wait for the whole ECMWF viewport or a tile error");
+  assert.ok(src.includes('layer.on("tileunload", (event)'));
+  assert.ok(src.includes("canStageSpatialRefresh(lastCompletedView, rasterView())"),
+    "stage only same-zoom small-area updates; show new pixels immediately on large pans");
+  assert.ok(src.includes("frame.tileGates.forEach((gate) => gate.release());"),
+    "previous held tiles cannot survive an invalidated viewport");
+  assert.ok(src.includes('map.on("move", onMove)'));
+  assert.ok(src.includes('significantSpatialMove(origin,'));
+  assert.ok(queue.includes("const cancel = deferred ? []"));
+  assert.ok(satellite.includes("SATELLITE_UNDERLAY_NATIVE_ZOOM = 4"));
+  assert.ok(map.includes("maxNativeZoom: SATELLITE_UNDERLAY_NATIVE_ZOOM"));
+});
+
+test("visible ECMWF viewport interrupts obsolete prefetch and stages nonblocking snowfall", () => {
+  const src = read("project/src/weather/modelField.ts");
+  const scheduler = read("project/src/weather/modelFrameQueue.ts");
+  assert.ok(src.includes('map.on("movestart", onMoveStart)'));
+  assert.ok(src.includes('map.on("moveend", onMoveEnd)'));
+  assert.ok(src.includes('if (step !== this.base) this.discardFrame(step)'));
+  assert.ok(src.includes('this.viewportMoving || now < this.viewportHoldUntil'));
+  assert.ok(src.includes('this.map.off("movestart", this.moveStartListener)'));
+  assert.ok(src.includes('if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer)'));
+  assert.ok(src.includes('if (index < 2) layer.addTo(map)'));
+  assert.ok(src.includes('frame.snowStartTimer = window.setTimeout(mountSnow, 650)'));
+  assert.ok(src.includes('made[0]!.on("tileload", mountSnow)'));
+  assert.ok(scheduler.includes("visibleRefreshAgeMs < grace"));
+  assert.ok(src.includes("const ready = spatialFrameReadyDuringRefresh("),
+    "keep previously rendered ECMWF field while only a viewport refresh is pending");
+  assert.ok(src.includes("const preview = !fallbackForHour && !cooldown"),
+    "never overlay an incompatible fallback beneath partial ECMWF weather");
 });
 
 test("cloud field uses seamless single-pass pattern and moon respects the city's horizon", () => {
@@ -332,4 +375,62 @@ test("home sky renders gently but never competes with weather map tile decoding 
   assert.ok(sky.includes('document.addEventListener("visibilitychange", onVisibility)'));
   assert.ok(sky.includes('document.removeEventListener("visibilitychange", onVisibility)'));
   assert.ok(sky.includes("pause();") && sky.includes("ro.disconnect();"));
+});
+test("one viewport generation publishes consistent model layers and retains satellite parent tiles", () => {
+  const src = read("project/src/weather/modelField.ts");
+  const generation = read("project/src/weather/spatialRenderGeneration.ts");
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(src.includes("frame.renderGeneration.begin(incomplete)"),
+    "a gesture must adopt unfinished layers rather than dropping their load events");
+  assert.ok(src.includes("frame.layerGeneration[index] = adopted"));
+  assert.ok(src.includes("frame.renderGeneration.loaded(index, frame.layerGeneration[index]!)"));
+  assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"));
+  assert.ok(generation.includes("for (const index of inFlight) this.started.add(index)"));
+  assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
+  assert.ok(map.includes("shouldKeepSatelliteParent(map.getZoom(), detailedReady)"));
+  assert.ok(map.includes("underlay.setOpacity(keep ? 1 : 0)"));
+  assert.ok(!map.includes("underlay.remove()"), "retain satellite parent tiles across zooms");
+  assert.ok(map.includes('imagery.on("load", () => { detailedReady = true; syncUnderlay(); })'));
+});
+
+test("ECMWF viewport renderer reuses decoded data, limits retained states and supports rollback", () => {
+  const model = read("project/src/weather/modelField.ts");
+  const engine = read("project/src/weather/spatialViewportRenderer.ts");
+  const worker = read("project/src/weather/spatialViewportRaster.worker.ts");
+  const screen = read("project/src/components/weather/MapScreen.tsx");
+  assert.ok(model.includes("maxStatesWithData: 6"), "three current + three playback states must stay cached");
+  assert.ok(model.includes('new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,'),
+    "custom ECMWF raster stays conditional on Android non-isolated WebView and rollback");
+  assert.ok(model.includes('() => this.base'), "renderer must receive the live requested forecast hour");
+  assert.ok(model.includes('this.viewportRenderer?.handler ?? omProtocol'));
+  assert.ok(model.includes('this.viewportRenderer?.dispose()'));
+  assert.ok(engine.includes('type: "arrayBuffer"'), "decode OM through official protocol without duplicate first-tile paint");
+  assert.ok(engine.includes("resolveCurrentSpatialState("),
+    "always validate current viewport before selecting cached model states");
+  assert.ok(!engine.includes("private pendingData = new Map"),
+    "do not duplicate upstream's .om request coalescing across invalid viewport bounds");
+  assert.ok(engine.includes("MAX_WORKER_DATA = 32 * 1024 * 1024"),
+    "bounded worker memory must cover the full Gaussian ECMWF IFS grid");
+  assert.ok(engine.includes("this.admission.acquire(signal)"),
+    "worker congestion must wait instead of immediately switching to legacy raster");
+  assert.ok(engine.includes("peakWaiting: this.admission.peakWaiting"),
+    "track queue pressure for real-device diagnosis");
+  assert.ok(screen.includes("viewportRenderer.reasons"),
+    "explain every legacy raster fallback instead of hiding its cause");
+  assert.ok(engine.includes('slot.cache.has(job.dataKey)'), "reuse decoded raster data across tiles");
+  assert.ok(worker.includes("GridFactory.create"), "preserve official ECMWF grid interpolation");
+  assert.ok(screen.includes("viewportRenderer.renderP95Ms"), "render timing must be visible to QA");
+});
+
+test("mobile weather displays complete same-run ECMWF layers without per-variable first-paint succession", () => {
+  const src = read("project/src/weather/modelField.ts");
+  const policy = read("project/src/weather/spatialTilePolicy.ts");
+  const planner = read("project/src/weather/modelFrameQueue.ts");
+  assert.ok(policy.includes("COMPACT_SPATIAL_TILE_SIZE = 1024"));
+  assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
+  assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
+  assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
+  assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
+    "small viewport reveals must be synchronized across all 3 layers");
+  assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
 });

@@ -2,19 +2,22 @@ import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
-import { planSpatialRequests, canAdvanceSpatialTime } from "@/weather/modelFrameQueue";
-import { SpatialNativeQueue } from "@/weather/spatialNativeQueue";
+import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
+import { SpatialTileReveal, canStageSpatialRefresh, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
+import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
-import { spatialTileOptions } from "@/weather/spatialTilePolicy";
+import { spatialTileOptions, useCompactSpatialTiles, COMPACT_SPATIAL_TILE_SIZE } from "@/weather/spatialTilePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
+import { SpatialViewportRenderer, type ViewportRendererStats } from "@/weather/spatialViewportRenderer";
+import { SpatialRenderGeneration } from "@/weather/spatialRenderGeneration";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -61,6 +64,7 @@ export type WeatherModelDiagnostics = {
   cacheStored: number;
   cacheRejected: number;
   performance: SpatialPerformanceSnapshot;
+  viewportRenderer: ViewportRendererStats;
   rateLimitedResponses: number;
   rateLimitRemainingMs: number;
   startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
@@ -70,6 +74,8 @@ type AnyLayer = {
   addTo: (map: LeafletMap) => AnyLayer;
   remove: () => void;
   on: (event: string, fn: (ev?: { tile?: HTMLElement }) => void) => void;
+  /** Leaflet GridLayer's authoritative current-queue loading state. */
+  isLoading?: () => boolean;
   setOpacity?: (opacity: number) => void;
   bringToFront?: () => void;
 };
@@ -135,7 +141,12 @@ function modelSettings() {
     cloud_cover_mid: CLOUD,
     cloud_cover_high: CLOUD,
   };
-  return { ...defaultOmProtocolSettings, colorScales };
+  // Three current-hour variables, plus up to three during active playback.
+  // Upstream defaults to TWO cached states; that evicts one of our three
+  // variables every tile and can restart .om Range reads repeatedly.
+  // Six entries retain one complete current/next-hour ECMWF frame pair,
+  // still bounded independently of the native HTTP block cache.
+  return { ...defaultOmProtocolSettings, colorScales, maxStatesWithData: 6 };
 }
 
 function spatialUrl(url: string): boolean {
@@ -203,9 +214,9 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
   return new Response(bytes.byteLength ? body : null, { status: status || 0, headers });
 }
 
-// Six bounded native reads improve spatial decoding throughput on mobile
-// without allowing the dozens of simultaneous Range fetches triggered by
-// three Leaflet model layers. Every request still obeys cancellation.
+// Six bounded native reads, with fair priority for visible cloud/rain ranges,
+// prevent obsolete snowfall queues from delaying the first useful coverage.
+// Do not raise concurrency or bypass provider cooldowns.
 const spatialNativeQueue = new SpatialNativeQueue(6);
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
@@ -234,7 +245,7 @@ async function measuredNativeRequest(
       spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
-    });
+    }, spatialNativePriority(options.url));
     const retryAfter = Object.entries(result.headers ?? {})
       .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
     spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));
@@ -454,7 +465,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[] }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -474,6 +485,14 @@ export class ModelField {
   // time Leaflet emits another 'loading' for the same requested hour.
   private refreshBase: number | null = null;
   private refreshSince = 0;
+  // A new visible viewport temporarily outranks speculative forecast hours.
+  // Both flags are reset when the rain map is hidden/disposed.
+  private viewportMoving = false;
+  private viewportHoldUntil = 0;
+  // Android WebView lacks SharedArrayBuffer: avoid showing cloud/rain/snow
+  // one by one before a complete same-run ECMWF frame is ready.
+  private compactSpatialTiles = false;
+  private viewportRenderer: SpatialViewportRenderer | null = null;
   private ready: Promise<void> = Promise.resolve();
   private metadataAbort: AbortController | null = null;
   // First-session readiness timings are read-only and measured on device.
@@ -483,6 +502,9 @@ export class ModelField {
   private firstCloudReadyMs: number | null = null;
   private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
+  private moveStartListener: (() => void) | null = null;
+  private moveEndListener: (() => void) | null = null;
+  private moveListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
     this.attachedAt = performance.now();
@@ -492,6 +514,20 @@ export class ModelField {
     installSpatialFetch();
     this.metadataAbort?.abort();
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
+    if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
+    if (this.map && this.moveListener) this.map.off("move", this.moveListener);
+    this.viewportMoving = false;
+    this.viewportHoldUntil = 0;
+    this.compactSpatialTiles = useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true);
+    // A/B rollback for diagnosing vendor/device-specific worker regressions.
+    // Never assume an experimental custom worker is available in every
+    // Android System WebView. Missing/failed workers use official OM raster.
+    let legacyOverride = false;
+    try { legacyOverride = localStorage.getItem("myweather.ecmwfRenderer") === "legacy"; } catch { /* private storage */ }
+    this.viewportRenderer?.dispose();
+    this.viewportRenderer = new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,
+      () => this.base);
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -521,8 +557,72 @@ export class ModelField {
     // update the data window before the new weather tiles are requested.
     map.on("moveend", updateBounds);
     this.updateBoundsListener = updateBounds;
+    let origin: { lat: number; lng: number; zoom: number } | null = null;
+    let latSpan = 0;
+    let lonSpan = 0;
+    let cancelledSpeculation = false;
+    let lastSampleAt = 0;
+    const onMoveStart = () => {
+      if (!this.visible || this.viewportMoving) return;
+      const b = map.getBounds();
+      const center = map.getCenter();
+      origin = { lat: center.lat, lng: center.lng, zoom: map.getZoom() };
+      latSpan = Math.max(0.01, b.getNorth() - b.getSouth());
+      lonSpan = Math.max(0.01, b.getEast() - b.getWest());
+      cancelledSpeculation = false;
+      lastSampleAt = 0;
+      this.viewportMoving = true;
+    };
+    const onMove = () => {
+      if (!this.visible || !this.viewportMoving || !origin || cancelledSpeculation ||
+          !this.frames.get(this.base)?.ready) return;
+      const now = performance.now();
+      if (now - lastSampleAt < 90) return;
+      lastSampleAt = now;
+      const center = map.getCenter();
+      if (!significantSpatialMove(origin,
+          { lat: center.lat, lng: center.lng, zoom: map.getZoom() }, latSpan, lonSpan)) return;
+      cancelledSpeculation = true;
+      // Cancel speculative *model hours* only on significant region changes.
+      // Already rendered requested-hour tiles stay onscreen during movement.
+      for (const step of [...this.loading]) {
+        if (step !== this.base) this.discardFrame(step);
+      }
+    };
+    const onMoveEnd = () => {
+      onMove();
+      this.viewportMoving = false;
+      origin = null;
+      // Every pan/zoom begins a new viewport generation. Old completed
+      // cloud/rain/snow events must not authorize a new raster reveal.
+      for (const frame of this.frames.values()) {
+        frame.tileGates.forEach((gate) => gate.release());
+        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+        frame.revealTimer = undefined;
+        // A Leaflet layer can remain in flight throughout a pan. Rebase
+        // that layer's eventual 'load' event into the new viewport instead
+        // of invalidating it forever and keeping ECMWF hidden by fallback.
+        const incomplete = frame.loaded.flatMap((done, index) => done ? [] : [index]);
+        const adopted = frame.renderGeneration.begin(incomplete);
+        for (const index of incomplete) frame.layerGeneration[index] = adopted;
+      }
+      if (!this.visible || !this.frames.get(this.base)?.ready) return;
+      // GridLayer's 'loading' may be emitted after this moveend callback.
+      // Give it time to request the newly visible viewport before prefetch
+      // can start again, without adding a periodic timer or another redraw.
+      this.viewportHoldUntil = Date.now() + 450;
+      this.refreshBase = this.base;
+      this.refreshSince = Date.now();
+      this.pump();
+    };
+    map.on("movestart", onMoveStart);
+    map.on("move", onMove);
+    map.on("moveend", onMoveEnd);
+    this.moveStartListener = onMoveStart;
+    this.moveListener = onMove;
+    this.moveEndListener = onMoveEnd;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
-    this.adapter.addProtocol("om", omProtocol, modelSettings());
+    this.adapter.addProtocol("om", this.viewportRenderer?.handler ?? omProtocol, modelSettings());
     this.lastError = null;
     this.pinnedRun = null;
     this.ready = fetch(META, { signal: metadataAbort.signal })
@@ -637,6 +737,15 @@ export class ModelField {
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
+      viewportRenderer: this.viewportRenderer?.snapshot() ?? {
+        mode: "legacy", workerTiles: 0, fallbackTiles: 0, datasetCopies: 0,
+        datasetReuses: 0, datasetEvictions: 0, workerSlots: 0, capturedReadRecoveries: 0,
+        queued: 0, peakWaiting: 0, reasons: {
+          missingData: 0, oversizedData: 0, admissionSaturated: 0,
+          admissionDeadline: 0, workerFailure: 0, other: 0,
+        }, readP50Ms: null, readP95Ms: null, workerQueueP95Ms: null,
+        renderP50Ms: null, renderP95Ms: null,
+      },
       performance: spatialPerformance.snapshot(
         globalThis.crossOriginIsolated === true,
         (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize ?? null,
@@ -676,10 +785,13 @@ export class ModelField {
       this.holdingPreviousFrame = false;
       this.refreshBase = null;
       this.refreshSince = 0;
+      this.viewportMoving = false;
+      this.viewportHoldUntil = 0;
       this.playbackActive = false;
       this.lastScheduledAt = 0;
       this.fallbackForMissingHour = false;
       this.clear();
+      this.viewportRenderer?.clear();
     }
   }
 
@@ -698,7 +810,7 @@ export class ModelField {
       this.blend = f;
       // The animation blend continues at 20Hz, but planning/canceling work
       // cannot become a hot loop while tiles decode or the slider is held.
-      // Poll once every 500ms so the 2.5s prefetch fairness deadline and
+      // Poll every 500ms so the bounded viewport priority deadline and
       // failed-provider cooldown are still observed.
       if (shouldReplanSpatialFrame(hourChanged, now, this.lastScheduledAt)) {
         this.lastScheduledAt = now;
@@ -729,12 +841,15 @@ export class ModelField {
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
-    // Favor the visible tile queues briefly, but DO NOT restart this clock
-    // on each Leaflet pan/loading event. This guarantees that the next forecast
-    // can begin within the configured grace period during continuous panning.
+    // Favor the visible tile queues before speculative forecast hours; do
+    // not restart this clock for every tile 'loading' event. The bounded
+    // grace still lets playback prepare the next hour on slow connections.
     const current = this.frames.get(this.base);
-    const viewportRefreshing = !!current?.ready && current.loaded.some((complete) => !complete);
     const now = Date.now();
+    const viewportRefreshing = !!current?.ready && (
+      this.viewportMoving || now < this.viewportHoldUntil ||
+      current.loaded.some((complete) => !complete)
+    );
     if (!viewportRefreshing) {
       this.refreshBase = null;
       this.refreshSince = 0;
@@ -744,7 +859,7 @@ export class ModelField {
     }
     const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
     const plan = planSpatialRequests(
-      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive,
+      this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive, this.viewportMoving,
     );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
@@ -762,6 +877,9 @@ export class ModelField {
     if (timer !== undefined) window.clearTimeout(timer);
     this.pendingTimers.delete(step);
     const frame = this.frames.get(step);
+    if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
+    if (frame?.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+    frame?.tileGates.forEach((gate) => gate.release());
     this.frames.delete(step);
     this.loading.delete(step);
     // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
@@ -803,12 +921,17 @@ export class ModelField {
     // Use coherent ECMWF model fields for actual cloud shape, precipitation
     // and snowfall instead of inflating low-resolution point forecasts.
     // Keep already-loaded tiles during gestures; load new coverage after idle.
-    const cloudOpts = spatialTileOptions("wx-clouds");
-    const rainOpts = spatialTileOptions("wx-model");
+    const cloudOpts = spatialTileOptions("wx-clouds", this.compactSpatialTiles);
+    const rainOpts = spatialTileOptions("wx-model", this.compactSpatialTiles);
+    const renderUrl = (variable: string) => {
+      const url = tileUrl(variable, step, this.pinnedRun);
+      // OM render tile_size must match Leaflet's canvas tileSize.
+      return this.compactSpatialTiles ? `${url}&tile_size=${COMPACT_SPATIAL_TILE_SIZE}` : url;
+    };
     const made = [
-      adapter.createTileLayer(tileUrl("cloud_cover", step, this.pinnedRun), cloudOpts),
-      adapter.createTileLayer(tileUrl("precipitation", step, this.pinnedRun), rainOpts),
-      adapter.createTileLayer(tileUrl("snowfall_water_equivalent", step, this.pinnedRun), rainOpts),
+      adapter.createTileLayer(renderUrl("cloud_cover"), cloudOpts),
+      adapter.createTileLayer(renderUrl("precipitation"), rainOpts),
+      adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
     const frame = {
       layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0, previewOpacityKey: "",
@@ -820,6 +943,11 @@ export class ModelField {
       layerFirstTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       layerLastTileAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       layerFinishedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      snowStartTimer: undefined as number | undefined,
+      tileGates: Array.from({ length: SPATIAL_LAYER_COUNT }, () => new SpatialTileReveal()),
+      renderGeneration: new SpatialRenderGeneration(),
+      layerGeneration: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
+      revealTimer: undefined as number | undefined,
     };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
@@ -835,14 +963,21 @@ export class ModelField {
       // the visible viewport; do not expose the low-resolution global fallback
       // every time a cloud/rain/snow tile queue enters "loading".
       const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
-      const preview = spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
+      // Keep current genuine fallback until all three ECMWF layers finish,
+      // rather than visibly replacing them in three separate passes.
+      const preview = !this.compactSpatialTiles &&
+        spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
       const previewMask = frame.loaded.reduce((mask, complete, index) =>
         complete && frame.tileCounts[index]! > 0 && !frame.errored.has(index)
           ? mask | (1 << index) : mask, 0);
       const previewChanged = frame.previewReady !== preview || frame.previewMask !== previewMask;
       frame.previewReady = preview;
       frame.previewMask = previewMask;
-      if (step === this.base && preview && this.firstCloudReadyMs === null) {
+      // Measure when the cloud field really finishes, not when policy allows
+      // the cloud-only preview to be shown. This keeps mobile QA timings
+      // comparable after the synchronized three-layer display change.
+      if (step === this.base && this.firstCloudReadyMs === null &&
+          frame.loaded[0] && frame.tileCounts[0]! > 0 && !frame.errored.has(0)) {
         this.firstCloudReadyMs = performance.now() - this.attachedAt;
       }
       // A completed successful reload clears stale timeout errors, even when
@@ -905,6 +1040,27 @@ export class ModelField {
     // tiles arrive, but terminate after a prolonged idle or bounded total time.
     const checkProgress = () => {
       if (!alive() || frame.ready) return;
+      // Leaflet may finish its active tile queue while a moveend has
+      // invalidated the former generation's load callback. Recover only
+      // when real tiles for THIS layer were delivered and GridLayer reports
+      // no pending tile requests. Never fabricate an ECMWF completion.
+      let recovered = false;
+      for (const [index, layer] of made.entries()) {
+        if (frame.loaded[index] || frame.layerLastTileAt[index] === 0 ||
+            layer.isLoading?.() !== false) continue;
+        const token = frame.layerGeneration[index]!;
+        if (!frame.renderGeneration.loaded(index, token)) continue;
+        frame.loaded[index] = true;
+        frame.layerFinishedAt[index] = Date.now();
+        recovered = true;
+      }
+      if (recovered) {
+        if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
+          frame.tileGates.forEach((gate) => gate.release());
+        }
+        refresh();
+      }
+      if (frame.ready) return;
       if (spatialFrameTimedOut(Date.now(), startedAt, lastProgressAt)) {
         giveUp();
         return;
@@ -912,16 +1068,41 @@ export class ModelField {
       this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+    const rasterView = (): SpatialRasterView => {
+      const b = map.getBounds();
+      return { west: b.getWest(), east: b.getEast(), south: b.getSouth(),
+        north: b.getNorth(), zoom: map.getZoom() };
+    };
     for (const [index, layer] of made.entries()) {
       const tileStart = new WeakMap<object, number>();
+      const tileGate = frame.tileGates[index]!;
+      let refreshBatch = false;
+      let lastCompletedView: SpatialRasterView | null = null;
       layer.on("tileloadstart", (event) => {
         if (!alive() || !event?.tile) return;
         tileStart.set(event.tile, performance.now());
+        // During a viewport refresh, Leaflet independently inserts rendered
+        // images. Stage only new tiles until this layer's 'load', so hard
+        // rectangular fragments do not appear over the previous coverage.
+        if (refreshBatch) tileGate.hold(event.tile as SpatialTileNode);
+      });
+      layer.on("tileunload", (event) => {
+        tileGate.discard(event?.tile as SpatialTileNode | undefined);
       });
       // 'tileload' reports ONE tile. 'load' reports that the complete current
       // viewport tile queue has settled. Only the latter may replace fallback.
       layer.on("loading", () => {
         if (!alive()) return;
+        // Staging helps only when the old image still covers the same zoom.
+        // A large move or pinch invalidates previous tile coverage; show new
+        // tiles as they decode instead of hiding the screen for 8+ seconds.
+        // A new loading generation supersedes the old state for this
+        // particular variable, even if other variables still show old tiles.
+        frame.layerGeneration[index] = frame.renderGeneration.loading(index);
+        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+        frame.revealTimer = undefined;
+        refreshBatch = (frame.ready || frame.previewReady) &&
+          canStageSpatialRefresh(lastCompletedView, rasterView());
         frame.loaded[index] = false;
         frame.layerStartedAt[index] = Date.now();
         frame.layerFirstTileAt[index] = 0;
@@ -933,9 +1114,24 @@ export class ModelField {
         refresh();
       });
       layer.on("load", () => {
-        if (!alive()) return;
+        if (!alive() || !frame.renderGeneration.loaded(index, frame.layerGeneration[index]!)) return;
+        // Publish one generation only after every layer with new work
+        // settles. A short coalescing window catches overlapping 'loading'
+        // events from Leaflet's three independent raster grids.
+        refreshBatch = false;
+        if (frame.tileCounts[index]! > 0) lastCompletedView = rasterView();
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
+        if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
+          if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+          const expected = frame.renderGeneration.id;
+          frame.revealTimer = window.setTimeout(() => {
+            frame.revealTimer = undefined;
+            if (alive() && expected === frame.renderGeneration.id && frame.renderGeneration.ready()) {
+              frame.tileGates.forEach((gate) => gate.release());
+            }
+          }, 85);
+        }
         refresh();
       });
       layer.on("tileload", (event) => {
@@ -958,6 +1154,10 @@ export class ModelField {
         if (err) this.lastError = String(err instanceof Error ? err.message : err).slice(0, 160);
         frame.errorCounts[index] += 1;
         frame.errored.add(index);
+        // Never hold a staged raster indefinitely when any tile errors.
+        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+        frame.revealTimer = undefined;
+        frame.tileGates.forEach((gate) => gate.release());
         refresh();
         errors += 1;
         if (errors >= 3) {
@@ -970,8 +1170,23 @@ export class ModelField {
           giveUp();
         }
       });
-      layer.addTo(map);
+      // Prioritize first real cloud/rain coverage. A bounded 650-ms delay
+      // in mounting snowfall avoids starting all three costly OM worker
+      // decoders at once; snow is never skipped or fabricated.
+      if (index < 2) layer.addTo(map);
     }
+    let snowStarted = false;
+    const mountSnow = () => {
+      if (!alive() || snowStarted) return;
+      snowStarted = true;
+      if (frame.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
+      frame.snowStartTimer = undefined;
+      made[2]!.addTo(map);
+    };
+    // If cloud tiles arrive sooner, start snowfall immediately. Otherwise
+    // the bounded deadline guarantees snow is requested even on a slow link.
+    made[0]!.on("tileload", mountSnow);
+    frame.snowStartTimer = window.setTimeout(mountSnow, 650);
   }
 
   /** الساعة الأقدم تخفت بينما الساعة الأحدث تظهر، فتنساب الكتل بدل القفزة. */
@@ -1093,13 +1308,23 @@ export class ModelField {
     this.metadataAbort?.abort();
     this.metadataAbort = null;
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
+    if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
+    if (this.map && this.moveListener) this.map.off("move", this.moveListener);
     this.updateBoundsListener = null;
+    this.moveStartListener = null;
+    this.moveEndListener = null;
+    this.moveListener = null;
+    this.viewportMoving = false;
+    this.viewportHoldUntil = 0;
     this.visible = false;
     this.playbackActive = false;
     this.seq += 1; // invalidate asynchronous frame and metadata callbacks
     this.onLive = null;
     this.onMiss = null;
     this.clear();
+    this.viewportRenderer?.dispose();
+    this.viewportRenderer = null;
     this.failedUntil.clear();
     this.spatialVisible = false;
     this.lastDisplayedStep = null;

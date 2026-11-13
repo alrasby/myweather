@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { modelTileFrameReady, modelVariablesReady, spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, SPATIAL_LAYER_COUNT } from "./modelTileReadiness.ts";
+import { SpatialTileReveal, canStageSpatialRefresh } from "./spatialTileReveal.ts";
 
 test("cloud, rain and snowfall must all load successfully", () => {
   assert.equal(SPATIAL_LAYER_COUNT, 3);
@@ -64,4 +65,38 @@ test("ECMWF cloud preview starts after real cloud tiles arrive even while precip
   assert.equal(spatialCloudPreviewReady(true, [false, false, false], new Set(), [3, 0, 0]), true);
   assert.equal(spatialCloudPreviewReady(true, [false, false, false], new Set([0]), [3, 0, 0]), false);
   assert.equal(spatialCloudPreviewReady(false, [false, true, true], new Set(), [0, 2, 3]), false);
+});
+
+test("viewport tile batch becomes visible atomically, preserving original styles", () => {
+  const gate = new SpatialTileReveal();
+  const first = { style: { visibility: "" } };
+  const second = { style: { visibility: "visible" } };
+  gate.hold(first);
+  gate.hold(second);
+  gate.hold(first);
+  assert.equal(gate.pending, 2);
+  assert.equal(first.style.visibility, "hidden");
+  assert.equal(second.style.visibility, "hidden");
+  gate.release();
+  assert.equal(first.style.visibility, "");
+  assert.equal(second.style.visibility, "visible");
+  assert.equal(gate.pending, 0);
+  // New viewport starts its own batch; old state must not leak.
+  gate.hold(first);
+  gate.discard(first);
+  assert.equal(first.style.visibility, "");
+  assert.equal(gate.pending, 0);
+  gate.hold(undefined);
+  gate.discard(undefined);
+});
+
+test("batch reveal is allowed only when the previous raster still covers the new view", () => {
+  const a = { west: 8, east: 38, south: 48, north: 68, zoom: 6 };
+  assert.equal(canStageSpatialRefresh(null, a), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, west: 10, east: 40 }), true);
+  assert.equal(canStageSpatialRefresh(a, { ...a, west: 18, east: 48 }), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, zoom: 7 }), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, south: 58, north: 78 }), false);
+  assert.equal(canStageSpatialRefresh(a, { ...a, west: 368, east: 398 }), true);
+  assert.equal(canStageSpatialRefresh(a, { ...a, east: NaN }), false);
 });

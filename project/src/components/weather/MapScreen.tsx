@@ -9,7 +9,7 @@ import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { shouldKeepSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -290,25 +290,28 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
-        // At world zoom (<=5) the underlay and detailed imagery requested the
-        // *same* Esri raster tiles and composited two full-size tile grids.
-        // Avoid that duplicate GPU surface and its possible horizontal seams.
-        // At closer zoom, the low-resolution underlay is useful while high-res
-        // images arrive after a pan. Mount it only in that case.
+        // The prior z5 underlay was removed at the initial z5 map view,
+        // exposing dark areas while the first satellite tiles arrived.
+        // Keep a coarser z4 parent behind z5+ imagery (distinct Esri URLs,
+        // not two copies of the same z5 tiles), without affecting ECMWF.
         const underlay = L.tileLayer(imageryUrl, {
-          maxNativeZoom: 5,
+          maxNativeZoom: SATELLITE_UNDERLAY_NATIVE_ZOOM,
           maxZoom: 16,
           zIndex: 0,
           updateWhenIdle: false,
           updateInterval: 200,
-          keepBuffer: 2,
-        });
+          keepBuffer: 3,
+        }).addTo(map);
+        // A permanent z4 parent keeps decoded satellite coverage ready across
+        // zooms. Removing/re-adding it on every zoom discarded buffered tiles
+        // and exposed black holes during fast global pans.
+        let detailedReady = false;
         const syncUnderlay = () => {
           if (!map) return;
-          const need = needsSatelliteUnderlay(map.getZoom());
-          if (need && !map.hasLayer(underlay)) underlay.addTo(map);
-          else if (!need && map.hasLayer(underlay)) underlay.remove();
+          const keep = shouldKeepSatelliteParent(map.getZoom(), detailedReady);
+          underlay.setOpacity(keep ? 1 : 0);
         };
+        map.on("zoomstart", () => { detailedReady = false; syncUnderlay(); });
         map.on("zoomend", syncUnderlay);
         syncUnderlay();
         const imagery = L.tileLayer(imageryUrl, {
@@ -319,6 +322,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
+        imagery.on("loading", () => { detailedReady = false; syncUnderlay(); });
+        imagery.on("load", () => { detailedReady = true; syncUnderlay(); });
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
@@ -1221,13 +1226,40 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
               {" · transfer MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
             </p>
+            <p>{"ECMWF renderer: "}{weatherDiagnostics?.viewportRenderer.mode ?? "legacy"}
+              {" · worker tiles "}{weatherDiagnostics?.viewportRenderer.workerTiles ?? 0}
+              {" · dataset copies "}{weatherDiagnostics?.viewportRenderer.datasetCopies ?? 0}
+              {" · reuse "}{weatherDiagnostics?.viewportRenderer.datasetReuses ?? 0}
+              {" · evicted "}{weatherDiagnostics?.viewportRenderer.datasetEvictions ?? 0}
+              {" · recovered "}{weatherDiagnostics?.viewportRenderer.capturedReadRecoveries ?? 0}
+              {" · fallback tiles "}{weatherDiagnostics?.viewportRenderer.fallbackTiles ?? 0}
+              {" · queued "}{weatherDiagnostics?.viewportRenderer.queued ?? 0}
+              {" · peak waiters "}{weatherDiagnostics?.viewportRenderer.peakWaiting ?? 0}
+            </p>
+            <p>{"Raster fallback reasons: "}
+              {weatherDiagnostics?.viewportRenderer.reasons ?
+                Object.entries(weatherDiagnostics.viewportRenderer.reasons)
+                  .filter(([, count]) => count > 0)
+                  .map(([reason, count]) => `${reason}:${count}`).join(" · ") || "none" : "—"}
+            </p>
+            <p>{"ECMWF model read p50/p95: "}
+              {weatherDiagnostics?.viewportRenderer.readP50Ms ?? "—"}{" / "}
+              {weatherDiagnostics?.viewportRenderer.readP95Ms ?? "—"}{" ms"}
+            </p>
+            <p>{"Worker queue p95: "}
+              {weatherDiagnostics?.viewportRenderer.workerQueueP95Ms ?? "—"}{" ms"}
+            </p>
+            <p>{"Raster worker p50/p95: "}
+              {weatherDiagnostics?.viewportRenderer.renderP50Ms ?? "—"}{" / "}
+              {weatherDiagnostics?.viewportRenderer.renderP95Ms ?? "—"}{" ms"}
+            </p>
             <p>{"SharedArrayBuffer: "}{weatherDiagnostics?.performance.runtime.crossOriginIsolated ? "available" : "unavailable"}
               {" · JS heap: "}{weatherDiagnostics?.performance.runtime.heapUsedMb == null
                 ? "N/A" : `${weatherDiagnostics.performance.runtime.heapUsedMb} MB`}
             </p>
             <p className="text-white/60">{lang === "ar"
-                ? "زمن البلاطة يشمل فك البيانات ورسمها ونقلها؛ لا يمكن فصلهما دون أدوات داخل عامل OM."
-                : "Tile time includes decoding, rendering and delivery; worker-level breakdown is not exposed."}</p>
+                ? "زمن البلاطة الكامل يشمل الجلب وفك البيانات والرسم. زمن عامل الرسم الجديد مقاس منفصل؛ المحرك الاحتياطي لا يتيح هذا الفصل."
+                : "Full tile time includes fetch, decode and paint. Viewport worker timing measures raster painting only; the legacy engine has no separate worker timing."}</p>
           </div>
           <p>{lang === "ar" ? "الإطارات الجاري تجهيزها" : "Decoding forecast frames"}: {weatherDiagnostics?.loadingFrames.join(", ") || "—"}</p>
           {(["cloud", "rain", "snow"] as const).map((name, index) => (
