@@ -434,3 +434,19 @@ test("mobile weather displays complete same-run ECMWF layers without per-variabl
     "small viewport reveals must be synchronized across all 3 layers");
   assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
 });
+
+test("rain map playback remains silent while the real ECMWF fallback and diagnostics work", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const model = read("project/src/weather/modelField.ts");
+  const engine = read("project/src/weather/glField.ts");
+  for (const hidden of [
+    "جاري تجهيز التوقع التالي", "تحميل التوقعات أبطأ من المعتاد",
+    "Forecast loading is slow", "Preparing next forecast", "weatherLoadPhase",
+    "weatherLoadingPhase", "aria-live=\"polite\"",
+  ]) assert.ok(!map.includes(hidden), `remove visual playback alert: ${hidden}`);
+  assert.ok(map.includes("info.playbackWaitingMs >= 1600"), "keep genuine real-data fallback timing");
+  assert.ok(map.includes("rainPlaybackQuickRef.current?.()"), "keep real rain prefetch for stalled playback");
+  assert.ok(map.includes("modelRef.current?.diagnostics()"), "keep diagnostic panel data");
+  assert.ok(engine.includes("weatherWaitSince"), "retain accurate silent playback buffering");
+  assert.ok(model.includes("canAdvanceSpatialTime("), "retain real forecast-hour readiness gate");
+});
