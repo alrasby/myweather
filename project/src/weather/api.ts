@@ -162,7 +162,7 @@ function buildBundle(
     daily: dayRows.filter((row) => Number.isFinite(row.t) && validDailyTemperatures(row.tmax, row.tmin)),
     air,
     marine,
-    marineVersion: 1,
+    marineVersion: 2,
   };
   if (!Number.isFinite(bundle.current.temp)) {
     const now = Date.now();
@@ -502,7 +502,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     daily,
     air: null,
     marine: null,
-    marineVersion: 1,
+    marineVersion: 2,
   };
 }
 
@@ -562,7 +562,7 @@ export function loadWeather(
   }
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
-    const fresh = !!cached && cached.bundle.marineVersion === 1 &&
+    const fresh = !!cached && cached.bundle.marineVersion === 2 &&
       Date.now() - cached.at < CACHE_TTL_MS;
     if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
     let last: unknown;
@@ -572,7 +572,7 @@ export function loadWeather(
         const bundle = await fetchForecast(place, opts?.signal);
         // Preserve known coastal eligibility if the secondary forecast provider
         // does not include marine data or the separate marine API is offline.
-        if (bundle.marine == null && cached?.bundle.marine?.coastal) {
+        if (bundle.marine == null && cached?.bundle.marineVersion === 2 && cached.bundle.marine?.coastal) {
           // A brief Marine outage must not reclassify a known coastal city as
           // inland. Reuse only still-relevant ACTUAL sea-level samples.
           const oldTide = cached.bundle.marine.tide;

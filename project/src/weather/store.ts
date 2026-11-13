@@ -175,7 +175,7 @@ export const useWeather = create<WeatherState>((set, get) => ({
       get().places.find((p) => p.id === get().activeId) ?? (peek && peek.id === get().activeId ? peek : undefined);
     if (!place) return;
     const cached = readCacheFile().entries[place.id];
-    const fresh = !!cached && cached.bundle.marineVersion === 1 &&
+    const fresh = !!cached && cached.bundle.marineVersion === 2 &&
       Date.now() - cached.at < CACHE_TTL_MS && !force;
     if (fresh && cached) {
       if (signal?.aborted || generation !== activeLoadGeneration || get().activeId !== place.id) return;
