@@ -399,7 +399,9 @@ test("ECMWF viewport renderer reuses decoded data, limits retained states and su
   const worker = read("project/src/weather/spatialViewportRaster.worker.ts");
   const screen = read("project/src/components/weather/MapScreen.tsx");
   assert.ok(model.includes("maxStatesWithData: 6"), "three current + three playback states must stay cached");
-  assert.ok(model.includes('new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride)'));
+  assert.ok(model.includes('new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,'),
+    "custom ECMWF raster stays conditional on Android non-isolated WebView and rollback");
+  assert.ok(model.includes('() => this.base'), "renderer must receive the live requested forecast hour");
   assert.ok(model.includes('this.viewportRenderer?.handler ?? omProtocol'));
   assert.ok(model.includes('this.viewportRenderer?.dispose()'));
   assert.ok(engine.includes('type: "arrayBuffer"'), "decode OM through official protocol without duplicate first-tile paint");
