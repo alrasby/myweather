@@ -1242,6 +1242,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                   .filter(([, count]) => count > 0)
                   .map(([reason, count]) => `${reason}:${count}`).join(" · ") || "none" : "—"}
             </p>
+            <p>{"ECMWF model read p50/p95: "}
+              {weatherDiagnostics?.viewportRenderer.readP50Ms ?? "—"}{" / "}
+              {weatherDiagnostics?.viewportRenderer.readP95Ms ?? "—"}{" ms"}
+            </p>
+            <p>{"Worker queue p95: "}
+              {weatherDiagnostics?.viewportRenderer.workerQueueP95Ms ?? "—"}{" ms"}
+            </p>
             <p>{"Raster worker p50/p95: "}
               {weatherDiagnostics?.viewportRenderer.renderP50Ms ?? "—"}{" / "}
               {weatherDiagnostics?.viewportRenderer.renderP95Ms ?? "—"}{" ms"}

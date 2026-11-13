@@ -12,6 +12,8 @@ test("viewport raster parser preserves requested run, variable and tile coords",
   assert.equal(parsed.file, base.slice(5));
   assert.equal(parsed.variable, "cloud_cover");
   assert.deepEqual(parsed.tile, { z: 8, x: 112, y: 89, size: 1024 });
+  assert.equal(parsed.frame, null);
+  assert.equal(parseSpatialRasterTile(base + "?time_step=valid_times_22&variable=cloud_cover&tile_size=1024/8/112/89")?.frame, 22);
   assert.ok(parsed.key.endsWith("tile_size=1024"));
   assert.equal(parseSpatialRasterTile(base + "?variable=wind_speed&tile_size=1024/8/1/2"), null);
   assert.equal(parseSpatialRasterTile(base + "?variable=precipitation/NaN/1/2"), null);
@@ -117,4 +119,21 @@ test("raster queue preserves hot forecast data without starving earlier hours", 
   assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 300), { job: 1, slot: 0 });
   assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 650), { job: 0, slot: 0 });
   assert.deepEqual(nextSpatialWorkerJob(jobs.slice(0, 1), slots, 200), { job: 0, slot: 0 });
+});
+\n
+test("requested hour beats queued future-hour raster and future work resumes", () => {
+  const slots = [
+    { variable: "cloud_cover" as const, busy: false },
+    { variable: "precipitation" as const, busy: false },
+    { variable: "snowfall_water_equivalent" as const, busy: false },
+  ];
+  const jobs = [
+    { variable: "cloud_cover" as const, frame: 23, queuedAt: 100 },
+    { variable: "precipitation" as const, frame: 22, queuedAt: 120 },
+  ];
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 200, 22), { job: 1, slot: 1 });
+  assert.deepEqual(nextSpatialWorkerJob(jobs.slice(0, 1), slots, 200, 22), { job: 0, slot: 0 });
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 200, null), { job: 0, slot: 0 });
+  slots[1]!.busy = true;
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 200, 22), { job: 0, slot: 0 });
 });

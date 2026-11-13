@@ -85,3 +85,12 @@ test("raster model state resolution and bounded cache locality are protected", (
   assert.ok(src.includes("const values = state.data.values;"));
   assert.ok(src.includes("const values = job.values;"));
 });
+\n
+test("ECMWF viewport raster keeps visible-frame priority and separate read/queue timing", () => {
+  const src = read("project/src/weather/spatialViewportRenderer.ts");
+  const model = read("project/src/weather/modelField.ts");
+  assert.ok(src.includes("performance.now(), this.currentFrame()"));
+  assert.ok(model.includes("() => this.base"));
+  assert.ok(src.includes("readP95Ms: pctl(this.readSamples, 0.95)"));
+  assert.ok(src.includes("workerQueueP95Ms: pctl(this.workerQueueSamples, 0.95)"));
+});

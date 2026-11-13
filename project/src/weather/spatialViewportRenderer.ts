@@ -24,12 +24,19 @@ export const MAX_ACTIVE_SPATIAL_WORKERS = 2;
 /** Keep model-hour data hot for up to six intervening tiles / 550ms.
  * After that the oldest queued raster wins; no hour can be starved. */
 export function nextSpatialWorkerJob(
-  jobs: readonly { variable: SpatialVariable; dataKey?: string; queuedAt?: number }[],
+  jobs: readonly { variable: SpatialVariable; dataKey?: string; queuedAt?: number; frame?: number | null }[],
   slots: readonly { variable: SpatialVariable; busy: boolean; cache?: ReadonlyMap<string, number> }[],
   nowMs = performance.now(),
+  requestedFrame: number | null = null,
 ): { job: number; slot: number } | null {
+  // Give queued tiles of the visible forecast hour precedence over optional
+  // next-hour work, without cancelling reads or raising worker concurrency.
+  const currentRunnable = requestedFrame !== null && jobs.some(job =>
+    job.frame === requestedFrame && slots.some(s => !s.busy && s.variable === job.variable));
+  const eligible = (frame?: number | null) => !currentRunnable || frame === requestedFrame;
   let first: { job: number; slot: number } | null = null;
   for (let i = 0; i < jobs.length; i++) {
+    if (!eligible(jobs[i]!.frame)) continue;
     const slot = slots.findIndex(s => !s.busy && s.variable === jobs[i]!.variable);
     if (slot >= 0) { first = { job: i, slot }; break; }
   }
@@ -39,6 +46,7 @@ export function nextSpatialWorkerJob(
   if (oldest.queuedAt == null || nowMs - oldest.queuedAt >= 550) return first;
   for (let i = first.job + 1; i < Math.min(jobs.length, first.job + 7); i++) {
     const job = jobs[i]!;
+    if (!eligible(job.frame)) continue;
     const slot = slots.findIndex(s => !s.busy && s.variable === job.variable &&
       !!job.dataKey && !!s.cache?.has(job.dataKey));
     if (slot >= 0) return { job: i, slot };
@@ -46,7 +54,7 @@ export function nextSpatialWorkerJob(
   return first;
 }
 type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable;
-  queuedAt: number; values: Float32Array; palette: Palette;
+  queuedAt: number; frame: number | null; values: Float32Array; palette: Palette;
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
@@ -62,6 +70,7 @@ export type ViewportRendererStats = {
   workerTiles: number; fallbackTiles: number; datasetCopies: number; datasetReuses: number;
   datasetEvictions: number; workerSlots: number; capturedReadRecoveries: number;
   queued: number; peakWaiting: number; reasons: ViewportFallbackReasons;
+  readP50Ms: number | null; readP95Ms: number | null; workerQueueP95Ms: number | null;
   renderP50Ms: number | null; renderP95Ms: number | null;
 };
 export function classifyViewportFailure(error: unknown): ViewportFallbackReason {
@@ -89,7 +98,7 @@ function pctl(input: number[], fraction: number): number | null {
   return Math.round(sorted[Math.ceil(sorted.length * fraction) - 1]!);
 }
 export function parseSpatialRasterTile(url: string): { key: ReadKey; file: string;
-  variable: string; tile: RasterTask } | null {
+  variable: string; frame: number | null; tile: RasterTask } | null {
   const m = url.match(tileSuffix);
   if (!m) return null;
   const key = url.slice(0, m.index);
@@ -103,7 +112,9 @@ export function parseSpatialRasterTile(url: string): { key: ReadKey; file: strin
   const tile = { z: Number(m[1]), x: Number(m[2]), y: Number(m[3]), size };
   if (![tile.z, tile.x, tile.y, tile.size].every(Number.isInteger) ||
     tile.z < 0 || tile.z > 16 || tile.size < 256 || tile.size > 1024) return null;
-  return { key, file: key.slice(5, queryAt), variable: variable!, tile };
+  const time = params.get("time_step")?.match(/^valid_times_(\d+)$/);
+  const frame = time ? Number(time[1]) : null;
+  return { key, file: key.slice(5, queryAt), variable: variable!, frame, tile };
 }
 export function shouldUseViewportWorker(native: boolean, isolated: boolean, workerSupported: boolean,
   legacyOverride: boolean): boolean {
@@ -149,6 +160,9 @@ export class SpatialViewportRenderer {
   private serial = 0;
   private stateIds = new WeakMap<OmUrlState, string>();
   private samples: number[] = [];
+  private readSamples: number[] = [];
+  private workerQueueSamples: number[] = [];
+  private readonly currentFrame: () => number | null;
   private copied = 0;
   private reused = 0;
   private evicted = 0;
@@ -164,7 +178,8 @@ export class SpatialViewportRenderer {
   private admission = new SpatialRenderAdmission(MAX_PENDING_TILES + 2, 64, 15_000);
   private disabled = false;
 
-  constructor(enable: boolean) {
+  constructor(enable: boolean, currentFrame: () => number | null = () => null) {
+    this.currentFrame = currentFrame;
     if (!enable || typeof Worker === "undefined") return;
     try {
       // Real-device QA: 189 large variable copies for 308 tiles, no worker
@@ -191,6 +206,8 @@ export class SpatialViewportRenderer {
       workerSlots: this.slots.length, capturedReadRecoveries: this.recovered,
       queued: this.jobs.length + this.admission.waiting,
       peakWaiting: this.admission.peakWaiting, reasons: { ...this.reasons },
+      readP50Ms: pctl(this.readSamples, 0.5), readP95Ms: pctl(this.readSamples, 0.95),
+      workerQueueP95Ms: pctl(this.workerQueueSamples, 0.95),
       renderP50Ms: pctl(this.samples, 0.5), renderP95Ms: pctl(this.samples, 0.95) };
   }
   readonly handler: typeof omProtocol = async (params, abort, settings) => {
@@ -200,8 +217,11 @@ export class SpatialViewportRenderer {
     const palette = parsed && paletteOf(config, parsed.variable);
     if (!parsed || !palette) return omProtocol(params, abort, settings);
     try {
+      const readStarted = performance.now();
       const state = await this.ensureDataset(parsed, abort, config);
       if (abort.signal.aborted) return { data: new ArrayBuffer(0) };
+      this.readSamples.push(performance.now() - readStarted);
+      if (this.readSamples.length > 90) this.readSamples.shift();
       if (!state?.data?.values) {
         this.fallback("missingData");
         return omProtocol(params, abort, config);
@@ -210,7 +230,8 @@ export class SpatialViewportRenderer {
         this.fallback("oversizedData");
         return omProtocol(params, abort, config);
       }
-      const bitmap = await this.render(state, palette, parsed.tile, parsed.variable as SpatialVariable, abort.signal);
+      const bitmap = await this.render(state, palette, parsed.tile,
+        parsed.variable as SpatialVariable, parsed.frame, abort.signal);
       if (abort.signal.aborted) { bitmap.close(); return { data: new ArrayBuffer(0) }; }
       return { data: bitmap };
     } catch (error) {
@@ -263,7 +284,7 @@ export class SpatialViewportRenderer {
   }
 
   private async render(state: OmUrlState, palette: Palette, tile: RasterTask,
-    variable: SpatialVariable, signal: AbortSignal): Promise<ImageBitmap> {
+    variable: SpatialVariable, frame: number | null, signal: AbortSignal): Promise<ImageBitmap> {
     if (!this.active || !state.data?.values) throw new Error("worker-disabled");
     // Hold the exact decoded array reference BEFORE the admission await.
     // Upstream can evict state.data during a pan or hour change, but already
@@ -278,7 +299,7 @@ export class SpatialViewportRenderer {
       let key = this.stateIds.get(state);
       if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
       return await new Promise<ImageBitmap>((resolve, reject) => {
-        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable,
+        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable, frame,
           queuedAt: performance.now(), values, tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
@@ -306,11 +327,13 @@ export class SpatialViewportRenderer {
       // because a different layer had a free worker. CPU budget is unchanged.
       const next = nextSpatialWorkerJob(this.jobs,
         this.slots.map(slot => ({ variable: slot.variable, busy: slot.busy !== null,
-          cache: slot.cache })));
+          cache: slot.cache })), performance.now(), this.currentFrame());
       if (!next) break;
       const slot = this.slots[next.slot]!;
       const job = this.jobs.splice(next.job, 1)[0]!;
       if (job.signal.aborted) { job.onAbort(); continue; }
+      this.workerQueueSamples.push(performance.now() - job.queuedAt);
+      if (this.workerQueueSamples.length > 90) this.workerQueueSamples.shift();
       // This is the exact array held when the job was admitted; reading
       // state.data again after waiting would race upstream's LRU eviction.
       const values = job.values;

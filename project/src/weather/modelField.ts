@@ -526,7 +526,8 @@ export class ModelField {
     let legacyOverride = false;
     try { legacyOverride = localStorage.getItem("myweather.ecmwfRenderer") === "legacy"; } catch { /* private storage */ }
     this.viewportRenderer?.dispose();
-    this.viewportRenderer = new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride);
+    this.viewportRenderer = new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,
+      () => this.base);
     this.map = map;
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
@@ -742,7 +743,8 @@ export class ModelField {
         queued: 0, peakWaiting: 0, reasons: {
           missingData: 0, oversizedData: 0, admissionSaturated: 0,
           admissionDeadline: 0, workerFailure: 0, other: 0,
-        }, renderP50Ms: null, renderP95Ms: null,
+        }, readP50Ms: null, readP95Ms: null, workerQueueP95Ms: null,
+        renderP50Ms: null, renderP95Ms: null,
       },
       performance: spatialPerformance.snapshot(
         globalThis.crossOriginIsolated === true,
