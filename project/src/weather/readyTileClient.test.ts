@@ -35,6 +35,7 @@ test('complete three-layer source frame publishes atomically and switches UTC ho
   client.show(0);assert.equal(L.tiles.length,3);assert.equal(map.layers.size,3);
   loaded(L.tiles.slice(0,2));assert.equal(client.displayedTime,null);
   loaded(L.tiles.slice(2,3));assert.equal(client.displayedHour,0);
+  assert.ok(L.tiles.slice(0,3).every(tile=>tile.opacity===1));
   assert.deepEqual(published,[manifest.validTimes[0]]);
   client.show(1);assert.equal(L.tiles.length,6);assert.equal(client.displayedHour,0);
   loaded(L.tiles.slice(3,6));assert.equal(client.displayedHour,1);
@@ -50,5 +51,17 @@ test('failed or obsolete frame never publishes invented or partial weather',()=>
   client.prefetch(0,1,0,true,false);assert.ok(images.length>0&&images.length<=8);
   client.prefetch(0,1,0,true,true);assert.equal(client.displayedHour,0);
   assert.equal(published.length,1);
+ }finally{client.destroy();}
+});
+
+test('a later current-viewport tile error removes stale ECMWF imagery and enters cooldown',()=>{
+ const {L,map,published,client}=make();
+ try{
+  client.show(0);loaded(L.tiles.slice(0,3));
+  L.tiles[0]!.fire('tileerror');
+  assert.equal(client.displayedTime,null);
+  assert.equal(map.layers.size,0);
+  assert.deepEqual(published,[manifest.validTimes[0],'missing']);
+  client.show(0);assert.equal(L.tiles.length,3,'cooldown must not hot-loop failed source');
  }finally{client.destroy();}
 });
