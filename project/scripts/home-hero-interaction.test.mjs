@@ -321,14 +321,10 @@ test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite
   assert.ok(src.includes('layer.on("load", () => {') &&
     src.includes("frame.tileGates.forEach((gate) => gate.release())"));
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
-    "stage release waits for all three ECMWF layers");
-  assert.ok(src.includes("frame.visualCommitted = true") &&
-    src.includes("visualViewportReady("),
-    "large pan waits for a coalesced complete model before publishing");
+    "stage release must wait for the whole ECMWF viewport or a tile error");
   assert.ok(src.includes('layer.on("tileunload", (event)'));
-  assert.ok(src.includes('spatialRevealDecision(frame.ready || frame.previewReady,') &&
-    src.includes('frame.fullViewportRefresh = true'),
-    "small pans stage tiles while large pans hide incomplete model coverage rather than showing patches");
+  assert.ok(src.includes("canStageSpatialRefresh(lastCompletedView, rasterView())"),
+    "stage only same-zoom small-area updates; show new pixels immediately on large pans");
   assert.ok(src.includes("frame.tileGates.forEach((gate) => gate.release());"),
     "previous held tiles cannot survive an invalidated viewport");
   assert.ok(src.includes('map.on("move", onMove)'));
@@ -351,9 +347,8 @@ test("visible ECMWF viewport interrupts obsolete prefetch and stages nonblocking
   assert.ok(src.includes('frame.snowStartTimer = window.setTimeout(mountSnow, 650)'));
   assert.ok(src.includes('made[0]!.on("tileload", mountSnow)'));
   assert.ok(scheduler.includes("visibleRefreshAgeMs < grace"));
-  assert.ok(src.includes("spatialFrameReadyDuringRefresh(frame.ready, frame.loaded") &&
-    src.includes("frame.fullViewportRefresh") && src.includes("frame.visualCommitted"),
-    "keep old ECMWF only for overlapping refreshes; hide incomplete large-area patches");
+  assert.ok(src.includes("const ready = spatialFrameReadyDuringRefresh("),
+    "keep previously rendered ECMWF field while only a viewport refresh is pending");
   assert.ok(src.includes("const preview = !fallbackForHour && !cooldown"),
     "never overlay an incompatible fallback beneath partial ECMWF weather");
 });
@@ -434,8 +429,7 @@ test("mobile weather displays complete same-run ECMWF layers without per-variabl
   assert.ok(policy.includes("COMPACT_SPATIAL_TILE_SIZE = 1024"));
   assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
   assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
-  assert.ok(src.includes("const preview = !frame.fullViewportRefresh && !this.compactSpatialTiles &&"),
-    "large viewport refresh cannot expose a partial cloud rectangle");
+  assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
     "small viewport reveals must be synchronized across all 3 layers");
   assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
