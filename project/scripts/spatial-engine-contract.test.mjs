@@ -82,8 +82,14 @@ test("raster model state resolution and bounded cache locality are protected", (
   assert.ok(src.includes("nowMs - oldest.queuedAt >= 550"));
   assert.ok(src.includes("datasetReuses: this.reused"));
   assert.ok(src.includes("capturedReadRecoveries: this.recovered"));
-  assert.ok(src.includes("const values = state.data.values;"));
+  const identity = read("project/src/weather/spatialDatasetKeys.ts");
+  assert.ok(src.includes("const {values,dataKey,scaleFactor} = captureSpatialWorkerData("),
+    "capture the exact decoded data before worker admission");
   assert.ok(src.includes("const values = job.values;"));
+  assert.ok(src.includes("scaleFactor: job.scaleFactor"),
+    "do not re-read an evicted source state after admission");
+  assert.ok(identity.includes("this.entries.get(values)"),
+    "the original decoded array, not its shallow state wrapper, identifies worker data");
 });
 
 test("ECMWF viewport raster keeps visible-frame priority and separate read/queue timing", () => {
