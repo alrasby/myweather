@@ -1,6 +1,6 @@
 /** Visual readiness is a deterministic safety gate, not synthetic weather.
  * A tile patch must not show over a different frame or model product. */
-import {canStageSpatialRefresh,type SpatialRasterView} from "./spatialTileReveal";
+import {canStageSpatialRefresh,type SpatialRasterView} from "./spatialTileReveal.ts";
 export type SpatialRevealDecision = "stage"|"hide-incomplete"|"initial";
 export function spatialRevealDecision(
   hasShownForecast:boolean,
