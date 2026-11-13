@@ -67,7 +67,7 @@ test("inland or unavailable marine data hides tide card without exposing error c
  assert.equal(hasDisplayableCoastalTide({coastal:true,wave:1,tide:coast?.tide},now),true);
  assert.equal(hasDisplayableCoastalTide(coast,now+8*hour),false,"expired predictions are hidden");
  assert.equal(hasDisplayableCoastalTide(coast,now-hour),false,"future fetch stamps are not accepted");
- const justInland=parseMarineSnapshot(response(25.24,55.27),25.4,55.27,now);
+ const justInland=parseMarineSnapshot(response(25.24,55.27),25.45,55.27,now);
  assert.equal(justInland?.coastal,false,"distant sea-grid cells cannot classify nearby inland towns as sea coast");
  assert.equal(hasDisplayableCoastalTide(justInland,now),false);
 });
