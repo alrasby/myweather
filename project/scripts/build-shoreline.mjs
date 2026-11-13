@@ -15,8 +15,11 @@ function add(a,b) {
  const [ax,ay]=a,[bx,by]=b;
  if(![ax,ay,bx,by].every(Number.isFinite)||Math.abs(ax)>180||Math.abs(bx)>180||Math.abs(ay)>90||Math.abs(by)>90)return;
  const points=[ax,ay,bx,by].map(v=>Math.round(v*1e5));
- const lo=Math.max(0,Math.floor(Math.min(ay,by)+90)-1);
- const hi=Math.min(179,Math.floor(Math.max(ay,by)+90)+1);
+ // A 12km coastal lookup needs only 0.13deg latitude halo, not a
+ // duplicated FULL degree either side of every segment. This substantially
+ // reduces APK asset and Android WebView heap without losing nearby coasts.
+ const lo=Math.max(0,Math.floor(Math.min(ay,by)+90-0.13));
+ const hi=Math.min(179,Math.floor(Math.max(ay,by)+90+0.13));
  for(let i=lo;i<=hi;i++)bins[i].push(...points);
 }
 async function source(name) {

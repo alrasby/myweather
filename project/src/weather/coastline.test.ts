@@ -14,7 +14,7 @@ test("global CC0 coastline places Muscat and other coastal cities by shore proxi
   ["Hammerfest",70.6634,23.6821,true],
   ["Riyadh",24.7136,46.6753,false],
   ["Prague",50.0755,14.4378,false],
- ];
+ ] as const;
  for(const [name,lat,lon,wanted] of cities){
   const km=shorelineDistanceKm(index,lat,lon);
   console.log("SHORELINE_COVERAGE",name,Number(km.toFixed(2)),wanted);
