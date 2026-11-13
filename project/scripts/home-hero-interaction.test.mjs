@@ -320,7 +320,7 @@ test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite
   assert.ok(src.includes('tileGate.hold(event.tile as SpatialTileNode)'));
   assert.ok(src.includes('layer.on("load", () => {') &&
     src.includes("frame.tileGates.forEach((gate) => gate.release())"));
-  assert.ok(src.includes("if (frame.loaded.every(Boolean) || frame.errored.size > 0)"),
+  assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
     "stage release must wait for the whole ECMWF viewport or a tile error");
   assert.ok(src.includes('layer.on("tileunload", (event)'));
   assert.ok(src.includes("canStageSpatialRefresh(lastCompletedView, rasterView())"),
@@ -412,7 +412,7 @@ test("mobile weather displays complete same-run ECMWF layers without per-variabl
   assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
   assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
   assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
-  assert.ok(src.includes("if (frame.loaded.every(Boolean) || frame.errored.size > 0)"),
+  assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
     "small viewport reveals must be synchronized across all 3 layers");
   assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
 });
