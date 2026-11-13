@@ -4,6 +4,7 @@ import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTim
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
 import { SpatialTileReveal, canStageSpatialRefresh, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
+import { spatialRevealDecision } from "@/weather/spatialVisualGate";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
@@ -468,7 +469,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; fullViewportRefresh: boolean; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -599,7 +600,9 @@ export class ModelField {
       // Every pan/zoom begins a new viewport generation. Old completed
       // cloud/rain/snow events must not authorize a new raster reveal.
       for (const frame of this.frames.values()) {
-        frame.tileGates.forEach((gate) => gate.release());
+        // Do not reveal held tiles on moveend: pending cloud/rain/snow
+        // batches may belong to different viewport generations.
+        // The last complete three-layer 'load' releases them atomically.
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
         // A Leaflet layer can remain in flight throughout a pan. Rebase
@@ -948,6 +951,7 @@ export class ModelField {
       layerFinishedAt: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       snowStartTimer: undefined as number | undefined,
       tileGates: Array.from({ length: SPATIAL_LAYER_COUNT }, () => new SpatialTileReveal()),
+      fullViewportRefresh: false,
       renderGeneration: new SpatialRenderGeneration(),
       layerGeneration: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       revealTimer: undefined as number | undefined,
@@ -968,7 +972,7 @@ export class ModelField {
       const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
       // Keep current genuine fallback until all three ECMWF layers finish,
       // rather than visibly replacing them in three separate passes.
-      const preview = !this.compactSpatialTiles &&
+      const preview = !frame.fullViewportRefresh && !this.compactSpatialTiles &&
         spatialCloudPreviewReady(frame.previewReady, frame.loaded, frame.errored, frame.tileCounts);
       const previewMask = frame.loaded.reduce((mask, complete, index) =>
         complete && frame.tileCounts[index]! > 0 && !frame.errored.has(index)
@@ -1002,6 +1006,7 @@ export class ModelField {
       // early-exit would leave that newly finished layer at opacity=0.
       if (ready && !frame.ready && frame.opacity > 0.98) frame.opacity = 0.975;
       frame.ready = ready;
+      if (ready && frame.loaded.every(Boolean)) frame.fullViewportRefresh = false;
       this.orderKey = "";
       if (ready) {
         if (step === this.base && this.firstCompleteReadyMs === null) {
@@ -1096,16 +1101,34 @@ export class ModelField {
       // viewport tile queue has settled. Only the latter may replace fallback.
       layer.on("loading", () => {
         if (!alive()) return;
-        // Staging helps only when the old image still covers the same zoom.
-        // A large move or pinch invalidates previous tile coverage; show new
-        // tiles as they decode instead of hiding the screen for 8+ seconds.
+        // A region jump cannot safely show a partial ECMWF rectangle on
+        // top of satellite imagery (or a different global fallback). Keep
+        // a completed view only for tightly overlapping same-zoom drags.
+        const decision = spatialRevealDecision(
+          frame.ready || frame.previewReady || frame.opacity > 0.01,
+          lastCompletedView, rasterView(),
+        );
+        if (decision === "hide-incomplete" && !frame.fullViewportRefresh) {
+          frame.fullViewportRefresh = true;
+          frame.ready = false;
+          frame.previewReady = false;
+          frame.previewMask = 0;
+          frame.previewOpacityKey = "";
+          frame.opacity = 0;
+          for (const currentLayer of made) currentLayer.setOpacity?.(0);
+          // Any staged tiles from an earlier small pan are now invisible.
+          // A new complete viewport generation will make them visible again.
+          frame.tileGates.forEach(gate => gate.release());
+          this.orderKey = "";
+        }
         // A new loading generation supersedes the old state for this
         // particular variable, even if other variables still show old tiles.
         frame.layerGeneration[index] = frame.renderGeneration.loading(index);
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
-        refreshBatch = (frame.ready || frame.previewReady) &&
-          canStageSpatialRefresh(lastCompletedView, rasterView());
+        refreshBatch = !frame.fullViewportRefresh &&
+          spatialRevealDecision(frame.ready || frame.previewReady,
+            lastCompletedView, rasterView()) === "stage";
         frame.loaded[index] = false;
         frame.layerStartedAt[index] = Date.now();
         frame.layerFirstTileAt[index] = 0;
@@ -1160,7 +1183,14 @@ export class ModelField {
         // Never hold a staged raster indefinitely when any tile errors.
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
+        // Do not expose an incomplete batch after an error. Hide it and
+        // preserve the coherent alternate source until the next retry.
         frame.tileGates.forEach((gate) => gate.release());
+        frame.fullViewportRefresh = true;
+        frame.previewReady = false;
+        frame.ready = false;
+        frame.opacity = 0;
+        for (const currentLayer of made) currentLayer.setOpacity?.(0);
         refresh();
         errors += 1;
         if (errors >= 3) {

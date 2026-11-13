@@ -51,3 +51,6 @@ Only testers with a privately deployed, authenticated-and-rate-limited HTTPS `/v
 - `myweather.readyTiles.origin = "https://tiles.your-approved-host.example"`
 
 Do **not** use an arbitrary public tile host or an HTTP address. A full app restart/map remount is required after toggling the pilot. This intentionally does not add a user-facing setting or make a network request on normal installs. Public deployment, load testing, tile/temporal parity and physical Android acceptance still block release.
+
+## Visual integrity of the current Android fallback renderer
+The old Android `ModelField` keeps its original source-backed colors and data. A new viewport barrier prevents prematurely releasing held model tiles on `moveend` and hides a partly rendered model when the new viewport/zoom is too far from the completed viewport. Only the same-run, same-hour fully resolved three-layer generation can restore visibility. Short same-zoom gestures retain old buffered raster and publish new tiles together. Model changes, palette alpha and map styling remain unchanged; this avoids inventing precipitation and does not claim 60fps. The ready-tile pilot remains opt-in until an actual production HTTPS host is available.
