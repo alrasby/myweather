@@ -600,17 +600,20 @@ export class ModelField {
       // Every pan/zoom begins a new viewport generation. Old completed
       // cloud/rain/snow events must not authorize a new raster reveal.
       for (const frame of this.frames.values()) {
-        // Do not reveal held tiles on moveend: pending cloud/rain/snow
-        // batches may belong to different viewport generations.
-        // The last complete three-layer 'load' releases them atomically.
-        if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
-        frame.revealTimer = undefined;
-        // A Leaflet layer can remain in flight throughout a pan. Rebase
-        // that layer's eventual 'load' event into the new viewport instead
-        // of invalidating it forever and keeping ECMWF hidden by fallback.
+        // Do not expose held tiles on moveend: each raster queue may finish
+        // at a different moment, even when its siblings appear complete.
         const incomplete = frame.loaded.flatMap((done, index) => done ? [] : [index]);
-        const adopted = frame.renderGeneration.begin(incomplete);
-        for (const index of incomplete) frame.layerGeneration[index] = adopted;
+        if (incomplete.length) {
+          if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
+          frame.revealTimer = undefined;
+          // Adopt unfinished Leaflet queues into the new viewport generation.
+          // A late load for an obsolete viewport is not authorization to paint.
+          const adopted = frame.renderGeneration.begin(incomplete);
+          for (const index of incomplete) frame.layerGeneration[index] = adopted;
+        }
+        // If all queues already finished, KEEP the current 85-ms commit
+        // timer and its epoch. Beginning an empty generation here would
+        // invalidate that timer and leave staged tiles invisible forever.
       }
       if (!this.visible || !this.frames.get(this.base)?.ready) return;
       // GridLayer's 'loading' may be emitted after this moveend callback.
