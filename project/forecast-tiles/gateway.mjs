@@ -20,6 +20,12 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
   if(manifest&&now()<due)return manifest;
   if(!refreshing)refreshing=Promise.resolve().then(fetchMetadata).then(parseModelMetadata).then(m=>{
    manifest=m;due=now()+manifestTtlMs;return m;
+  }).catch(error=>{
+   // No credentials or response bodies are logged. CI can distinguish
+   // transport problems from wrong source schema without masking failures.
+   const code=String(error?.cause?.code??error?.code??'').slice(0,60);
+   console.warn('ECMWF_METADATA_QA_ERROR',String(error?.message??'unknown').slice(0,140),code);
+   throw error;
   }).finally(()=>{refreshing=null;});
   return refreshing;
  }
