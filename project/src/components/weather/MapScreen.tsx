@@ -300,14 +300,16 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           zIndex: 0,
           updateWhenIdle: false,
           updateInterval: 200,
-          keepBuffer: 2,
-        });
+          keepBuffer: 3,
+        }).addTo(map);
+        // A permanent z4 parent keeps decoded satellite coverage ready across
+        // zooms. Removing/re-adding it on every zoom discarded buffered tiles
+        // and exposed black holes during fast global pans.
         let detailedReady = false;
         const syncUnderlay = () => {
           if (!map) return;
           const keep = shouldKeepSatelliteParent(map.getZoom(), detailedReady);
-          if (keep && !map.hasLayer(underlay)) underlay.addTo(map);
-          else if (!keep && map.hasLayer(underlay)) underlay.remove();
+          underlay.setOpacity(keep ? 1 : 0);
         };
         map.on("zoomstart", () => { detailedReady = false; syncUnderlay(); });
         map.on("zoomend", syncUnderlay);
@@ -1227,6 +1229,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             <p>{"ECMWF renderer: "}{weatherDiagnostics?.viewportRenderer.mode ?? "legacy"}
               {" · worker tiles "}{weatherDiagnostics?.viewportRenderer.workerTiles ?? 0}
               {" · dataset copies "}{weatherDiagnostics?.viewportRenderer.datasetCopies ?? 0}
+              {" · reuse "}{weatherDiagnostics?.viewportRenderer.datasetReuses ?? 0}
+              {" · evicted "}{weatherDiagnostics?.viewportRenderer.datasetEvictions ?? 0}
+              {" · recovered "}{weatherDiagnostics?.viewportRenderer.capturedReadRecoveries ?? 0}
               {" · fallback tiles "}{weatherDiagnostics?.viewportRenderer.fallbackTiles ?? 0}
               {" · queued "}{weatherDiagnostics?.viewportRenderer.queued ?? 0}
               {" · peak waiters "}{weatherDiagnostics?.viewportRenderer.peakWaiting ?? 0}

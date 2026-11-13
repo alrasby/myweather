@@ -21,17 +21,32 @@ export const SPATIAL_WORKER_VARIABLES = ["cloud_cover", "precipitation", "snowfa
 type SpatialVariable = typeof SPATIAL_WORKER_VARIABLES[number];
 // Three resident ECMWF fields, but at most two active raster jobs.
 export const MAX_ACTIVE_SPATIAL_WORKERS = 2;
+/** Keep model-hour data hot for up to six intervening tiles / 550ms.
+ * After that the oldest queued raster wins; no hour can be starved. */
 export function nextSpatialWorkerJob(
-  jobs: readonly { variable: SpatialVariable }[],
-  slots: readonly { variable: SpatialVariable; busy: boolean }[],
+  jobs: readonly { variable: SpatialVariable; dataKey?: string; queuedAt?: number }[],
+  slots: readonly { variable: SpatialVariable; busy: boolean; cache?: ReadonlyMap<string, number> }[],
+  nowMs = performance.now(),
 ): { job: number; slot: number } | null {
+  let first: { job: number; slot: number } | null = null;
   for (let i = 0; i < jobs.length; i++) {
     const slot = slots.findIndex(s => !s.busy && s.variable === jobs[i]!.variable);
+    if (slot >= 0) { first = { job: i, slot }; break; }
+  }
+  if (!first) return null;
+  const oldest = jobs[first.job]!;
+  if (oldest.dataKey && slots[first.slot]?.cache?.has(oldest.dataKey)) return first;
+  if (oldest.queuedAt == null || nowMs - oldest.queuedAt >= 550) return first;
+  for (let i = first.job + 1; i < Math.min(jobs.length, first.job + 7); i++) {
+    const job = jobs[i]!;
+    const slot = slots.findIndex(s => !s.busy && s.variable === job.variable &&
+      !!job.dataKey && !!s.cache?.has(job.dataKey));
     if (slot >= 0) return { job: i, slot };
   }
-  return null;
+  return first;
 }
-type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable; palette: Palette;
+type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable;
+  queuedAt: number; palette: Palette;
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
@@ -44,8 +59,8 @@ export type ViewportFallbackReason = "missingData" | "oversizedData" | "admissio
 export type ViewportFallbackReasons = Record<ViewportFallbackReason, number>;
 export type ViewportRendererStats = {
   mode: "worker-cache" | "legacy";
-  workerTiles: number; fallbackTiles: number; datasetCopies: number;
-  datasetEvictions: number; workerSlots: number;
+  workerTiles: number; fallbackTiles: number; datasetCopies: number; datasetReuses: number;
+  datasetEvictions: number; workerSlots: number; capturedReadRecoveries: number;
   queued: number; peakWaiting: number; reasons: ViewportFallbackReasons;
   renderP50Ms: number | null; renderP95Ms: number | null;
 };
@@ -105,6 +120,22 @@ export async function resolveCurrentSpatialState<T>(
   await ensureCurrentBounds();
   return readState();
 }
+/** The exact .om read can complete while Leaflet replaces stateByKey with a
+ * newer viewport. Prefer the state captured for this specific request, not
+ * an unrelated newer state. Reuse upstream's ordinary loaded-state lookup
+ * when a concurrent request already owned the read. */
+export function chooseLoadedSpatialState(
+  captured: OmUrlState | null,
+  states: Iterable<OmUrlState>,
+  file: string,
+  variable: string,
+): OmUrlState | null {
+  const valid = (s: OmUrlState | null) => !!s &&
+    s.omFileUrl === file && s.dataOptions.variable === variable && !!s.data?.values;
+  if (valid(captured)) return captured;
+  for (const state of Array.from(states).reverse()) if (valid(state)) return state;
+  return null;
+}
 function paletteOf(settings: OmProtocolSettings, variable: string): Palette | null {
   const scale = settings.colorScales[variable] as RenderableColorScale | undefined;
   if (!scale || scale.type !== "breakpoint" || !scale.breakpoints.length ||
@@ -119,7 +150,9 @@ export class SpatialViewportRenderer {
   private stateIds = new WeakMap<OmUrlState, string>();
   private samples: number[] = [];
   private copied = 0;
+  private reused = 0;
   private evicted = 0;
+  private recovered = 0;
   private completed = 0;
   private fallbackCount = 0;
   private reasons: ViewportFallbackReasons = {
@@ -154,7 +187,8 @@ export class SpatialViewportRenderer {
   snapshot(): ViewportRendererStats {
     return { mode: this.active ? "worker-cache" : "legacy", workerTiles: this.completed,
       fallbackTiles: this.fallbackCount, datasetCopies: this.copied,
-      datasetEvictions: this.evicted, workerSlots: this.slots.length,
+      datasetReuses: this.reused, datasetEvictions: this.evicted,
+      workerSlots: this.slots.length, capturedReadRecoveries: this.recovered,
       queued: this.jobs.length + this.admission.waiting,
       peakWaiting: this.admission.peakWaiting, reasons: { ...this.reasons },
       renderP50Ms: pctl(this.samples, 0.5), renderP95Ms: pctl(this.samples, 0.95) };
@@ -200,22 +234,30 @@ export class SpatialViewportRenderer {
     // Calling arrayBuffer with no vectors/contours never paints a redundant
     // raster tile, and upstream ensureData() already deduplicates concurrent
     // .om reads by state + AbortSignal. Do NOT re-implement that cache here.
+    let captured: OmUrlState | null = null;
+    const previousCallback = config.postReadCallback;
+    const recordRead: NonNullable<OmProtocolSettings["postReadCallback"]> = (reader, data, state) => {
+      previousCallback?.(reader, data, state);
+      if (state.omFileUrl === parsed.file && state.dataOptions.variable === parsed.variable &&
+          data.values) {
+        // Shallow snapshot only: no additional 25MiB Float32Array copy.
+        // The upstream LRU may null state.data after this precise read.
+        captured = { ...state, data };
+      }
+    };
+    const requestSettings = { ...config, postReadCallback: recordRead };
     return resolveCurrentSpatialState(
       () => omProtocol(
         { url: `${parsed.key}/${parsed.tile.z}/${parsed.tile.x}/${parsed.tile.y}`, type: "arrayBuffer" },
-        controller, config,
+        controller, requestSettings,
       ),
       () => {
         if (controller.signal.aborted) return null;
-        // The upstream request has now validated the current viewport.
-        // Choose the most recent loaded matching state, never a previous
-        // stale entry captured before the new bounds were parsed.
-        const states = getProtocolInstance(config).stateByKey;
-        for (const state of Array.from(states.values()).reverse()) {
-          if (state.omFileUrl === parsed.file && state.dataOptions.variable === parsed.variable &&
-              state.data?.values) return state;
-        }
-        return null;
+        const states = Array.from(getProtocolInstance(config).stateByKey.values());
+        const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable);
+        const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable);
+        if (resolved === captured && !live) this.recovered++;
+        return resolved;
       },
     );
   }
@@ -232,7 +274,8 @@ export class SpatialViewportRenderer {
       let key = this.stateIds.get(state);
       if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
       return await new Promise<ImageBitmap>((resolve, reject) => {
-        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable, tile, palette, signal,
+        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable,
+          queuedAt: performance.now(), tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
           const index = this.jobs.indexOf(job);
@@ -258,7 +301,8 @@ export class SpatialViewportRenderer {
       // Oldest runnable tile wins; no model-variable data is evicted merely
       // because a different layer had a free worker. CPU budget is unchanged.
       const next = nextSpatialWorkerJob(this.jobs,
-        this.slots.map(slot => ({ variable: slot.variable, busy: slot.busy !== null })));
+        this.slots.map(slot => ({ variable: slot.variable, busy: slot.busy !== null,
+          cache: slot.cache })));
       if (!next) break;
       const slot = this.slots[next.slot]!;
       const job = this.jobs.splice(next.job, 1)[0]!;
@@ -284,6 +328,7 @@ export class SpatialViewportRenderer {
           const bytes = slot.cache.get(job.dataKey)!;
           slot.cache.delete(job.dataKey);
           slot.cache.set(job.dataKey, bytes);
+          this.reused++;
         }
         slot.busy = job;
         activeCount++;

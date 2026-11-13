@@ -388,6 +388,8 @@ test("one viewport generation publishes consistent model layers and retains sate
   assert.ok(generation.includes("for (const index of inFlight) this.started.add(index)"));
   assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
   assert.ok(map.includes("shouldKeepSatelliteParent(map.getZoom(), detailedReady)"));
+  assert.ok(map.includes("underlay.setOpacity(keep ? 1 : 0)"));
+  assert.ok(!map.includes("underlay.remove()"), "retain satellite parent tiles across zooms");
   assert.ok(map.includes('imagery.on("load", () => { detailedReady = true; syncUnderlay(); })'));
 });
 

@@ -738,7 +738,7 @@ export class ModelField {
       cacheRejected: spatialCacheRejected,
       viewportRenderer: this.viewportRenderer?.snapshot() ?? {
         mode: "legacy", workerTiles: 0, fallbackTiles: 0, datasetCopies: 0,
-        datasetEvictions: 0, workerSlots: 0,
+        datasetReuses: 0, datasetEvictions: 0, workerSlots: 0, capturedReadRecoveries: 0,
         queued: 0, peakWaiting: 0, reasons: {
           missingData: 0, oversizedData: 0, admissionSaturated: 0,
           admissionDeadline: 0, workerFailure: 0, other: 0,

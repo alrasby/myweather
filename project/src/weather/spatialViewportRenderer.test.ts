@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -91,4 +91,30 @@ test("three resident variables are scheduled fairly with two active render jobs"
   assert.deepEqual(nextSpatialWorkerJob(jobs, slots), { job: 2, slot: 1 });
   slots[1]!.busy = true;
   assert.equal(nextSpatialWorkerJob(jobs, slots), null);
+});
+
+test("request-scoped ECMWF data survives a concurrent state-map replacement", () => {
+  const filename = base.slice(5);
+  const read = { omFileUrl: filename, dataOptions: { variable: "cloud_cover" },
+    data: { values: new Float32Array([8, 9]) } };
+  const pending = { omFileUrl: filename, dataOptions: { variable: "cloud_cover" }, data: null };
+  assert.equal(chooseLoadedSpatialState(read as never, [pending as never], filename, "cloud_cover"), read);
+  assert.equal(chooseLoadedSpatialState(null, [pending as never], filename, "cloud_cover"), null);
+  assert.equal(chooseLoadedSpatialState(read as never, [], filename, "precipitation"), null);
+  assert.equal(chooseLoadedSpatialState(null, [read as never], filename, "cloud_cover"), read);
+});
+
+test("raster queue preserves hot forecast data without starving earlier hours", () => {
+  const slots = [
+    { variable: "cloud_cover" as const, busy: false, cache: new Map([["hour-17", 100]]) },
+    { variable: "precipitation" as const, busy: true },
+    { variable: "snowfall_water_equivalent" as const, busy: true },
+  ];
+  const jobs = [
+    { variable: "cloud_cover" as const, dataKey: "hour-18", queuedAt: 100 },
+    { variable: "cloud_cover" as const, dataKey: "hour-17", queuedAt: 140 },
+  ];
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 300), { job: 1, slot: 0 });
+  assert.deepEqual(nextSpatialWorkerJob(jobs, slots, 650), { job: 0, slot: 0 });
+  assert.deepEqual(nextSpatialWorkerJob(jobs.slice(0, 1), slots, 200), { job: 0, slot: 0 });
 });
