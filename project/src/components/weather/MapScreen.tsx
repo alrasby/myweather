@@ -1229,6 +1229,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {" · dataset copies "}{weatherDiagnostics?.viewportRenderer.datasetCopies ?? 0}
               {" · fallback tiles "}{weatherDiagnostics?.viewportRenderer.fallbackTiles ?? 0}
               {" · queued "}{weatherDiagnostics?.viewportRenderer.queued ?? 0}
+              {" · peak waiters "}{weatherDiagnostics?.viewportRenderer.peakWaiting ?? 0}
+            </p>
+            <p>{"Raster fallback reasons: "}
+              {weatherDiagnostics?.viewportRenderer.reasons ?
+                Object.entries(weatherDiagnostics.viewportRenderer.reasons)
+                  .filter(([, count]) => count > 0)
+                  .map(([reason, count]) => `${reason}:${count}`).join(" · ") || "none" : "—"}
             </p>
             <p>{"Raster worker p50/p95: "}
               {weatherDiagnostics?.viewportRenderer.renderP50Ms ?? "—"}{" / "}

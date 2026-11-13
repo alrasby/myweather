@@ -9,6 +9,7 @@
  * No dependency patches, alternative weather providers or fabricated pixels.
  */
 import { getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
+import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
 
 type ReadKey = string;
@@ -17,14 +18,27 @@ type TileJob = { id: number; state: OmUrlState; dataKey: string; palette: Palett
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
-type Slot = { worker: Worker; cache: Map<string, number>; busy: TileJob | null; bytes: number };
+type Slot = { worker: Worker; cache: Map<string, number>; busy: TileJob | null;
+  bytes: number; watchdog?: ReturnType<typeof setTimeout> };
 type Reply = { type: "rendered"; id: number; bitmap: ImageBitmap; durationMs: number } |
   { type: "error"; id: number; error: string };
+export type ViewportFallbackReason = "missingData" | "oversizedData" | "admissionSaturated" |
+  "admissionDeadline" | "workerFailure" | "other";
+export type ViewportFallbackReasons = Record<ViewportFallbackReason, number>;
 export type ViewportRendererStats = {
   mode: "worker-cache" | "legacy";
   workerTiles: number; fallbackTiles: number; datasetCopies: number;
-  queued: number; renderP50Ms: number | null; renderP95Ms: number | null;
+  queued: number; peakWaiting: number; reasons: ViewportFallbackReasons;
+  renderP50Ms: number | null; renderP95Ms: number | null;
 };
+export function classifyViewportFailure(error: unknown): ViewportFallbackReason {
+  if (error instanceof SpatialAdmissionError)
+    return error.reason === "saturated" ? "admissionSaturated" :
+      error.reason === "deadline" ? "admissionDeadline" : "workerFailure";
+  if (error instanceof Error && (/worker|viewport-data|model-data-evicted/i).test(error.message))
+    return "workerFailure";
+  return "other";
+}
 const MAX_WORKER_DATA = 24 * 1024 * 1024;
 const MAX_PENDING_TILES = 40;
 const RENDER_DEADLINE_MS = 20000;
@@ -74,6 +88,13 @@ export class SpatialViewportRenderer {
   private copied = 0;
   private completed = 0;
   private fallbackCount = 0;
+  private reasons: ViewportFallbackReasons = {
+    missingData: 0, oversizedData: 0, admissionSaturated: 0,
+    admissionDeadline: 0, workerFailure: 0, other: 0,
+  };
+  // Two busy workers plus a bounded queue; overflow waits briefly instead
+  // of immediately firing a second, legacy raster engine alongside ours.
+  private admission = new SpatialRenderAdmission(MAX_PENDING_TILES + 2, 64, 15_000);
   private disabled = false;
 
   constructor(enable: boolean) {
@@ -95,7 +116,9 @@ export class SpatialViewportRenderer {
   get active(): boolean { return !this.disabled && this.slots.length > 0; }
   snapshot(): ViewportRendererStats {
     return { mode: this.active ? "worker-cache" : "legacy", workerTiles: this.completed,
-      fallbackTiles: this.fallbackCount, datasetCopies: this.copied, queued: this.jobs.length,
+      fallbackTiles: this.fallbackCount, datasetCopies: this.copied,
+      queued: this.jobs.length + this.admission.waiting,
+      peakWaiting: this.admission.peakWaiting, reasons: { ...this.reasons },
       renderP50Ms: pctl(this.samples, 0.5), renderP95Ms: pctl(this.samples, 0.95) };
   }
   readonly handler: typeof omProtocol = async (params, abort, settings) => {
@@ -107,19 +130,28 @@ export class SpatialViewportRenderer {
     try {
       const state = await this.ensureDataset(parsed, abort.signal, config);
       if (abort.signal.aborted) return { data: new ArrayBuffer(0) };
-      if (!state?.data?.values || state.data.values.byteLength > MAX_WORKER_DATA) {
-        this.fallbackCount++;
+      if (!state?.data?.values) {
+        this.fallback("missingData");
+        return omProtocol(params, abort, config);
+      }
+      if (state.data.values.byteLength > MAX_WORKER_DATA) {
+        this.fallback("oversizedData");
         return omProtocol(params, abort, config);
       }
       const bitmap = await this.render(state, palette, parsed.tile, abort.signal);
       if (abort.signal.aborted) { bitmap.close(); return { data: new ArrayBuffer(0) }; }
       return { data: bitmap };
-    } catch {
+    } catch (error) {
       if (abort.signal.aborted) return { data: new ArrayBuffer(0) };
-      this.fallbackCount++;
+      this.fallback(classifyViewportFailure(error));
       return omProtocol(params, abort, config);
     }
   };
+
+  private fallback(reason: ViewportFallbackReason): void {
+    this.fallbackCount++;
+    this.reasons[reason]++;
+  }
 
   private async ensureDataset(parsed: NonNullable<ReturnType<typeof parseSpatialRasterTile>>,
     signal: AbortSignal, config: OmProtocolSettings): Promise<OmUrlState | null> {
@@ -165,26 +197,35 @@ export class SpatialViewportRenderer {
     }
   }
 
-  private render(state: OmUrlState, palette: Palette, tile: RasterTask, signal: AbortSignal): Promise<ImageBitmap> {
-    if (!this.active || !state.data?.values) return Promise.reject(new Error("worker-disabled"));
-    if (this.jobs.length >= MAX_PENDING_TILES) return Promise.reject(new Error("worker-queue-full"));
-    let key = this.stateIds.get(state);
-    if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
-    return new Promise((resolve, reject) => {
-      const job: TileJob = { id: ++this.serial, state, dataKey: key!, tile, palette, signal,
-        resolve, reject, started: false, onAbort: () => {} };
-      job.onAbort = () => {
-        const index = this.jobs.indexOf(job);
-        if (index >= 0) this.jobs.splice(index, 1);
-        // An in-flight worker may still finish its draw. Ignore/close that
-        // bitmap when it returns; do not deliver obsolete viewport pixels.
-        reject(new DOMException("Aborted", "AbortError"));
-      };
-      if (signal.aborted) { job.onAbort(); return; }
-      signal.addEventListener("abort", job.onAbort, { once: true });
-      this.jobs.push(job);
-      this.pump();
-    });
+  private async render(state: OmUrlState, palette: Palette, tile: RasterTask, signal: AbortSignal): Promise<ImageBitmap> {
+    if (!this.active || !state.data?.values) throw new Error("worker-disabled");
+    // A finite admission wait prevents congestion from silently switching
+    // 40+ tiles to a different renderer during the same visible viewport.
+    // Leaflet's AbortSignal drops obsolete pans while they are waiting.
+    const release = await this.admission.acquire(signal);
+    try {
+      if (!this.active || signal.aborted) throw new DOMException("Aborted", "AbortError");
+      let key = this.stateIds.get(state);
+      if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
+      return await new Promise<ImageBitmap>((resolve, reject) => {
+        const job: TileJob = { id: ++this.serial, state, dataKey: key!, tile, palette, signal,
+          resolve, reject, started: false, onAbort: () => {} };
+        job.onAbort = () => {
+          const index = this.jobs.indexOf(job);
+          if (index >= 0) this.jobs.splice(index, 1);
+          // Ignore (and close) a bitmap completed after Leaflet has cancelled
+          // this tile; never paint stale viewport pixels.
+          reject(new DOMException("Aborted", "AbortError"));
+          this.pump();
+        };
+        if (signal.aborted) { job.onAbort(); return; }
+        signal.addEventListener("abort", job.onAbort, { once: true });
+        this.jobs.push(job);
+        this.pump();
+      });
+    } finally {
+      release();
+    }
   }
   private pump() {
     if (!this.active) return;
@@ -194,7 +235,7 @@ export class SpatialViewportRenderer {
       let index = this.jobs.findIndex(job => slot.cache.has(job.dataKey));
       if (index < 0) index = 0;
       const job = this.jobs.splice(index, 1)[0]!;
-      if (job.signal.aborted) continue;
+      if (job.signal.aborted) { job.onAbort(); continue; }
       const values = job.state.data?.values;
       if (!values) { job.reject(new Error("model-data-evicted")); continue; }
       try {
@@ -218,6 +259,9 @@ export class SpatialViewportRenderer {
         }
         slot.busy = job;
         job.started = true;
+        // A broken worker must never leave an active tile pending forever.
+        slot.watchdog = setTimeout(() => this.disable(new Error("viewport-worker-timeout")),
+          RENDER_DEADLINE_MS);
         slot.worker.postMessage({ type: "render", id: job.id, key: job.dataKey, ...job.tile });
       } catch {
         job.signal.removeEventListener("abort", job.onAbort);
@@ -234,6 +278,8 @@ export class SpatialViewportRenderer {
       return;
     }
     slot.busy = null;
+    if (slot.watchdog !== undefined) clearTimeout(slot.watchdog);
+    slot.watchdog = undefined;
     job.signal.removeEventListener("abort", job.onAbort);
     if (data.type === "error") job.reject(new Error(data.error));
     else if (job.signal.aborted) data.bitmap.close();
@@ -248,7 +294,10 @@ export class SpatialViewportRenderer {
   private disable(reason: Error) {
     if (this.disabled) return;
     this.disabled = true;
+    this.admission.close();
     for (const slot of this.slots) {
+      if (slot.watchdog !== undefined) clearTimeout(slot.watchdog);
+      slot.watchdog = undefined;
       if (slot.busy) { slot.busy.signal.removeEventListener("abort", slot.busy.onAbort);
         slot.busy.reject(reason); }
       slot.worker.terminate();

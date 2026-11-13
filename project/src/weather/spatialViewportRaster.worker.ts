@@ -4,6 +4,7 @@
  * upstream raster worker; model values, units and colour breakpoints are not
  * modified. This worker never fetches network data. */
 import { GridFactory } from "@openmeteo/weather-map-layer";
+import { spatialRasterColor, spatialTileLatitude, spatialTileLongitude } from "./spatialRasterColor";
 import type { Domain } from "@openmeteo/weather-map-layer";
 
 type Range = { start: number; end: number };
@@ -19,42 +20,24 @@ const entries = new Map<string, Entry>();
 const port = self as unknown as { postMessage: (message: unknown, transfer?: Transferable[]) => void;
   onmessage: ((event: MessageEvent<Command>) => void) | null };
 
-function lonAt(x: number, z: number): number {
-  return (((x / 2 ** z) * 360 + 360) % 360) - 180;
-}
-function latAt(y: number, z: number): number {
-  const n = Math.PI - 2 * Math.PI * y / 2 ** z;
-  return Math.atan(Math.sinh(n)) * (180 / Math.PI);
-}
 function paint(task: Render, entry: Entry): ImageBitmap {
   const { size, z, x, y } = task;
   const rgba = new Uint8ClampedArray(size * size * 4);
   const lons = new Float64Array(size);
-  for (let col = 0; col < size; col++) lons[col] = lonAt(x + (col + 0.5) / size, z);
-  const { breakpoints, colors } = entry.palette;
+  for (let col = 0; col < size; col++) lons[col] = spatialTileLongitude(x + (col + 0.5) / size, z);
+  // No allocation per pixel: reuse one four-channel colour vector.
+  const colorOut = [0, 0, 0, 0];
   for (let row = 0; row < size; row++) {
-    const lat = latAt(y + (row + 0.5) / size, z);
+    const lat = spatialTileLatitude(y + (row + 0.5) / size, z);
     for (let col = 0; col < size; col++) {
       const value = entry.grid.getInterpolatedValue(entry.values, lat, lons[col]!, "linear") + entry.quantum;
       if (!Number.isFinite(value)) continue;
-      // Same breakpoint-index and linear RGBA blending as Open-Meteo's
-      // getColor(..., colorBlend=true), but without allocations per pixel.
-      let lo = 0, hi = breakpoints.length - 1, found = -1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >>> 1;
-        if (value >= breakpoints[mid]!) { found = mid; lo = mid + 1; }
-        else hi = mid - 1;
-      }
-      const i = Math.max(0, found);
-      const next = Math.min(colors.length - 1, i + 1);
-      const a = colors[i]!, b = colors[next]!;
-      const denominator = breakpoints[next]! - breakpoints[i]!;
-      const blend = denominator > 0 ? Math.max(0, Math.min(1, (value - breakpoints[i]!) / denominator)) : 0;
+      const color = spatialRasterColor(entry.palette, value, colorOut);
       const dest = (row * size + col) * 4;
-      rgba[dest] = a[0]! + (b[0]! - a[0]!) * blend;
-      rgba[dest + 1] = a[1]! + (b[1]! - a[1]!) * blend;
-      rgba[dest + 2] = a[2]! + (b[2]! - a[2]!) * blend;
-      rgba[dest + 3] = 255 * (a[3]! + (b[3]! - a[3]!) * blend);
+      rgba[dest] = color[0]!;
+      rgba[dest + 1] = color[1]!;
+      rgba[dest + 2] = color[2]!;
+      rgba[dest + 3] = 255 * color[3]!;
     }
   }
   const canvas = new OffscreenCanvas(size, size);

@@ -738,7 +738,10 @@ export class ModelField {
       cacheRejected: spatialCacheRejected,
       viewportRenderer: this.viewportRenderer?.snapshot() ?? {
         mode: "legacy", workerTiles: 0, fallbackTiles: 0, datasetCopies: 0,
-        queued: 0, renderP50Ms: null, renderP95Ms: null,
+        queued: 0, peakWaiting: 0, reasons: {
+          missingData: 0, oversizedData: 0, admissionSaturated: 0,
+          admissionDeadline: 0, workerFailure: 0, other: 0,
+        }, renderP50Ms: null, renderP95Ms: null,
       },
       performance: spatialPerformance.snapshot(
         globalThis.crossOriginIsolated === true,

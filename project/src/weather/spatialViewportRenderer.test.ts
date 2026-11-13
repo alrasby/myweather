@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer } from "./spatialViewportRenderer.ts";
+import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
 
@@ -29,5 +30,16 @@ test("worker renderer in unsupported runtimes reports legacy without starting jo
   const renderer = new SpatialViewportRenderer(false);
   assert.equal(renderer.snapshot().mode, "legacy");
   assert.equal(renderer.snapshot().workerTiles, 0);
+  assert.equal(renderer.snapshot().fallbackTiles, 0);
+  assert.equal(renderer.snapshot().peakWaiting, 0);
+  assert.ok(Object.values(renderer.snapshot().reasons).every(v => v === 0));
   renderer.dispose();
+});
+
+test("worker backpressure and data/memory failure categories are independently observable", () => {
+  assert.equal(classifyViewportFailure(new SpatialAdmissionError("saturated")), "admissionSaturated");
+  assert.equal(classifyViewportFailure(new SpatialAdmissionError("deadline")), "admissionDeadline");
+  assert.equal(classifyViewportFailure(new SpatialAdmissionError("closed")), "workerFailure");
+  assert.equal(classifyViewportFailure(new Error("viewport-worker-timeout")), "workerFailure");
+  assert.equal(classifyViewportFailure(new Error("unclassified-protocol-error")), "other");
 });

@@ -402,6 +402,12 @@ test("ECMWF viewport renderer reuses decoded data, limits retained states and su
   assert.ok(model.includes('this.viewportRenderer?.dispose()'));
   assert.ok(engine.includes('type: "arrayBuffer"'), "decode OM through official protocol without duplicate first-tile paint");
   assert.ok(engine.includes("MAX_WORKER_DATA = 24 * 1024 * 1024"), "bounded worker memory");
+  assert.ok(engine.includes("this.admission.acquire(signal)"),
+    "worker congestion must wait instead of immediately switching to legacy raster");
+  assert.ok(engine.includes("peakWaiting: this.admission.peakWaiting"),
+    "track queue pressure for real-device diagnosis");
+  assert.ok(screen.includes("viewportRenderer.reasons"),
+    "explain every legacy raster fallback instead of hiding its cause");
   assert.ok(engine.includes('slot.cache.has(job.dataKey)'), "reuse decoded raster data across tiles");
   assert.ok(worker.includes("GridFactory.create"), "preserve official ECMWF grid interpolation");
   assert.ok(screen.includes("viewportRenderer.renderP95Ms"), "render timing must be visible to QA");
