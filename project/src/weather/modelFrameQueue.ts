@@ -98,7 +98,11 @@ export function canAdvanceSpatialTime(
   // over. ECMWF then NEVER reached a ready frame during world playback even
   // after removing the old zoom gate. Wait for active source work to settle,
   // but continue through an actual provider cooldown (checked above).
-  if (sourceBackedFallback && !loading.has(requested)) return true;
+  // A different model hour is still in flight: even if the prospective
+  // requested hour has not been mounted yet, advancing the clock would
+  // cancel that work in planSpatialRequests on the next sync tick. Do not
+  // conflate "this hour not loading" with "no model decoding underway".
+  if (sourceBackedFallback && loading.size === 0) return true;
   // No spatial frame exists: allow global fallback only when no model request
   // is in progress, so playback never silently outruns an active decode.
   return ready.size === 0 && loading.size === 0;
