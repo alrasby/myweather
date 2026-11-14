@@ -32,7 +32,8 @@ def records(days=35, pressure_effect=True):
             residual += (1013.25-pressure)/30*0.12+east/15*0.14-north/15*0.1
         rows.append(GaugeRecord(
             t, astro+residual+0.002*math.cos(i/5),astro,
-            pressure,east,north,True,True))
+            pressure,east,north,True,True,
+            t-timedelta(hours=6),"offline-synthetic-forecast-test"))
     return rows
 
 

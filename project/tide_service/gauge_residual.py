@@ -9,7 +9,7 @@ on a chronologically unseen validation window. Does not alter astronomy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from math import isfinite
 from statistics import median
 
@@ -24,6 +24,9 @@ class GaugeRecord:
     wind_north_ms: float
     datum_aligned: bool
     quality_verified: bool
+    # Genuine meteorological forecasts issued BEFORE the predicted tide time.
+    meteo_issued_at_utc: datetime | None = None
+    meteo_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,17 @@ def fit_station(station_id: str, rows: list[GaugeRecord]) -> ResidualModel:
         raise CalibrationRejected("timestamps-not-UTC")
     if any(rows[i].time_utc <= rows[i-1].time_utc for i in range(1, len(rows))):
         raise CalibrationRejected("unordered-or-duplicate-UTC")
+    # Future pressure or wind observations cannot be used to backtest a
+    # predictor that would not have known them at forecast issuance.
+    for r in rows:
+        issued = r.meteo_issued_at_utc
+        if (issued is None or issued.tzinfo is None or
+            issued.utcoffset() != timedelta(0) or
+            issued > r.time_utc - timedelta(hours=1) or
+            issued < r.time_utc - timedelta(days=10) or
+            not isinstance(r.meteo_source, str) or
+            len(r.meteo_source.strip()) < 3):
+            raise CalibrationRejected("forecast-issue-time-or-feature-provenance-missing")
     if (rows[-1].time_utc - rows[0].time_utc).total_seconds() < 30*86400:
         raise CalibrationRejected("history-covers-less-than-30-days")
     for r in rows:

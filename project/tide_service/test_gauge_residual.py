@@ -21,7 +21,8 @@ def history(days=33, with_real_relation=True):
         true_residual = (0.08+(1013.25-p)/30*0.16+u/15*0.11-v/15*0.12
                          if with_real_relation else 0.08)
         observed = astro+true_residual+0.004*math.sin(i/3)
-        rows.append(GaugeRecord(t,observed,astro,p,u,v,True,True))
+        rows.append(GaugeRecord(t,observed,astro,p,u,v,True,True,
+                                t-timedelta(hours=6),"offline-synthetic-forecast-test"))
     return rows
 
 
@@ -63,6 +64,21 @@ class GaugeMLSafety(unittest.TestCase):
         rows[0]=replace(rows[0],observed_m=float("nan"))
         with self.assertRaisesRegex(CalibrationRejected,"invalid"):
             fit_station("invalid",rows)
+
+    def test_reject_future_observation_leakage_and_missing_forecast_issue(self):
+        from dataclasses import replace
+        rows=history()
+        rows[0]=replace(rows[0],meteo_issued_at_utc=None)
+        with self.assertRaisesRegex(CalibrationRejected,"forecast-issue-time"):
+            fit_station("missing-issued-forecast",rows)
+        rows=history()
+        rows[7]=replace(rows[7],meteo_issued_at_utc=rows[7].time_utc)
+        with self.assertRaisesRegex(CalibrationRejected,"forecast-issue-time"):
+            fit_station("uses-weather-measured-after-target",rows)
+        rows=history()
+        rows[3]=replace(rows[3],meteo_source=None)
+        with self.assertRaisesRegex(CalibrationRejected,"feature-provenance"):
+            fit_station("missing-meteo-source",rows)
 
     def test_uncertain_forecast_features_cannot_generate_ai_prediction(self):
         model=fit_station("validated-test",history())

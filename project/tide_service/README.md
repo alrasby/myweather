@@ -151,3 +151,7 @@ Run local offline checks (synthetic fixtures ONLY):
 
 No official FES2022b atlas or validated Omani station gauges have been
 provided or activated; no marine accuracy or navigation claim is implied.
+
+### Leakage prevention enforced by code
+
+GaugeRecord now includes meteo_issued_at_utc and meteo_source. The residual learner rejects every pressure/wind training record unless it identifies a source forecast issued **at least one hour before** the predicted tide target and no more than ten days earlier. Historic observed pressure or wind recorded at/after the event cannot prove future prediction skill. FES-only and station-bias evaluation is still possible without archived meteorological forecasts. The unit fixtures merely exercise this contract, and cannot prove observations were genuinely obtained before issuance.
