@@ -613,11 +613,20 @@ export class ModelField {
         const adopted = frame.renderGeneration.begin(incomplete);
         for (const index of incomplete) frame.layerGeneration[index] = adopted;
       }
-      // The previous zoom's completed tiles are no longer a complete
-      // forecast at the NEW Leaflet zoom. Invalidating them before the
-      // GridLayer moveend load prevents the hard rectangular cloud cuts
-      // visible during world zoom-out. Same-zoom pans keep buffered tiles.
-      for (const frame of this.frames.values()) frame.invalidateZoom?.(map.getZoom());
+      // A new zoom invalidates the raster of ALL old forecast hours. Do
+      // not trigger 3 expensive variable reads for each hidden lookahead
+      // hour: keep the requested hour, retire unrelated forecast layers,
+      // and let the normal bounded scheduler prefetch once the view settles.
+      // Same-zoom drags retain their buffered tiles unchanged.
+      const zoom = map.getZoom();
+      const zoomChanged = [...this.frames.values()].some(frame =>
+        spatialZoomNeedsNewCoverage(frame.coverageZoom, zoom));
+      if (zoomChanged) {
+        for (const step of [...this.frames.keys()]) {
+          if (step !== this.base) this.discardFrame(step);
+        }
+        this.frames.get(this.base)?.invalidateZoom?.(zoom);
+      }
       if (!this.visible || !this.frames.get(this.base)?.ready) {
         if (this.visible) this.pump();
         return;
