@@ -361,9 +361,18 @@ function TideCard({
       <div className="text-end">
         <h2 className="text-sm font-semibold text-fg">{t(lang, "tide")}</h2>
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
-        <p className="mt-1 text-[0.66rem] text-muted">{lang === "ar"
-          ? "توقع ارتفاع سطح البحر من Open-Meteo Marine (مرجع متوسط سطح البحر)؛ دقته الساحلية محدودة، ولا يُستخدم للملاحة."
-          : "Modelled sea level from Open-Meteo Marine (global mean sea level); limited coastal accuracy, not for navigation."}</p>
+        {/* Source/limits stay accessible, but the long recurring warning
+            does not occupy the weather card on every city selection.
+            Until FES is licensed, validated and deployed, never imply this
+            is a calibrated astronomical tide or hide its real provider. */}
+        <details className="mt-1 text-[0.66rem] text-muted">
+          <summary className="cursor-pointer select-none">
+            {lang === "ar" ? "بيانات بحرية تقديرية · Open-Meteo Marine" : "Modelled sea level · Open-Meteo Marine"}
+          </summary>
+          <p className="mt-1">{lang === "ar"
+            ? "ارتفاع سطح البحر بالنسبة لمتوسط سطح البحر من نموذج عالمي؛ دقته الساحلية محدودة، وليست مواعيد مد ملاحي معتمدة. لا يُستخدم للملاحة."
+            : "Global modelled sea level relative to mean sea level. Coastal accuracy is limited; these are not locally certified harbour tide predictions. Not for navigation."}</p>
+        </details>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
