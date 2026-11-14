@@ -137,7 +137,8 @@ test("saved city paging works on clickable daily rows, including Android touchca
 });
 test("rain spatial failures reduce fallback delay without extra grid budgets", () => {
   const map = read("project/src/components/weather/MapScreen.tsx");
-  assert.ok(map.includes('}, 4500);'));
+  assert.ok(map.includes('map.getZoom() <= 5 ? 1600 : 4500'),
+    "broad views must use real global fallback promptly while regional ECMWF retains a bounded grace");
   assert.ok(map.includes('modelRef.current?.isSpatialVisible()'));
   assert.ok(map.includes('const budget = 4200;'));
 });
