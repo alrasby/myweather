@@ -20,6 +20,7 @@ import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLa
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
 import { SpatialViewportRenderer, type ViewportRendererStats } from "@/weather/spatialViewportRenderer";
 import { SpatialRenderGeneration } from "@/weather/spatialRenderGeneration";
+import { certifiedCurrentLeafletTiles, type CachedRasterLayer } from "@/weather/spatialLeafletCoverage";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -87,7 +88,7 @@ type AnyLayer = {
   isLoading?: () => boolean;
   setOpacity?: (opacity: number) => void;
   bringToFront?: () => void;
-};
+} & CachedRasterLayer;
 
 type Adapter = {
   addProtocol: (name: string, handler: typeof omProtocol, settings?: ReturnType<typeof modelSettings>) => void;
@@ -474,7 +475,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; revalidateCurrentTiles?: () => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -498,6 +499,8 @@ export class ModelField {
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
   private viewportHoldUntil = 0;
+  private viewportSettleUntil = 0;
+  private viewportSettleTimer: number | null = null;
   private spatialBudget: SpatialViewportDecision = { allow: true, reason: "regional", rasterSize: 1024 };
   private protocolSettings: ReturnType<typeof modelSettings> | null = null;
   // Android WebView lacks SharedArrayBuffer: avoid showing cloud/rain/snow
@@ -576,6 +579,11 @@ export class ModelField {
     let lastSampleAt = 0;
     const onMoveStart = () => {
       if (!this.visible || this.viewportMoving) return;
+      if (this.viewportSettleTimer !== null) {
+        window.clearTimeout(this.viewportSettleTimer);
+        this.viewportSettleTimer = null;
+      }
+      this.viewportSettleUntil = 0;
       const b = map.getBounds();
       const center = map.getCenter();
       origin = { lat: center.lat, lng: center.lng, zoom: map.getZoom() };
@@ -623,6 +631,18 @@ export class ModelField {
       const wasAllowed = this.spatialBudget.allow;
       this.refreshSpatialBudget();
       if (!this.spatialBudget.allow) return;
+      // The next settled viewport is a single decoding generation. Repeated
+      // moveend events during a continental fling must not immediately
+      // restart and abort a new expensive current-hour .om read.
+      this.viewportSettleUntil = Date.now() + 260;
+      if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
+      this.viewportSettleTimer = window.setTimeout(() => {
+        this.viewportSettleTimer = null;
+        if (!this.visible || this.viewportMoving) return;
+        this.viewportSettleUntil = 0;
+        this.frames.get(this.base)?.revalidateCurrentTiles?.();
+        this.pump();
+      }, 275);
       if (!wasAllowed) {
         this.pump();
         return;
@@ -777,6 +797,9 @@ export class ModelField {
    * Never freeze playback permanently when the upstream request is in cooldown. */
   canAdvanceTo(ms: number): boolean {
     if (!this.visible || !this.times.length || !this.spatialBudget.allow) return true;
+    // Keep the forecast clock steady during panning; a successful forecast
+    // from the PREVIOUS viewport cannot authorize advancing the timeline.
+    if (this.viewportMoving || Date.now() < this.viewportSettleUntil) return false;
     const { i } = this.bracket(ms);
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
@@ -951,7 +974,8 @@ export class ModelField {
   }
 
   private pump() {
-    if (!this.visible || !this.spatialBudget.allow || !this.adapter || !this.map) return;
+    if (!this.visible || !this.spatialBudget.allow || !this.adapter || !this.map ||
+        this.viewportMoving || Date.now() < this.viewportSettleUntil) return;
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
@@ -1054,7 +1078,8 @@ export class ModelField {
     ] as AnyLayer[];
     const frame = {
       layers: made, token, opacity: -1, ready: false, coverageZoom: null as number | null, requestedZoom: map.getZoom(),
-      invalidateZoom: undefined as ((zoom: number) => void) | undefined,
+      invalidateZoom: undefined as ((zoom: number, force?: boolean) => void) | undefined,
+      revalidateCurrentTiles: undefined as (() => void) | undefined,
       previewReady: false, previewMask: 0, previewOpacityKey: "",
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
