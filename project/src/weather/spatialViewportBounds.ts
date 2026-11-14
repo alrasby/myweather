@@ -31,9 +31,14 @@ export function worldLongitudeLatitudeBand(south: number, north: number): Spatia
 
 export function spatialViewportBounds(view: SpatialView): SpatialBounds {
   const { west, east, south, north } = view;
-  if (![west, east, south, north].every(Number.isFinite) ||
-      north <= south || east <= west) return [...GLOBAL];
-  const width = east - west;
+  if (![west, east, south, north].every(Number.isFinite) || north <= south)
+    return [...GLOBAL];
+  // Some map adapters report a dateline-crossing box as west > east
+  // instead of Leaflet's unwrapped longitude. Unwrap once, preserving the
+  // actual latitude band instead of reading the entire global OM dataset.
+  const unwrappedEast = east < west && east + 360 > west ? east + 360 : east;
+  if (unwrappedEast <= west) return [...GLOBAL];
+  const width = unwrappedEast - west;
   const height = north - south;
   if (width >= 300) return worldLongitudeLatitudeBand(south, north);
 
