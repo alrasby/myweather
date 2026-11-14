@@ -7,7 +7,7 @@ test("soften only visible real ECMWF tiles with bounded compositor opacity",()=>
  const tile={style:{visibility:"visible"},animate:(frames:unknown,opts:unknown)=>{
    calls++;
    duration=(opts as {duration:number}).duration;
-   assert.deepEqual(frames,[{opacity:0.2},{opacity:1}]);
+   assert.deepEqual(frames,[{opacity:0.68},{opacity:1}]);
    return {} as Animation;
  }} as SpatialTileNode;
  assert.equal(softenSpatialTileArrival(tile,true),true);
