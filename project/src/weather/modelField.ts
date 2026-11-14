@@ -717,7 +717,7 @@ export class ModelField {
   }
 
   private currentSpatialBudget(): SpatialViewportDecision {
-    if (!this.map) return { allow: false, reason: "invalid" };
+    if (!this.map) return { allow: false, reason: "invalid", rasterSize: 256 };
     const b = this.map.getBounds();
     return decideSpatialViewport({
       zoom: this.map.getZoom(), west: b.getWest(), east: b.getEast(),
