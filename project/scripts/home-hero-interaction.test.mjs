@@ -402,7 +402,8 @@ test("ECMWF viewport renderer reuses decoded data, limits retained states and su
   const engine = read("project/src/weather/spatialViewportRenderer.ts");
   const worker = read("project/src/weather/spatialViewportRaster.worker.ts");
   const screen = read("project/src/components/weather/MapScreen.tsx");
-  assert.ok(model.includes("maxStatesWithData: 6"), "three current + three playback states must stay cached");
+  assert.ok(model.includes("maxStatesWithData: 6") && model.includes("rasterSize <= 512 ? 4 : 6"),
+    "protect the three current ECMWF sources with bounded model cache on global mobile maps");
   assert.ok(model.includes('new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,'),
     "custom ECMWF raster stays conditional on Android non-isolated WebView and rollback");
   assert.ok(model.includes('() => this.base'), "renderer must receive the live requested forecast hour");
@@ -432,7 +433,8 @@ test("mobile weather displays complete same-run ECMWF layers without per-variabl
   const planner = read("project/src/weather/modelFrameQueue.ts");
   assert.ok(policy.includes("COMPACT_SPATIAL_TILE_SIZE = 1024"));
   assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
-  assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
+  assert.ok(src.includes("tile_size=${this.spatialBudget.rasterSize}"),
+    "global cloud/rain/snow sampling reduces GPU/worker cost without removing ECMWF");
   assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
     "small viewport reveals must be synchronized across all 3 layers");
