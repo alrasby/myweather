@@ -497,7 +497,9 @@ test("estimated coastal tide readings are visible and clearly distinguished from
   assert.ok(ui.includes('formatSignedMeters(tide.nextHigh.level, lang)'));
   assert.ok(ui.includes('formatSignedMeters(tide.nextLow.level, lang)'));
   assert.ok(ui.includes('تقديري') && ui.includes('Open-Meteo Marine'), "identify estimated model source");
-  assert.ok(ui.includes('PyFES') && ui.includes('عند توفر'), "do not imply an undelivered PyFES service");
+  assert.ok(ui.includes('PyFES') && ui.includes('Open-Meteo Marine'), "do not imply an undelivered PyFES service");
+  assert.ok(!ui.includes('<details className="mt-1'), "hide expanded source paragraphs; keep one compact line");
+  assert.ok(ui.includes("moonRiseSet(place.lat, place.lon, now, bundle.timezone)"), "calculate moon events in selected city day");
   assert.ok(!ui.includes('time="—" sub={lang === "ar" ? "غير متاح"'),
     "do not deliberately hide real modelled sea-level extrema");
 });
