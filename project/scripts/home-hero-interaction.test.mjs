@@ -331,7 +331,8 @@ test("map viewport reveal stages new ECMWF tiles and retains a coarser satellite
     "previous held tiles cannot survive an invalidated viewport");
   assert.ok(src.includes('map.on("move", onMove)'));
   assert.ok(src.includes('significantSpatialMove(origin,'));
-  assert.ok(queue.includes("const cancel = deferred ? []"));
+  assert.ok(queue.includes("const cancel = deferred || deferNewSpeculation ? []"),
+    "pending current-viewport work and already-started lookahead should not be cancelled for brief pan");
   assert.ok(satellite.includes("SATELLITE_UNDERLAY_NATIVE_ZOOM = 4"));
   assert.ok(map.includes("maxNativeZoom: SATELLITE_UNDERLAY_NATIVE_ZOOM"));
 });
