@@ -166,3 +166,17 @@ test("spatial move threshold ignores tiny gestures and wraps around the dateline
   assert.equal(significantSpatialMove(a, { lat: 40, lng: 179, zoom: 5 }, 20, 30), false);
   assert.equal(significantSpatialMove(a, { lat: 40, lng: 179, zoom: 5 }, 0, 30), true);
 });
+test("rapid globe pans never start useless future-hour ECMWF decodes while the visible hour is complete",()=>{
+ const ready=new Set([8]);
+ assert.deepEqual(planSpatialRequests(8,32,ready,new Set(),new Set(),
+   false,0,true,false,true,true),{cancel:[],start:null});
+ assert.deepEqual(planSpatialRequests(8,32,ready,new Set([9]),new Set(),
+   false,0,true,false,true,true),{cancel:[],start:null},
+   "do not abort already-running small-pan lookahead");
+ assert.deepEqual(planSpatialRequests(8,32,ready,new Set(),new Set(),
+   false,0,true,false,true,false),{cancel:[],start:9},
+   "after the idle window real next-hour prefetch resumes automatically");
+ assert.deepEqual(planSpatialRequests(8,32,new Set(),new Set([9]),new Set(),
+   false,0,true,false,true,true),{cancel:[9],start:8},
+   "missing CURRENT ECMWF image is never blocked by speculative idle throttle");
+});
