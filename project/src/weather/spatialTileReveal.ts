@@ -20,8 +20,11 @@ export function softenSpatialTileArrival(tile: SpatialTileNode | undefined,
   if (!allowed || reducedMotion || !tile || tile.style.visibility === "hidden" ||
       typeof tile.animate !== "function") return false;
   try {
-    tile.animate([{ opacity: 0.2 }, { opacity: 1 }],
-      { duration: 190, easing: "ease-out" });
+    // A very low starting alpha flashes a dark 1024px rectangular patch
+    // over satellite imagery. Keep genuine pixels mostly visible from the
+    // first paint and use only a short compositor transition for the edge.
+    tile.animate([{ opacity: 0.68 }, { opacity: 1 }],
+      { duration: 160, easing: "ease-out" });
     return true;
   } catch {
     return false;
