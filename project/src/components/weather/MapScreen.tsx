@@ -371,6 +371,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           };
           modelRef.current.onMiss = () => {
             engine.setModelCover(false);
+            // A zoom-out invalidates the previous ECMWF raster coverage.
+            // Prepare one REAL, source-backed small global precipitation
+            // grid immediately at broad scales, rather than exposing the
+            // obsolete half-painted tiles for 4.5 seconds. The quick-world
+            // loader is deduplicated by its existing pending/ready flags.
+            if (map && map.getZoom() <= 4) rainPlaybackQuickRef.current?.();
             rainFallbackRefreshRef.current?.();
           };
         }
