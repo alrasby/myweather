@@ -11,7 +11,13 @@ export const SATELLITE_UNDERLAY_NATIVE_ZOOM = 4;
  * Importantly, do not request a third satellite grid at close zoom levels. */
 export const SATELLITE_WORLD_PARENT_NATIVE_ZOOM = 2;
 export function shouldKeepWorldSatelliteParent(zoom: number, detailedReady: boolean): boolean {
-  return Number.isFinite(zoom) && zoom >= 0 && zoom <= 5 && !detailedReady;
+  // At z3–z4 the native z4 parent requests the very SAME Esri image as
+  // the detailed layer. A z2 parent must remain mounted and warm even after
+  // detail initially becomes ready: a global fling can otherwise expose
+  // the black map host before Leaflet emits the next 'loading' event.
+  // Zoom5 already has a distinct, permanent native-z4 parent.
+  return Number.isFinite(zoom) && zoom >= 0 &&
+    (zoom <= 4 || (zoom === 5 && !detailedReady));
 }
 
 /** Retain the parent imagery while the detailed base layer is loading,
