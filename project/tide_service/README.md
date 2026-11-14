@@ -187,3 +187,87 @@ astronomical high/low tides. Verified astronomical tides await a real source.
 Official docs:
 https://cnes.github.io/aviso-fes/user_guide.html
 https://api.tidesandcurrents.noaa.gov/mdapi/prod/
+
+## Global provisional PyFES service without AVISO+ — open EOT20 atlas
+
+**Now implemented:** `eot20_global.py` verifies the original worldwide EOT20
+NetCDF harmonic grids, prepares an explicit PyFES Darwin config and SHA-256
+manifest, and evaluates physical five-minute astronomical tide predictions
+without fabricating samples. `eot20_server.py` reuses the bounded loopback
+gateway, but reports source **EOT20** (not FES2022b). Android has a strict
+HTTPS-only EOT20 reader and prioritizes verified predictions over the
+source-attributed estimated Open-Meteo sea-level turning points **only when
+a service URL and explicit build flag have been set**. The ordinary APK ships
+with no EOT20 server URL, atlas or data access and therefore uses the
+honest estimated marine display instead. No misleading global activation.
+
+EOT20 is the ocean elevation model produced by DGFI-TUM, openly distributed
+at https://doi.org/10.17882/79489 under Creative Commons Attribution 4.0.
+Credit: Hart-Davis M., Piccioni G., Dettmering D., Schwatke C., Passaro M.,
+and Seitz F. (2021), Earth System Science Data 13, 3869-3884,
+https://doi.org/10.5194/essd-13-3869-2021.
+It is a **1/8 degree** worldwide satellite-altimetry harmonic model (17
+ocean-elevation constituents); it is distinct from AVISO's finer FES2022b.
+Near coastlines or narrow waterways its errors can be significant. It is a
+prediction relative to the atlas mean sea surface, not harbour chart datum,
+observed storm-surge water level, or navigation-grade tide.
+
+### Operator deployment (not performed; requires actual atlas & server)
+
+1. Download the **final** openly published EOT20 from SEANOE, following
+   https://geoscienceaustralia.github.io/eo-tides/setup/ .
+   Extract the nested `ocean_tides.zip` to an operator-private directory.
+   It must contain exactly the 17 full-world `*_ocean_eot20.nc` files; do not
+   use partial/demo/mislabeled grids.
+2. Install Python 3.12, PyFES 2026.5.2 (or newer compatible tested release),
+   PyYAML, NumPy and NetCDF4 on a trusted service machine. For example:
+   `python -m pip install --only-binary=:all: pyfes==2026.5.2`
+3. From `project/` create an operator-owned config and SHA-256 manifest
+   outside GitHub and Android:
+
+       python -m tide_service.eot20_server --prepare \\
+         --atlas-dir /secure/EOT20/ocean_tides \\
+         --config /secure/EOT20/eot20.yaml \\
+         --manifest /secure/EOT20/eot20.json
+
+   This validates the presence of all 17 genuine-looking global files,
+   amplitude/Greenwich-phase variable names, grid extent, units and hashes.
+   The SHA-256 checks attest consistency with operator-provided source files;
+   they do **not** cryptographically prove original publisher authenticity.
+   The operator must verify dataset provenance and the CC-BY obligations.
+4. Confirm with actual model files:
+
+       cd project
+       EOT20_CONFIG=/secure/EOT20/eot20.yaml \\
+       EOT20_MANIFEST=/secure/EOT20/eot20.json \\
+       python -m tide_service.eot20_global --lat 23.588 --lon 58.3829 \\
+         --start <current UTC on a 5min boundary> --hours 48
+
+   Verify with official tide tables/gauges for Muscat, Cape Town, Rabat,
+   New York and Hammerfest at the **same datum**. Reject missing coastal
+   coverage, flagged extrapolations or unacceptable deviations. Do not
+   claim gauge calibration merely because the computer can load the atlas.
+5. Only after scientific QA and real capacity planning, run the loopback
+   gateway with `TIDE_EOT20_ENABLED=1`, `EOT20_CONFIG`, `EOT20_MANIFEST`,
+   `TIDE_SERVICE_BIND=127.0.0.1`, `TIDE_SERVICE_PORT=8765`.
+   Use a real HTTPS reverse proxy with authentication/rate protection,
+   CORS allowlisting for web preview, uptime/health checks and enough
+   RAM for all 17 global grids or explicitly bounded geographical shards.
+6. Build Android with these **non-secret public config values**:
+
+       VITE_EOT20_TIDE_ENABLED=1
+       VITE_EOT20_TIDE_GATEWAY=https://your-owned-tide-host.example
+
+   The client appends `/v1/tides`, requests a 48h UTC source forecast,
+   verifies provider/coordinates/units/5-minute samples/extrema and displays
+   source EOT20 + scientific/non-navigation caveat. On any network, source
+   or parsing failure it falls back to the existing attributed Marine
+   estimate; no fake PyFES reading is shown. Do not put confidential API
+   keys in client environment variables. Do not enable this flag with a
+   private loopback-only/untested endpoint.
+
+**Not yet completed:** acquisition/hosting of the external global EOT20
+NetCDF atlas, official tide-table/gauge accuracy acceptance, live HTTPS
+server deployment, and physical Android world-coast QA. The default build
+therefore cannot truthfully be called a fully activated global PyFES
+service. AVISO+ FES2022b remains a later and independent upgrade path.
