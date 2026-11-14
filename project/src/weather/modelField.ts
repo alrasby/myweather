@@ -605,6 +605,15 @@ export class ModelField {
       }
     };
     const onMoveEnd = () => {
+      // Evaluate FINAL camera displacement even if 'move' sampling was
+      // throttled within 90ms (a fast fling can otherwise look "small").
+      // A major same-zoom change must cause a genuinely new Leaflet tile
+      // generation, not just reset counters on existing cached DOM tiles.
+      if (origin && !cancelledSpeculation) {
+        const center = map.getCenter();
+        cancelledSpeculation = significantSpatialMove(origin,
+          { lat: center.lat, lng: center.lng, zoom: map.getZoom() }, latSpan, lonSpan);
+      }
       onMove();
       this.viewportMoving = false;
       origin = null;
@@ -645,10 +654,20 @@ export class ModelField {
       // left black/rectangular holes over a supposedly complete frame.
       const majorCoverageChange = zoomChanged || cancelledSpeculation;
       if (majorCoverageChange) {
-        for (const step of [...this.frames.keys()]) {
-          if (step !== this.base) this.discardFrame(step);
-        }
-        this.frames.get(this.base)?.invalidateZoom?.(zoom, cancelledSpeculation);
+        // Root cause of the user's new 0/0/0 trace: invalidateZoom(force)
+        // zeroed three tile counters without remounting the Leaflet grids.
+        // Reused/cached canvas tiles never fire new 'tileload' events, so the
+        // frame stays unready forever even though all fields decoded before.
+        // A new full viewport generation MUST also own fresh GridLayer
+        // instances. One requested model hour is mounted; old lookahead
+        // frames and obsolete reads are retired atomically.
+        for (const step of [...this.frames.keys()]) this.discardFrame(step);
+        this.orderKey = "";
+        this.spatialVisible = false;
+        this.holdingPreviousFrame = false;
+        this.onMiss?.();
+        if (this.visible) this.pump();
+        return;
       }
       if (!this.visible || !this.frames.get(this.base)?.ready) {
         if (this.visible) this.pump();
