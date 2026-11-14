@@ -58,3 +58,38 @@ test("current certified coverage never treats a pending request as a completed v
  assert.equal(currentLeafletCoverage(active,5,cert).complete,false);
  assert.equal(currentLeafletCoverage(active,5,cert).delivered,1);
 });
+
+test("a real ECMWF screen cannot be certified from only its loaded half", () => {
+  const pane = { style: { visibility: "", opacity: "1" } };
+  const other = { style: { visibility: "", opacity: "1" } };
+  const delivered = new WeakSet<object>([pane, other]);
+  const grid = {
+    _tileZoom: 4,
+    _tiles: {
+      a: {current:true,loaded:1,coords:{x:0,y:0,z:4},el:pane},
+      b: {current:true,loaded:1,coords:{x:1,y:0,z:4},el:other},
+    },
+    isLoading: () => false,
+  };
+  const screen = {minX:0,maxX:1024,minY:0,maxY:1024,tileWidth:512,tileHeight:512};
+  const partial = currentLeafletCoverage(grid,4,delivered,screen);
+  assert.deepEqual(partial,{required:4,delivered:2,pending:2,hidden:0,complete:false});
+  assert.equal(certifiedCurrentLeafletTiles(grid,4,delivered,screen),0);
+  grid._tiles = {...grid._tiles,
+    c:{current:true,loaded:1,coords:{x:0,y:1,z:4},el:pane},
+    d:{current:true,loaded:1,coords:{x:1,y:1,z:4},el:other},
+  };
+  assert.equal(currentLeafletCoverage(grid,4,delivered,screen).complete,true);
+  assert.equal(certifiedCurrentLeafletTiles(grid,4,delivered,screen),4);
+  assert.equal(currentLeafletCoverage(grid,3,delivered,screen).complete,false);
+});
+
+test("world-copy ECMWF source cannot reuse unrelated cached longitude tiles", () => {
+ const el={style:{visibility:"",opacity:"1"}};
+ const tiles={"neg":{current:true,loaded:2,coords:{x:-2,y:1,z:3},el}};
+ const layer={_tileZoom:3,_tiles:tiles,isLoading:()=>false};
+ const cert=new WeakSet<object>([el]);
+ const viewport={minX:-1024,maxX:-512,minY:512,maxY:1024,tileWidth:512,tileHeight:512};
+ assert.equal(currentLeafletCoverage(layer,3,cert,viewport).complete,true);
+ assert.equal(currentLeafletCoverage(layer,3,cert,{...viewport,minX:-1536}).complete,false);
+});
