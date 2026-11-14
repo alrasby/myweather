@@ -4,6 +4,7 @@ import { MoonDisc } from "@/components/weather/SkyBackdrop";
 import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress } from "@/weather/astro";
 import { hasDisplayableCoastalTide, modelTideForecast } from "@/weather/marineTides";
 import { fetchEot20Forecast, isEot20GatewayEnabled, type Eot20Forecast } from "@/weather/eot20TideClient";
+import { fetchOpenWatersTide, type OpenWatersTideForecast } from "@/weather/openWatersTideClient";
 import { coastalDistanceKm, COASTAL_CITY_MAX_KM } from "@/weather/coastline";
 import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
@@ -48,19 +49,23 @@ export function DetailCards({
   // has no matching sea-level grid. Never request on unverified inland places.
   const tideHorizon = Math.floor(now / (6 * 3600000));
   const tideKey = `${place.lat}:${place.lon}:${tideHorizon}`;
-  const [eotState, setEotState] = useState<{key:string;data:Eot20Forecast}|null>(null);
+  const [tideState, setTideState] = useState<{key:string;data:Eot20Forecast|OpenWatersTideForecast}|null>(null);
   useEffect(() => {
     if (!isEot20GatewayEnabled()) return;
     const controller = new AbortController();
-    void coastalDistanceKm(place.lat, place.lon).then((km) => {
-      if (controller.signal.aborted || km > COASTAL_CITY_MAX_KM) return null;
-      return fetchEot20Forecast(place.lat, place.lon, now, controller.signal);
-    }).then((data) => {
-      if (data && !controller.signal.aborted) setEotState({key:tideKey,data});
-    }).catch(() => { /* no atlas/shoreline/service: preserve Marine fallback */ });
+    void coastalDistanceKm(place.lat, place.lon).then(async (km) => {
+      if (controller.signal.aborted || km > COASTAL_CITY_MAX_KM) return;
+      const eot = isEot20GatewayEnabled()
+        ? await fetchEot20Forecast(place.lat, place.lon, now, controller.signal) : null;
+      if (controller.signal.aborted) return;
+      // Prefer the atlas-backed physical model if it is truly deployed. In
+      // ordinary free builds use verified nearby station harmonics instead.
+      const actual = eot ?? await fetchOpenWatersTide(place.lat, place.lon, now, controller.signal);
+      if (actual && !controller.signal.aborted) setTideState({key:tideKey,data:actual});
+    }).catch(() => { /* preserve attributed Marine fallback on any failure */ });
     return () => controller.abort();
   }, [tideKey, place.lat, place.lon]);
-  const astronomicalTide = eotState?.key === tideKey ? eotState.data : null;
+  const astronomicalTide = tideState?.key === tideKey ? tideState.data : null;
   const showTides = (bundle.marineVersion === 3 &&
     hasDisplayableCoastalTide(bundle.marine, now)) || astronomicalTide !== null;
   const pressureUnit = useWeather((s) => s.prefs.pressure);
@@ -359,15 +364,16 @@ function TideCard({
   place: Place;
   lang: Lang;
   now: number;
-  astronomicalTide: Eot20Forecast | null;
+  astronomicalTide: Eot20Forecast | OpenWatersTideForecast | null;
 }) {
   const tidePoints = bundle.marine?.tide?.points ?? null;
-  const eot = astronomicalTide;
+  const eot = astronomicalTide?.source === "EOT20" ? astronomicalTide : null;
+  const station = astronomicalTide?.source === "OPEN_WATERS_STATION" ? astronomicalTide : null;
   const rawTide = modelTideForecast(tidePoints, now);
-  const eotEvents = eot?.extrema.map(({kind,t,levelM}) => ({kind,t,level:levelM})) ?? [];
-  const tide = eot ? {
+  const eotEvents = astronomicalTide?.extrema.map(({kind,t,levelM}) => ({kind,t,level:levelM})) ?? [];
+  const tide = astronomicalTide ? {
     ...rawTide,
-    points: eot.points.filter((p) => p.t >= now - 3 * 3600000 &&
+    points: astronomicalTide.points.filter((p) => p.t >= now - 3 * 3600000 &&
       p.t <= now + 24 * 3600000).map(({t,levelM}) => ({t,level:levelM})),
     nextHigh: eotEvents.find((ev) => ev.kind === "high" && ev.t >= now) ?? null,
     nextLow: eotEvents.find((ev) => ev.kind === "low" && ev.t >= now) ?? null,
@@ -400,8 +406,8 @@ function TideCard({
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
         <p className="mt-1 text-xs text-muted">
           {lang === "ar"
-            ? eot ? "المد الفلكي · PyFES / EOT20" : "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
-            : eot ? "Astronomical tide · PyFES / EOT20" : "Estimated high/low times from modelled sea level"}
+            ? eot ? "المد الفلكي · PyFES / EOT20" : station ? "مد فلكي من محطة قريبة" : "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
+            : eot ? "Astronomical tide · PyFES / EOT20" : station ? "Astronomical tide · Nearby station" : "Estimated high/low times from modelled sea level"}
         </p>
         {/* Source/limits stay accessible, but the long recurring warning
             does not occupy the weather card on every city selection.
@@ -410,26 +416,34 @@ function TideCard({
         <details className="mt-1 text-[0.66rem] text-muted">
           <summary className="cursor-pointer select-none">
             {eot ? (lang === "ar" ? "PyFES · EOT20 عالمي (CC BY 4.0)" : "PyFES · Global EOT20 (CC BY 4.0)") :
+              station ? (lang === "ar" ? `Open Waters · ${station.stationName} · ${formatNumber(station.distanceKm,lang,1)} كم` : `Open Waters · ${station.stationName} · ${station.distanceKm.toFixed(1)} km`) :
               (lang === "ar" ? "Open-Meteo Marine · نموذج بحري تقديري" : "Open-Meteo Marine · Estimated sea-level model")}
           </summary>
           <p className="mt-1">{eot
             ? (lang === "ar"
               ? "توقع مد فلكي من أطلس EOT20 العالمي (DGFI-TUM، Hart-Davis 2021) بمحرك PyFES؛ الارتفاع نسبة إلى متوسط سطح الأطلس وليس مرجع الميناء. غير معاير بمحطات محلية ولا يصلح للملاحة."
               : "Astronomical tide from DGFI-TUM EOT20 (Hart-Davis 2021) via PyFES. Heights use atlas mean sea surface, not harbour chart datum; not locally gauge-calibrated or for navigation.")
+            : station ? (lang === "ar"
+              ? `توقع فلكي لمحطة ${station.stationName} على بعد ${formatNumber(station.distanceKm,lang,1)} كم، مرجع الارتفاع ${station.datum}. لا يمثل بالضرورة مستوى المياه الفعلي لمدينتك ولا يصلح للملاحة.`
+              : `Astronomical station tide at ${station.stationName}, ${station.distanceKm.toFixed(1)} km away, vertical datum ${station.datum}. Not a local measured water level or for navigation.`)
             : (lang === "ar"
               ? "الأوقات المعروضة هي قمم وقيعان من بيانات مستوى البحر البحرية الفعلية للنموذج (MSL)، وليست مدًّا فلكيًّا محليًّا معتمدًا. دقة السواحل محدودة ولا تصلح للملاحة. سيحل PyFES محل هذا التقدير عند توفر بيانات توافقية مُتحقق منها وخدمة تشغيلية."
               : "Times shown are estimated turning points of the source-backed modelled sea-level curve (MSL), not locally validated astronomical high/low tides. Coastal accuracy is limited. Not for navigation. PyFES replaces estimates only when verified harmonics and a deployed service are available.")}</p>
+          {station ? <p className="mt-1 break-words">{station.attribution} · {station.license}
+            <a className="underline ms-1" href="https://openwaters.io/api/tides/" target="_blank" rel="noopener noreferrer">Open Waters</a>
+            {station.stationId.startsWith("kartverket/") ? <a className="underline ms-1" href="https://www.kartverket.no/" target="_blank" rel="noopener noreferrer">© Kartverket</a> : null}
+          </p> : null}
         </details>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           {/* These are estimated sea-level extrema from real provider samples,
               NOT astronomical gauge-calibrated tide predictions. */}
-          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? eot ? "فلكي" : "تقديري" : eot ? "Model" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
-          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? eot ? "فلكي" : "تقديري" : eot ? "Model" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
-          <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={eot ? "Open-Meteo Marine" : t(lang, "now")} />
+          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? astronomicalTide ? "فلكي" : "تقديري" : astronomicalTide ? "Model" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
+          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? astronomicalTide ? "فلكي" : "تقديري" : astronomicalTide ? "Model" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
+          <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={astronomicalTide ? "Open-Meteo Marine" : t(lang, "now")} />
         </div>
       <div dir="ltr">
-        <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={lang === "ar" ? "مستوى سطح البحر النموذجي التقديري" : "Estimated modelled sea level"}>
+        <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={astronomicalTide ? (lang === "ar" ? "منحنى المد والجزر الفلكي" : "Astronomical tide curve") : (lang === "ar" ? "مستوى سطح البحر النموذجي التقديري" : "Estimated modelled sea level")}>
           <path d={d} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
           {nowX !== null ? <line x1={nowX} x2={nowX} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
           {coords

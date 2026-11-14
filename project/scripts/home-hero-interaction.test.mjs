@@ -512,3 +512,15 @@ test("large map gestures retire stale ECMWF next-hour reads even while requested
   assert.ok(move.includes("cancelledSpeculation = true"),
     "cancel once, not on every pointer move");
 });
+
+test("keyless Open Waters is restricted to verified nearby tide stations, with fallback and attribution", () => {
+  const client=read("project/src/weather/openWatersTideClient.ts");
+  const ui=read("project/src/components/weather/SkyCards.tsx");
+  assert.ok(client.includes("OPEN_WATERS_STATION_MAX_KM=30"));
+  assert.ok(client.includes("commercial_use!==true"));
+  assert.ok(client.includes('ROOT="https://api.openwaters.io/tides"'));
+  assert.ok(ui.includes("fetchOpenWatersTide(place.lat, place.lon"));
+  assert.ok(ui.includes('station.attribution'));
+  assert.ok(ui.includes("PyFES") && ui.includes("Open-Meteo Marine"));
+  assert.ok(ui.includes("astronomicalTide !== null"));
+});
