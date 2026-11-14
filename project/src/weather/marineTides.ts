@@ -67,6 +67,10 @@ export function modelTideForecast(points:readonly TidePoint[]|null|undefined,now
  for(let i=1;i<samples.length-1;i++){
   const prev=samples[i-1]!,at=samples[i]!,next=samples[i+1]!;
   if(at.t<now-5*60000||at.t>now+48*3600000)continue;
+  // The source provides discrete hourly values. Missing hours may create
+  // artificial turning points if a discontinuity is treated as a smooth
+  // astronomical tide curve. Require neighboring genuine model samples.
+  if(at.t<=prev.t||next.t<=at.t||at.t-prev.t>2*3600000||next.t-at.t>2*3600000)continue;
   const a=at.level-prev.level,b=next.level-at.level;
   const kind=a>0.005&&b<=-0.005?"high":a< -0.005&&b>=0.005?"low":null;
   if(kind)events.push({...at,kind});
