@@ -40,6 +40,7 @@ export type WeatherDiagnosticMode = "all" | "cloud" | "rain" | "snow" | "fallbac
 export type WeatherModelDiagnostics = {
   mode: WeatherDiagnosticMode;
   source: "spatial" | "fallback";
+  spatialViewportPolicy?: SpatialViewportDecision;
   backend?: "ready-tiles" | "pilot-probing" | "om-on-device";
   pilotFailure?: string | null;
   tinyModelObservations?: number;
@@ -790,6 +791,7 @@ export class ModelField {
     return {
       mode: this.diagnosticMode,
       source: this.spatialVisible ? "spatial" : "fallback",
+      spatialViewportPolicy: this.spatialBudget,
       frame: this.base,
       requestedFrame: this.base,
       displayedFrame: this.spatialVisible ? displayed : null,
@@ -1457,6 +1459,7 @@ export class ModelField {
     this.lastDisplayedStep = null;
     this.holdingPreviousFrame = false;
     this.fallbackForMissingHour = false;
+    this.spatialBudget = { allow: true, reason: "regional" };
     this.times = [];
     this.pinnedRun = null;
     this.adapter = null;
