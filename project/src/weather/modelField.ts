@@ -1,5 +1,6 @@
 import type { Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
+import {mapForecastClock,type MapForecastClock} from "@/weather/mapForecastClock";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
@@ -855,6 +856,18 @@ export class ModelField {
       });
     }
     this.applyOpacity();
+  }
+
+  /** Cheap source-time audit for the existing weather-clock label. A visible
+   * held/stale ECMWF raster must not be labelled as a different forecast hour.
+   * Normal temporal blending, wind, temperature, and fallback are untouched. */
+  getMapClock(timelineMs:number):MapForecastClock {
+    if (!this.visible || !this.spatialVisible) return mapForecastClock(timelineMs,[]);
+    const visibleTimes = [...this.frames.entries()]
+      .filter(([step, frame]) => frame.ready && frame.opacity > 0.01 &&
+        Number.isFinite(this.times[step]))
+      .map(([step]) => this.times[step]!);
+    return mapForecastClock(timelineMs,visibleTimes,this.holdingPreviousFrame);
   }
 
   diagnostics(): WeatherModelDiagnostics {
