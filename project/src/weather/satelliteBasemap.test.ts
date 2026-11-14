@@ -62,7 +62,7 @@ test("satellite viewport detects missing uncreated images despite loaded cached 
   busy = true;
   assert.equal(snapshotSatelliteRasterCoverage(layer, 3, undefined, twoTiles).complete, false);
   busy = false;
-  assert.equal(snapshotSatelliteRasterCoverage(layer, 4, undefined, twoTiles).complete, false);
+  assert.equal(snapshotSatelliteRasterCoverage(layer, 2, undefined, twoTiles).complete, false, "a native z3 layer cannot certify a lower zoom2 map");
   const failed = new WeakSet<object>([second.el]);
   assert.deepEqual(snapshotSatelliteRasterCoverage(layer, 3, failed, twoTiles), {
     active: true, required: 2, delivered: 1, pending: 0, missing: 0,
