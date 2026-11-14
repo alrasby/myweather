@@ -29,7 +29,8 @@ test("independent z2 real satellite parent covers black holes during broad world
  assert.equal(shouldKeepWorldSatelliteParent(3,false),true);
  assert.equal(shouldKeepWorldSatelliteParent(4,false),true);
  assert.equal(shouldKeepWorldSatelliteParent(5,false),true);
- assert.equal(shouldKeepWorldSatelliteParent(3,true),false);
+ assert.equal(shouldKeepWorldSatelliteParent(3,true),true,
+   "keep the world parent warm after detail loads to eliminate black satellite gaps on pan");
  assert.equal(shouldKeepWorldSatelliteParent(5,true),false);
  assert.equal(shouldKeepWorldSatelliteParent(6,false),false,
    "never download a third Esri tile layer above world-scale views");
