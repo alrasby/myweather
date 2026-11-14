@@ -179,10 +179,32 @@ def verify_official_atlas_manifest(config_path: str, manifest_path: str) -> None
         raise TideUnavailable("fes2022-atlas-too-small-to-be-full-edition")
 
 
+
+def regional_bounds(text: str) -> tuple[float, float, float, float] | None:
+    """Optional PyFES regional sub-grid for memory-bounded operator shards.
+
+    Bounds are west,south,east,north. A global service should deploy separate
+    audited shards or provision enough RAM; never pretend a sub-grid is world
+    coverage. Dateline-crossing regions require two explicit shards.
+    """
+    if not text:
+        return None
+    try:
+        items = tuple(float(x.strip()) for x in text.split(","))
+    except ValueError as exc:
+        raise TideUnavailable("invalid-fes-region-bbox") from exc
+    if (len(items) != 4 or not all(math.isfinite(v) for v in items) or
+        not -180 <= items[0] < items[2] <= 180 or
+        not -90 <= items[1] < items[3] <= 90 or
+        items[2] - items[0] < 0.1 or items[3] - items[1] < 0.1):
+        raise TideUnavailable("invalid-fes-region-bbox")
+    return items
+
 class PyFESAtlas:
     """Fail-closed production adapter. Never downloads or guesses model data."""
 
-    def __init__(self, config_path: str, manifest_path: str = ""):
+    def __init__(self, config_path: str, manifest_path: str = "",
+                 bbox: tuple[float, float, float, float] | None = None):
         if not config_path or not Path(config_path).is_file():
             raise TideUnavailable("fes2022-atlas-config-required")
         verify_official_atlas_manifest(config_path, manifest_path)
@@ -193,13 +215,19 @@ class PyFESAtlas:
             raise TideUnavailable("pyfes-not-installed") from exc
         self.np = np
         self.pyfes = pyfes
+        self.bbox = bbox
         try:
-            self.config = pyfes.config.load(config_path)
+            self.config = (pyfes.config.load(config_path, bbox=bbox) if bbox
+                           else pyfes.config.load(config_path))
             self.model = self.config.models["tide"]
         except Exception as exc:
             raise TideUnavailable("invalid-or-incomplete-fes-atlas") from exc
 
     def __call__(self, times: list[datetime], lat: float, lon: float):
+        if self.bbox:
+            west, south, east, north = self.bbox
+            if not west <= lon <= east or not south <= lat <= north:
+                raise TideUnavailable("outside-provisioned-atlas-region")
         np, pyfes = self.np, self.pyfes
         dates = np.array([np.datetime64(t.replace(tzinfo=None), "s") for t in times])
         lats = np.full(len(times), lat, dtype=np.float64)
