@@ -37,5 +37,20 @@ jobs:
           rc=$?
           set -e
           python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); print("PyFES station QA:", p.get("status", "success"), p.get("reason", ""))'
+          if [ "$rc" -ne 0 ]; then
+            # Public station harmonic input only; do not log local GPS/data.
+            python - <<'PY'
+          from tide_service.noaa_station_pyfes import load_noaa_station, parse_station_harmonics
+          import pyfes, numpy as np
+          station, raw = load_noaa_station("9414290")
+          lat, _, cs = parse_station_harmonics(station, raw, "9414290")
+          try:
+              pyfes.evaluate_tide_from_constituents(
+                  cs, np.array([np.datetime64("2026-11-14T00:00:00")]),
+                  latitude=lat, settings=pyfes.FESSettings())
+          except Exception as error:
+              print("Public NOAA station PyFES exception:", type(error).__name__, str(error)[:280])
+          PY
+          fi
           test "$rc" -eq 0
           python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); assert p["source"]=="NOAA_COOPS_STATION_HARMONICS" and p["method"].startswith("PyFES") and p["station_id"]=="9414290" and len(p["samples"])==145 and p["not_for_navigation"]'
