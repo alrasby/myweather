@@ -157,15 +157,21 @@ def verify_eot20_manifest(config_file: str, manifest_file: str) -> None:
     files = meta.get("files")
     if not isinstance(files, list) or len(files) != len(EOT20_NAMES):
         raise TideUnavailable("eot20-constituent-manifest-incomplete")
-    expected = {x.name for x in atlas_files(Path(files[0]["path"]).parent).values()}
+    if (not isinstance(files[0], dict) or
+            not isinstance(files[0].get("path"), str)):
+        raise TideUnavailable("eot20-file-manifest-invalid")
+    expected_files = atlas_files(Path(files[0]["path"]).parent)
+    expected = {x.name for x in expected_files.values()}
     encountered: set[str] = set()
     for item in files:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
             raise TideUnavailable("eot20-file-manifest-invalid")
         p = Path(item["path"]).resolve()
-        if (p.name not in expected or str(p) in encountered or
+        if (p.name not in expected or p.parent != next(iter(expected_files.values())).parent
+                or str(p) in encountered or
                 not isinstance(item.get("sha256"), str) or
-                len(item["sha256"]) != 64):
+                len(item["sha256"]) != 64 or
+                any(ch not in "0123456789abcdef" for ch in item["sha256"])):
             raise TideUnavailable("eot20-constituent-file-invalid")
         encountered.add(str(p))
         if not p.is_file() or sha256(p) != item["sha256"]:
@@ -186,7 +192,7 @@ class PyFESEOT20Atlas:
             self.pyfes = pyfes
             self.np = np
             self.bbox = bbox
-        except (ImportError, Exception) as exc:
+        except Exception as exc:
             raise TideUnavailable("eot20-pyfes-atlas-load-failed") from exc
 
     def __call__(self, times, lat, lon):
