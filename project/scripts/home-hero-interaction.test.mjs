@@ -566,9 +566,9 @@ test("ECMWF source compositing follows exact valid-time weights; never retain gh
 test("ready ECMWF source always certifies the CURRENT complete three-layer viewport before exposing it", () => {
   const model=read("project/src/weather/modelField.ts");
   const policy=read("project/src/weather/modelTileReadiness.ts");
-  assert.ok(model.includes("const coverageCertified = made.every((layer, index) =>"),
+  assert.ok(model.includes("const coverageCertified = coverage.every(item => item.complete)"),
     "the previous region being ready cannot certify the new viewport");
-  assert.ok(model.includes("certifiedCurrentLeafletTiles(layer, map.getZoom(), certifiedTiles[index]!)"),
+  assert.ok(model.includes("currentLeafletCoverage(layer, map.getZoom(), certifiedTiles[index]!)"),
     "all current Leaflet canvases must have real tileload evidence");
   assert.ok(model.includes("frame.tileCounts, coverageCertified)"));
   assert.ok(policy.includes("if (!currentCoverageCertified || errored.size > 0) return false"),
