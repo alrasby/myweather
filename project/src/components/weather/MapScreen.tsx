@@ -124,6 +124,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const detailRef = useRef<GridField | null>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
+  const timelineUtcRef = useRef<number | null>(null);
   const valueRef = useRef<HTMLSpanElement>(null);
   const clickTimer = useRef(0);
   const popupAbort = useRef<AbortController | null>(null);
@@ -194,6 +195,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engineRef.current = engine;
     let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
+      timelineUtcRef.current = Number.isFinite(info.timeMs) ? info.timeMs : null;
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -1268,6 +1270,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 dataSaver: prefs.dataSaver,
                 mapZoom: currentZoom ?? null,
                 viewportSpanDegrees,
+                mapTimelineUtc: timelineUtcRef.current === null ? null : new Date(timelineUtcRef.current).toISOString(),
                 satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
                 // Local point forecast vs global ECMWF can legitimately differ.
@@ -1309,6 +1312,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "الإطار المعروض فعليًا" : "Displayed frame"}: {weatherDiagnostics?.displayedFrame ?? "—"}
             {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
           </p>
+          <p>{lang === "ar" ? "وقت شريط الخريطة (UTC)" : "Map timeline clock (UTC)"}: {timelineUtcRef.current === null ? "—" : new Date(timelineUtcRef.current).toISOString()}</p>
           <p>{lang === "ar" ? "وقت النموذج المطلوب" : "Requested model time"}: {weatherDiagnostics?.requestedValidTime ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المعروض" : "Displayed model time"}: {weatherDiagnostics?.displayedValidTime ?? "—"}</p>
           {(weatherDiagnostics?.compositedFrames?.length ?? 0) > 1 ? (
