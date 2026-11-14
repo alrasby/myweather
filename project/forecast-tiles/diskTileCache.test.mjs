@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readdir, readFile, rm, writeFile, mkdir} from 'node:fs/promises';
+import {mkdtemp, readdir, readFile, rm, writeFile, mkdir, utimes} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
 import {createDiskTileCache} from './diskTileCache.mjs';
@@ -28,7 +28,7 @@ test('finite disk quota evicts least recently used real images, never cache fabr
 test('restart rescans valid tile tree and safely bounds earlier disk files',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'mw-offdevice-restart-'));
  try{
-  for(const key of keys){const path=join(dir,...key.split('/'));await mkdir(dirname(path),{recursive:true});await writeFile(path,png);}
+  for(const key of keys){const path=join(dir,...key.split('/'));await mkdir(dirname(path),{recursive:true});await writeFile(path,png);await utimes(path,1700000000,1700000000);}
   const restarted=createDiskTileCache({root:dir,maxBytes:png.length*2,maxEntries:2});
   assert.deepEqual(await restarted.read(keys[2]),png);
   assert.equal(restarted.snapshot().entries,2);
