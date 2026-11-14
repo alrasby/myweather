@@ -14,7 +14,7 @@ export type CachedRasterLayer = {
     current?: boolean;
     loaded?: number;
     coords?: { z?: number };
-    el?: object;
+    el?: object & {style?: {visibility?: string; opacity?: string}};
   }>;
 };
 
@@ -32,7 +32,33 @@ export function certifiedCurrentLeafletTiles(
     // A pending/aborted canvas or a tile from the previous map zoom is
     // NOT current source-backed imagery, even if its DOM node still exists.
     if (!tile.el || !tile.loaded || tile.coords?.z !== layer._tileZoom ||
-        !delivered.has(tile.el)) return 0;
+        !delivered.has(tile.el) || tile.el.style?.visibility === "hidden" ||
+        tile.el.style?.opacity === "0") return 0;
   }
   return tiles.length;
+}
+
+/** Safe diagnostic breakdown of the actual Leaflet viewport, not the
+ * cumulative tileload counters. Zero-current means no visible raster grid,
+ * not necessarily a failed ECMWF provider; translucent dry tiles are valid. */
+export type CurrentTileCoverage = Readonly<{
+  required: number; delivered: number; pending: number; hidden: number; complete: boolean;
+}>;
+export function currentLeafletCoverage(
+  layer: CachedRasterLayer, zoom: number, delivered: WeakSet<object>,
+): CurrentTileCoverage {
+  const requiredTiles = Object.values(layer._tiles ?? {}).filter(t => t.current === true);
+  const compatible = Number.isFinite(zoom) && layer._tileZoom !== undefined &&
+    Math.abs(layer._tileZoom - zoom) <= 0.01;
+  let done = 0, hidden = 0;
+  for (const tile of requiredTiles) {
+    if (tile.el?.style?.visibility === "hidden" || tile.el?.style?.opacity === "0") hidden++;
+    if (compatible && tile.loaded && tile.coords?.z === layer._tileZoom && tile.el &&
+        delivered.has(tile.el) && tile.el.style?.visibility !== "hidden" &&
+        tile.el.style?.opacity !== "0") done++;
+  }
+  const required = requiredTiles.length;
+  const pending = required - done;
+  return {required, delivered: done, pending, hidden,
+    complete: compatible && layer.isLoading?.() === false && required > 0 && pending === 0};
 }
