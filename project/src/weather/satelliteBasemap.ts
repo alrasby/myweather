@@ -20,11 +20,12 @@ export function shouldKeepWorldSatelliteParent(zoom: number, detailedReady: bool
     (zoom <= 4 || (zoom === 5 && !detailedReady));
 }
 
-/** Retain the parent imagery while the detailed base layer is loading,
- * including when zooming OUT to z4. Removing it on zoomend exposed vertical
- * dark gaps before Esri's detail tiles had arrived. */
-export function shouldKeepSatelliteParent(zoom: number, detailReady: boolean): boolean {
-  return !detailReady || needsSatelliteUnderlay(zoom);
+/** At z3/z4 a maxNativeZoom=4 parent requests exactly the same Esri URLs
+ * as the detail layer, even if its opacity is zero. Unmount that duplicate;
+ * the independent z2 parent protects broad world pans. Retain the genuinely
+ * coarser z4 imagery at every closer zoom, regardless of detail readiness. */
+export function shouldKeepSatelliteParent(zoom: number, _detailReady: boolean): boolean {
+  return needsSatelliteUnderlay(zoom);
 }
 export function needsSatelliteUnderlay(
   zoom: number,
@@ -39,4 +40,48 @@ export function needsSatelliteUnderlay(
  */
 export function needsRasterSeamGuard(agent: string, dpr: number): boolean {
   return /Android/i.test(agent) && Number.isFinite(dpr) && dpr >= 1.5;
+}
+
+/** Read-only, opt-in coverage for Esri IMG tiles, independent of ECMWF.
+ * Never log imagery tile URLs, tile coordinates or precise device location. */
+export type SatelliteRasterLayerLike = {
+  _tileZoom?: number;
+  _tiles?: Record<string, {
+    current?: boolean; loaded?: number; coords?: { z?: number };
+    el?: object & { complete?: boolean; naturalWidth?: number };
+  }>;
+  isLoading?: () => boolean;
+};
+export type SatelliteRasterCoverage = Readonly<{
+  active: boolean; required: number; delivered: number; pending: number;
+  failed: number; loading: boolean; complete: boolean;
+}>;
+export function snapshotSatelliteRasterCoverage(
+  layer: SatelliteRasterLayerLike | null, zoom: number, failedTiles?: WeakSet<object>,
+): SatelliteRasterCoverage {
+  if (!layer) return {
+    active: false, required: 0, delivered: 0, pending: 0,
+    failed: 0, loading: false, complete: false,
+  };
+  const tiles = Object.values(layer._tiles ?? {}).filter((tile) => tile.current === true);
+  const compatible = Number.isFinite(zoom) && Number.isFinite(layer._tileZoom) &&
+    Math.abs(layer._tileZoom! - zoom) <= 0.01;
+  let delivered = 0, failed = 0;
+  for (const tile of tiles) {
+    const img = tile.el;
+    if (!img) continue;
+    const broken = failedTiles?.has(img) === true ||
+      (img.complete === true && img.naturalWidth === 0);
+    if (broken) { failed++; continue; }
+    if (compatible && tile.coords?.z === layer._tileZoom && tile.loaded &&
+      img.complete === true && typeof img.naturalWidth === "number" &&
+      img.naturalWidth > 0) delivered++;
+  }
+  const required = tiles.length;
+  const pending = Math.max(0, required - delivered - failed);
+  const loading = layer.isLoading?.() === true;
+  return {
+    active: true, required, delivered, pending, failed, loading,
+    complete: compatible && required > 0 && pending === 0 && failed === 0 && !loading,
+  };
 }
