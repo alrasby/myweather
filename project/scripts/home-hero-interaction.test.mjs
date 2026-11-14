@@ -547,11 +547,12 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(model.includes("decideSpatialViewport({"));
  assert.ok(model.includes("if (!this.visible || !this.spatialBudget.allow) return;"));
  assert.ok(model.includes("this.viewportRenderer?.clear();"));
- assert.ok(model.includes("majorCoverageChange = zoomChanged || cancelledSpeculation"));
- assert.ok(!model.includes("invalidateZoom?.(zoom, cancelledSpeculation)"),
-   "never reset raster counters and then await tileload on cached Leaflet canvases");
- assert.ok(model.includes("for (const step of [...this.frames.keys()]) this.discardFrame(step);"),
-   "a major pan needs fresh model image-layer instances");
+ assert.ok(model.includes("if (zoomChanged) {"), "zoom changes must invalidate source grids");
+ assert.ok(model.includes("if (cancelledSpeculation) {"), "large same-zoom moves are a separate case");
+ assert.ok(model.includes("requested?.invalidateZoom?.(zoom, true)"),
+   "reuse the current hour's genuine raster GridLayer on same-zoom pans");
+ assert.ok(model.includes("if (step !== this.base) this.discardFrame(step);"),
+   "retire obsolete forecast hours without remounting the current one");
  assert.ok(model.includes("cancelledSpeculation = significantSpatialMove(origin,"),
    "quick flings must be checked at the final camera position, not sampled move only");
  assert.ok(model.includes("if (this.visible) this.pump();"),
@@ -575,8 +576,8 @@ test("ready ECMWF source always certifies the CURRENT complete three-layer viewp
   const policy=read("project/src/weather/modelTileReadiness.ts");
   assert.ok(model.includes("const coverageCertified = coverage.every(item => item.complete)"),
     "the previous region being ready cannot certify the new viewport");
-  assert.ok(model.includes("currentLeafletCoverage(layer, map.getZoom(), certifiedTiles[index]!)"),
-    "all current Leaflet canvases must have real tileload evidence");
+  assert.ok(model.includes("currentLeafletCoverage(layer, map.getZoom(), certifiedTiles[index]!, viewportOf(layer))"),
+    "all expected screen cells must have real tileload evidence, not just existing cached tiles");
   assert.ok(model.includes("frame.tileCounts, coverageCertified)"));
   assert.ok(policy.includes("if (!currentCoverageCertified || errored.size > 0) return false"),
     "avoid half-screen weather tiles from prior viewport cache");
