@@ -48,3 +48,36 @@ test('concurrent completed renders cannot oversubscribe the disk budget',async()
   assert.ok(cache.snapshot().storedBytes<=png.length*2);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('restart removes only abandoned atomic PNG temp files and preserves unrelated files',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'mw-offdevice-interrupted-'));
+ try{
+  const key=keys[0],file=join(dir,...key.split('/'));
+  await mkdir(dirname(file),{recursive:true});
+  await writeFile(file,png);
+  const orphan=file+'.713.00112233-4455-4677-8899-aabbccddeeff.tmp';
+  const unrelated=join(dirname(file),'user-notes.tmp');
+  await writeFile(orphan,Buffer.alloc(4096,1));
+  await writeFile(unrelated,Buffer.from('keep this unrelated file'));
+  const cache=createDiskTileCache({root:dir,maxBytes:png.length*2,maxEntries:2});
+  assert.deepEqual(await cache.read(key),png);
+  assert.equal(cache.snapshot().orphanTempsRemoved,1);
+  assert.equal(cache.snapshot().storedBytes,png.length);
+  assert.equal(cache.snapshot().entries,1);
+  await assert.rejects(()=>readFile(orphan),error=>error?.code==='ENOENT');
+  assert.equal((await readFile(unrelated)).toString(),'keep this unrelated file');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('replacing an already cached tile preserves quota and rejects corrupt content',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'mw-offdevice-replace-'));
+ try{
+  const cache=createDiskTileCache({root:dir,maxBytes:png.length*2,maxEntries:2});
+  await cache.write(keys[0],png);
+  await assert.rejects(()=>cache.write(keys[0],Buffer.from('invalid weather')),/invalid-source-raster/);
+  assert.deepEqual(await cache.read(keys[0]),png);
+  await cache.write(keys[0],png);
+  assert.equal(cache.snapshot().storedBytes,png.length);
+  assert.equal(cache.snapshot().entries,1);
+  assert.equal(cache.snapshot().evictions,0);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
