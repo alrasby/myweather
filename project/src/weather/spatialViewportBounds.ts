@@ -66,3 +66,70 @@ export function spatialViewportBounds(view: SpatialView): SpatialBounds {
   if (s >= n || w >= e) return [...GLOBAL];
   return [w, s, e, n];
 }
+
+/**
+ * The bounded .om dataset MUST cover the COMPLETE physical Leaflet tile
+ * footprint, not just the smaller screen rectangle. GridLayer caches a
+ * rendered canvas by tile x/y/z. After a same-tile pan it reuses that canvas
+ * without fetching again. If the .om reader was cropped to the *old screen*,
+ * the cached canvas has permanent transparent strips in the newly exposed
+ * area: the hard rectangles seen in Android ECMWF cloud/rain playback.
+ *
+ * This snaps the read once to the REAL Leaflet model tile grid at the view's
+ * zoom and tileSize. It is stable while the visible tiles remain the same,
+ * so reusing a cached raster never exposes previously unsampled pixels.
+ * No fabricated field data or model interpolation changes.
+ */
+export function spatialTileAlignedBounds(
+  view: SpatialView,
+  mapZoom: number,
+  physicalTileSize: 256 | 512 | 1024,
+): SpatialBounds {
+  const fallback = spatialViewportBounds(view);
+  const {west,east,south,north} = view;
+  if (![west,east,south,north,mapZoom].every(Number.isFinite) ||
+      north <= south || ![256,512,1024].includes(physicalTileSize)) return fallback;
+  const width = east >= west ? east - west : east + 360 - west;
+  if (width <= 0 || width > 360) return fallback;
+
+  // GridLayer's physical 512px tile at map zoom 5 has the geographic
+  // footprint of a 256px world tile at z4. The 1024px compact variant
+  // corresponds to z3. This matches the adapter's zoomOffset exactly.
+  const offset = physicalTileSize === 1024 ? -2 :
+    physicalTileSize === 512 ? -1 : 0;
+  const z = Math.max(0, Math.round(mapZoom) + offset);
+  const tiles = 2 ** Math.min(z, 16);
+  const tileDeg = 360 / tiles;
+  const normalWest = ((west + 180) % 360 + 360) % 360 - 180;
+  const x0 = Math.floor((normalWest + 180) / tileDeg);
+  const x1 = Math.ceil((normalWest + width + 180) / tileDeg);
+  // A single-rectangle .om crop cannot cross the longitude seam. The
+  // latitude band still remains tiled and bounded; never use both poles
+  // simply because Leaflet unwrapped a longitude.
+  const snappedWest = x0 * tileDeg - 180;
+  const snappedEast = x1 * tileDeg - 180;
+  const clipLat = (latitude:number) => Math.max(-LAT_LIMIT,Math.min(LAT_LIMIT,latitude));
+  const tileY = (latitude:number) => {
+    const radians = clipLat(latitude)*Math.PI/180;
+    return (1-Math.asinh(Math.tan(radians))/Math.PI)/2*tiles;
+  };
+  const tileLat = (y:number) =>
+    Math.atan(Math.sinh(Math.PI * (1-2*y/tiles)))*180/Math.PI;
+  const y0 = Math.max(0,Math.floor(tileY(north)));
+  const y1 = Math.min(tiles,Math.ceil(tileY(south)));
+  // A single sample row beyond the tile avoids seams at the interpolation
+  // boundary, without adding an entire 90-degree tile as padding.
+  const latPad = 0.25, lonPad = 0.25;
+  const alignedSouth = Math.max(-LAT_LIMIT,tileLat(y1)-latPad);
+  const alignedNorth = Math.min(LAT_LIMIT,tileLat(y0)+latPad);
+  if (alignedNorth <= alignedSouth) return fallback;
+  if (snappedWest < -180 || snappedEast > 180 || width >= 360) {
+    return [-180,alignedSouth,180,alignedNorth];
+  }
+  return [
+    Math.max(-180,snappedWest-lonPad),
+    alignedSouth,
+    Math.min(180,snappedEast+lonPad),
+    alignedNorth,
+  ];
+}
