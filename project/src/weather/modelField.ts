@@ -89,6 +89,7 @@ type AnyLayer = {
   on: (event: string, fn: (ev?: { tile?: HTMLElement }) => void) => void;
   /** Leaflet GridLayer's authoritative current-queue loading state. */
   isLoading?: () => boolean;
+  getTileSize?: () => { x: number; y: number };
   setOpacity?: (opacity: number) => void;
   bringToFront?: () => void;
 } & CachedRasterLayer;
@@ -680,20 +681,28 @@ export class ModelField {
       const zoom = map.getZoom();
       const zoomChanged = [...this.frames.values()].some(frame =>
         spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom));
-      // A large same-zoom pan is ALSO a new coverage generation. The old
-      // code only invalidated on zoom, so frame.ready remained true while
-      // independently loaded cloud/rain/snow tiles painted old areas or
-      // left black/rectangular holes over a supposedly complete frame.
-      const majorCoverageChange = zoomChanged || cancelledSpeculation;
-      if (majorCoverageChange) {
-        // Root cause of the user's new 0/0/0 trace: invalidateZoom(force)
-        // zeroed three tile counters without remounting the Leaflet grids.
-        // Reused/cached canvas tiles never fire new 'tileload' events, so the
-        // frame stays unready forever even though all fields decoded before.
-        // A new full viewport generation MUST also own fresh GridLayer
-        // instances. One requested model hour is mounted; old lookahead
-        // frames and obsolete reads are retired atomically.
+      // Changing zoom or sampling footprint requires genuinely new grids.
+      // Same-zoom long pans do NOT: discarding all three raster GridLayers
+      // on each continent fling caused 129 worker dataset copies and 87
+      // evictions in the user's recorded session. Keep their verified caches.
+      if (zoomChanged) {
         for (const step of [...this.frames.keys()]) this.discardFrame(step);
+        this.orderKey = "";
+        this.spatialVisible = false;
+        this.holdingPreviousFrame = false;
+        this.onMiss?.();
+        if (this.visible) this.pump();
+        return;
+      }
+      if (cancelledSpeculation) {
+        // Retire irrelevant forecast hours, but reuse the same-hour GridLayer
+        // and its certified DOM tiles. Full pixel-bounds coverage now rejects
+        // a loaded OLD continent and recovers from true cached current tiles.
+        for (const step of [...this.frames.keys()]) {
+          if (step !== this.base) this.discardFrame(step);
+        }
+        const requested = this.frames.get(this.base);
+        requested?.invalidateZoom?.(zoom, true);
         this.orderKey = "";
         this.spatialVisible = false;
         this.holdingPreviousFrame = false;
@@ -1102,6 +1111,18 @@ export class ModelField {
       adapter.createTileLayer(renderUrl("precipitation"), rainOpts),
       adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
+    // A full-screen current-tile proof must count EVERY expected grid cell,
+    // including those Leaflet has not instantiated on a long global pan.
+    // Tile coordinates are in the map pixel zoom, not DOM layout pixels.
+    const viewportOf = (layer: AnyLayer) => {
+      const bounds = map.getPixelBounds();
+      const tileSize = layer.getTileSize?.();
+      return {
+        minX: bounds.min?.x ?? NaN, maxX: bounds.max?.x ?? NaN,
+        minY: bounds.min?.y ?? NaN, maxY: bounds.max?.y ?? NaN,
+        tileWidth: tileSize?.x ?? NaN, tileHeight: tileSize?.y ?? NaN,
+      };
+    };
     // DOM canvases that actually emitted a tileload in THIS model hour.
     // Leaflet can retain/reuse them after a pan without another tileload.
     const certifiedTiles = Array.from({ length: SPATIAL_LAYER_COUNT },
@@ -1112,7 +1133,7 @@ export class ModelField {
       revalidateCurrentTiles: undefined as (() => void) | undefined,
       previewReady: false, previewMask: 0, previewOpacityKey: "",
       coverageSnapshot: () => made.map((layer, index) =>
-        currentLeafletCoverage(layer, map.getZoom(), certifiedTiles[index]!)),
+        currentLeafletCoverage(layer, map.getZoom(), certifiedTiles[index]!, viewportOf(layer))),
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
       tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
@@ -1247,7 +1268,7 @@ export class ModelField {
         // false. Only previously certified DOM tiles at the CURRENT zoom
         // may satisfy the new epoch; an unrelated tile count cannot.
         const cachedCount = certifiedCurrentLeafletTiles(
-          layer, map.getZoom(), certifiedTiles[index]!);
+          layer, map.getZoom(), certifiedTiles[index]!, viewportOf(layer));
         if (!cachedCount && frame.layerLastTileAt[index] === 0) continue;
         const token = frame.layerGeneration[index]!;
         if (!frame.renderGeneration.loaded(index, token)) continue;
