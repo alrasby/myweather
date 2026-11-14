@@ -1,0 +1,61 @@
+name: Keyless Global Tide — Real Coverage QA
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
+    paths:
+      - '.github/workflows/openwaters-free-tide-coverage.yml'
+permissions:
+  contents: read
+jobs:
+  worldwide-stations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe open no-key tide stations and prediction coverage
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+          import json
+          base="https://api.openwaters.io/tides"
+          now=datetime.now(timezone.utc).replace(minute=0,second=0,microsecond=0)
+          until=now+timedelta(hours=24)
+          places={
+              "Muscat_Oman":(23.588,58.3829),
+              "Cape_Town":(-33.925,18.423),
+              "Rabat":(34.021,-6.841),
+              "New_York":(40.713,-74.006),
+              "Hammerfest":(70.663,23.682),
+          }
+          for city,(latitude,longitude) in places.items():
+              for endpoint,args in (
+                ("stations",dict(latitude=latitude,longitude=longitude,maxResults=3)),
+                ("extremes",dict(latitude=latitude,longitude=longitude,
+                                 start=now.isoformat(),end=until.isoformat(),units="meters"))):
+                  url=f"{base}/{endpoint}?{urlencode(args)}"
+                  try:
+                      with urlopen(Request(url,headers={"Accept":"application/json",
+                            "User-Agent":"MyWeatherPro-GlobalTideQA/1.0"}),timeout=9) as response:
+                          data=json.load(response)
+                      if endpoint=="stations":
+                          print(city,"stations",json.dumps([{
+                             "id":s.get("id"),"name":s.get("name"),
+                             "distance_km":s.get("distance"),
+                             "license":(s.get("license") or {}).get("name") if isinstance(s.get("license"),dict) else s.get("license"),
+                             "predictions":s.get("predictions")
+                           } for s in (data if isinstance(data,list) else [])][:3]))
+                      else:
+                          station=data.get("station") or {}
+                          print(city,"extremes",json.dumps({
+                             "station":station.get("name"),"id":station.get("id"),
+                             "distance_km":data.get("distance"),
+                             "datum":data.get("datum"),"units":data.get("units"),
+                             "events":len(data.get("extremes") or [])}))
+                  except HTTPError as exc:
+                      print(city,endpoint,"HTTP",exc.code)
+                  except (URLError,TimeoutError,ValueError) as exc:
+                      print(city,endpoint,"UNAVAILABLE",type(exc).__name__)
+          PY
