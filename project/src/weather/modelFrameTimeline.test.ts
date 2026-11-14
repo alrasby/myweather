@@ -75,3 +75,14 @@ test("future-only spatial data must not masquerade as the current forecast hour"
   assert.equal(plan.goals.size, 0);
   // Future-only ECMWF cannot be misrepresented as the requested time.
 });
+
+test("live Android trace: frame 14 at blend 0.006 cannot display old frame 13 at 26.9 percent",()=>{
+ const plan=selectSpatialFramePlan(14,0.006,new Set([13,14]),13);
+ assert.deepEqual([...plan.goals],[[14,1]]);
+ assert.equal(plan.goals.has(13),false,
+   "the previous completed hour must disappear as soon as the requested hour is ready");
+ const interpolated=selectSpatialFramePlan(14,0.006,new Set([13,14,15]),13);
+ assert.deepEqual([...interpolated.goals],[[14,0.994],[15,0.006]]);
+ assert.equal(interpolated.goals.has(13),false);
+ assert.equal([...interpolated.goals.values()].reduce((a,b)=>a+b,0),1);
+});
