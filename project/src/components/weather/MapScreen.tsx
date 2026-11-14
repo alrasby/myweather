@@ -1163,10 +1163,21 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 setCopyStatus(lang === "ar" ? "النسخ غير متاح" : "Clipboard unavailable");
                 return;
               }
+              // Include zoom and viewport SPAN (not private map-center
+              // coordinates) to distinguish a world decode from a local pan
+              // in the user's opt-in diagnostic. Never log precise location.
+              const bounds = mapRef.current?.getBounds();
+              const currentZoom = mapRef.current?.getZoom();
+              const viewportSpanDegrees = bounds ? {
+                longitude: Number((bounds.getEast() - bounds.getWest()).toFixed(1)),
+                latitude: Number((bounds.getNorth() - bounds.getSouth()).toFixed(1)),
+              } : null;
               void navigator.clipboard.writeText(JSON.stringify({
                 capturedAt: new Date().toISOString(),
                 layer: "ECMWF rain/cloud/snow",
                 dataSaver: prefs.dataSaver,
+                mapZoom: currentZoom ?? null,
+                viewportSpanDegrees,
                 ...report,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
