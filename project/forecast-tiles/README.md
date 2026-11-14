@@ -64,3 +64,56 @@ The local worker renderer received request-scoped shallow state snapshots from u
 The app now builds a compact local latitude-indexed coastline binary from *pinned* Natural Earth 1:10m ocean coastlines and minor islands (CC0 license; source commit 0b9a6ceb0a7032713abd9460ac1e995a9c60cd1e). Shoreline classification is independent of the much coarser ~8km Open-Meteo sea-level model cell, which could snap Muscat 22.66 km offshore and falsely call it inland. A city qualifies within 12 km of this real global shore and only if the genuine Marine model cell is at most 55 km offshore and provides valid values. Neither proximity is a claim that the model yields calibrated port tides. The bundled ~10m Natural Earth cartographic scale is *not* 10-meter positional accuracy; dynamic estuaries, small islands and local sea walls can differ. No remote coastline lookup or city-name allowlist at runtime. Missing/coastline corruption fails closed. A new marineVersion=3 migrates old cached city classifications. The live QA checks Muscat, Dubai, Mumbai, Helsinki, Hammerfest and inland Riyadh/Prague. 
 
 A globally accurate port-tide product requires a more precise licensed astronomical tide model (e.g., FES2022b from AVISO/CNES, 1/30 degree plus relevant refined coastal datasets) validated against local tide gauges and chart datums. This project has NOT acquired/embedded FES2022 or proved navigation-grade local accuracy. Keep the honest mean-sea-level / not-for-navigation disclaimer for Open-Meteo Marine. Do not merge this without verifying the pinned-build artifact and actual coastline city tests.
+
+## Off-device safety hardening (14 November 2026, QA only)
+
+The renderer still uses the **exact source-backed ECMWF IFS .om data and
+matching existing RAIN / SNOW / CLOUD breakpoints**. No weather values,
+forecast hours, imagery styles or normal Android map settings are changed.
+The optional ready-tile origin remains OFF unless explicitly configured for a
+controlled private QA session. **No tile service has been deployed.**
+
+### Bounded persistent PNG cache
+
+The loopback gateway now caches validated 256x256 PNGs under a **384 MiB /
+30,000 tile** default budget (the smaller limit wins). It scans and trims an
+existing directory at first use, keeps cache filenames pinned to the immutable
+model run/hour/field/zoom/x/y, and evicts least-recently-used entries to avoid
+unbounded disk growth. Writes are atomic and quota reservations are serialized
+across concurrent renders; corrupted images are never treated as completed
+source-backed tiles. The health response now includes a `diskCache` snapshot.
+
+For a dedicated Linux QA host, optionally set:
+- `TILE_CACHE_MAX_MB` (whole number, 16–4096; defaults to 384)
+- `TILE_CACHE_MAX_ENTRIES` (whole number, 1–250000; defaults to 30000)
+- `TILE_CACHE_DIR` (private persistent disk directory)
+
+This is **a safety bound, not a latency cure**: cold tiles still require real
+ECMWF network reads and Chromium decode. A separate load-tested CDN/object
+store or targeted prewarming would be necessary for consistent large-scale
+performance; do not promise that without measurement and permission.
+
+### Real viewport completeness before a pilot hour appears
+
+The optional Android `ReadyTileClient` now requires every visible Leaflet
+cell to contain a genuinely loaded, decoded IMG for **all three fields**.
+A mere `tileload` count, drained request queue, or old continent's cached
+image cannot authorize a new hour. When a completed view pans into uncached
+geography, only the authentic ready-tile overlays are hidden and the existing
+genuine fallback is shown until complete raster coverage returns. Transient
+pan misses do **not** permanently switch back to the on-device decoder;
+actual failed requests still trigger the existing safe legacy fallback.
+Forecast time and model run remain pinned.
+
+### Reproducible QA without hosting
+
+- Local (Node.js 22): `cd project && node --test forecast-tiles/diskTileCache.test.mjs forecast-tiles/gateway.test.mjs forecast-tiles/metatiles.test.mjs forecast-tiles/pngIntegrity.test.mjs`
+- Pure client (Node.js 22): `cd project && node --experimental-strip-types --test src/weather/readyTileClient.test.ts src/weather/readyTilePlan.test.ts src/weather/readyTilePilotConfig.test.ts src/weather/tinyTileDemandModel.test.ts`
+- GitHub Actions: `ECMWF Off-Device — Offline Integrity QA`, plus the normal Android PR CI.
+
+These offline tests use **test-only synthetic PNG fixtures**; they do not
+claim actual ECMWF meteorological accuracy. For a live QA session the existing
+`ready-tiles-live-qa.yml` workflow renders real pinned ECMWF source tiles in
+Chromium. Geographic seam, temporal-parity, mobile performance, CDN
+availability/cost, and in-person Android acceptance are required before any
+default enablement or release merge.
