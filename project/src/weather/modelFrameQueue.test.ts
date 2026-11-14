@@ -145,7 +145,12 @@ test("playback never starts more than one unready frame while the next is loadin
 });
 
 test("a real precipitation fallback may advance time while ECMWF decodes without mislabeling a held frame", () => {
-  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), true), true);
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), true), false,
+    "while real model tiles are decoding, fallback must not advance/cancel the same hour");
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set(), true), true,
+    "a real fallback can advance once no model decode is in flight");
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set([9]), new Set([9]), true), true,
+    "actual provider cooldown remains recoverable");
   assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), false), false);
   assert.equal(canAdvanceSpatialTime(9, new Set([9]), new Set(), new Set([10]), false), true);
 });
