@@ -356,8 +356,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           return snapshotSatelliteRasterCoverage(
             map!.hasLayer(layer) ? layer as unknown as SatelliteRasterLayerLike : null,
             map!.getZoom(), failed, {
-              minX: pixels.min.x, maxX: pixels.max.x,
-              minY: pixels.min.y, maxY: pixels.max.y,
+              // Leaflet's Bounds type permits unset min/max during
+              // transitional layouts; fail closed instead of throwing.
+              minX: pixels.min?.x ?? NaN, maxX: pixels.max?.x ?? NaN,
+              minY: pixels.min?.y ?? NaN, maxY: pixels.max?.y ?? NaN,
               tileWidth: size.x, tileHeight: size.y,
             },
           );
