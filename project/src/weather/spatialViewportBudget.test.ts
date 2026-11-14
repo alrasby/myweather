@@ -39,10 +39,12 @@ test("valid wrapped world copies are supported; invalid coordinates fail closed"
   assert.deepEqual(decideSpatialViewport({
     zoom: 8, west: 525, east: 555, south: 15, north: 30,
   }), {allow: true, reason: "regional", rasterSize: 1024});
+  assert.deepEqual(decideSpatialViewport({zoom:9, west:40, east:20, south:5, north:20}),
+    {allow:true, reason:"longitude-band", rasterSize:512},
+    "a valid dateline-style wrap must not accidentally hide ECMWF");
   for(const v of [
     {zoom: 8, west: 0, east: 360, south: -75, north: 76},
     {zoom: 9, west: NaN, east: 20, south: 5, north: 20},
-    {zoom: 9, west: 40, east: 20, south: 5, north: 20},
     {zoom: 10, west: 0, east: 10, south: 30, north: 20},
   ]) {
     const result = decideSpatialViewport(v);
