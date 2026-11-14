@@ -40,13 +40,14 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             # Public station harmonic input only; do not log local GPS/data.
             python - <<'PY'
-          from tide_service.noaa_station_pyfes import load_noaa_station, parse_station_harmonics
+          from tide_service.noaa_station_pyfes import load_noaa_station, parse_station_harmonics, canonical_pyfes_constituents
           import pyfes, numpy as np
           station, raw = load_noaa_station("9414290")
           lat, _, cs = parse_station_harmonics(station, raw, "9414290")
           try:
+              canonical = canonical_pyfes_constituents(cs, list(pyfes.known_constituents()))
               pyfes.evaluate_tide_from_constituents(
-                  cs, np.array([np.datetime64("2026-11-14T00:00:00")]),
+                  canonical, np.array([np.datetime64("2026-11-14T00:00:00")]),
                   latitude=lat, settings=pyfes.FESSettings())
           except Exception as error:
               print("Public NOAA station PyFES exception:", type(error).__name__, str(error)[:280])
