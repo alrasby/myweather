@@ -76,6 +76,13 @@ class NOAAStationPyFESContract(unittest.TestCase):
             with self.assertRaisesRegex(TideUnavailable, "unverified"):
                 parse_station_harmonics(value, harmonic(), "9414290")
 
+    def test_digit_prefixed_real_harmonic_name_is_valid(self):
+        # NOAA publishes 2N2/2SM2 harmonics, not only letter-prefixed names.
+        h = harmonic()
+        h["HarmonicConstituents"][7]["name"] = "2N2"
+        _, _, cs = parse_station_harmonics(STATION, h, "9414290")
+        self.assertIn("2N2", cs)
+
     def test_no_feet_or_missing_major_constituents(self):
         bad = harmonic()
         bad["units"] = "feet"
