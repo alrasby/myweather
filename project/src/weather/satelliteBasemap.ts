@@ -81,7 +81,7 @@ export function snapshotSatelliteRasterCoverage(
   });
   if (!layer) return empty(false);
   const tileZoom = layer._tileZoom;
-  if (!Number.isInteger(zoom) || !Number.isInteger(tileZoom) ||
+  if (!Number.isInteger(zoom) || !Number.isInteger(tileZoom ?? NaN) ||
       tileZoom !== zoom ||
       !Object.values(viewport).every(Number.isFinite) ||
       viewport.tileWidth <= 0 || viewport.tileHeight <= 0 ||
@@ -103,7 +103,7 @@ export function snapshotSatelliteRasterCoverage(
   const tiles = new Map<string, NonNullable<SatelliteRasterLayerLike["_tiles"]>[string]>();
   for (const tile of Object.values(layer._tiles ?? {})) {
     if (tile.current !== true || tile.coords?.z !== tileZoom ||
-        !Number.isInteger(tile.coords?.x) || !Number.isInteger(tile.coords?.y)) continue;
+        !Number.isInteger(tile.coords?.x ?? NaN) || !Number.isInteger(tile.coords?.y ?? NaN)) continue;
     tiles.set(`${tile.coords!.x},${tile.coords!.y}`, tile);
   }
   let delivered = 0, failed = 0, missing = 0;
