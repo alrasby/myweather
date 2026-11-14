@@ -472,7 +472,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; invalidateZoom?: (zoom: number) => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number) => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -620,7 +620,7 @@ export class ModelField {
       // Same-zoom drags retain their buffered tiles unchanged.
       const zoom = map.getZoom();
       const zoomChanged = [...this.frames.values()].some(frame =>
-        spatialZoomNeedsNewCoverage(frame.coverageZoom, zoom));
+        spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom));
       if (zoomChanged) {
         for (const step of [...this.frames.keys()]) {
           if (step !== this.base) this.discardFrame(step);
@@ -966,7 +966,7 @@ export class ModelField {
       adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
     const frame = {
-      layers: made, token, opacity: -1, ready: false, coverageZoom: null,
+      layers: made, token, opacity: -1, ready: false, coverageZoom: null, requestedZoom: map.getZoom(),
       invalidateZoom: undefined as ((zoom: number) => void) | undefined,
       previewReady: false, previewMask: 0, previewOpacityKey: "",
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
@@ -1036,6 +1036,7 @@ export class ModelField {
       this.orderKey = "";
       if (ready) {
         frame.coverageZoom = map.getZoom();
+        frame.requestedZoom = map.getZoom();
         if (step === this.base && this.firstCompleteReadyMs === null) {
           this.firstCompleteReadyMs = performance.now() - this.attachedAt;
         }
@@ -1104,7 +1105,8 @@ export class ModelField {
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     frame.invalidateZoom = (zoom) => {
-      if (!alive() || !spatialZoomNeedsNewCoverage(frame.coverageZoom, zoom)) return;
+      if (!alive() || !spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom)) return;
+      frame.requestedZoom = zoom;
       // A newly zoomed viewport must not inherit a historical layer's
       // cumulative tile count. That marked a frame ready with zero new
       // delivered tiles and left broken rectangular ECMWF patches.
