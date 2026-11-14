@@ -37,25 +37,30 @@ test("dry tiles count as delivered even when they have no coloured precipitation
   assert.equal(modelTileFrameReady([true, true, true], new Set(), [1, 1, 1]), true);
 });
 
-test("panning retains a previously ready spatial weather frame while new tiles load", () => {
+test("old ready ECMWF frame must NOT be shown across partial current map tiles", () => {
   const counts = [4, 4, 4];
   const noErrors = new Set<number>();
-  assert.equal(spatialFrameReadyDuringRefresh(true, [false, true, true], noErrors, counts), true);
-  assert.equal(spatialFrameReadyDuringRefresh(true, [false, false, false], noErrors, counts), true);
-  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], noErrors, counts), true);
+  assert.equal(spatialFrameReadyDuringRefresh(true, [false, true, true], noErrors, counts, false), false,
+    "a prior fully painted region cannot authorize showing half the new viewport");
+  assert.equal(spatialFrameReadyDuringRefresh(true, [false, false, false], noErrors, counts, false), false);
+  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], noErrors, counts, false), false,
+    "historical delivered counters are not evidence of current tile coverage");
+  assert.equal(spatialFrameReadyDuringRefresh(true, [false, true, true], noErrors, counts, true), true,
+    "certified reused Leaflet cache may preserve the real ECMWF image");
+  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], noErrors, counts, true), true);
 });
 
 test("initial spatial imagery cannot appear before all queues deliver", () => {
   const noErrors = new Set<number>();
-  assert.equal(spatialFrameReadyDuringRefresh(false, [false, true, true], noErrors, [0, 4, 4]), false);
-  assert.equal(spatialFrameReadyDuringRefresh(false, [true, true, true], noErrors, [0, 4, 4]), false);
-  assert.equal(spatialFrameReadyDuringRefresh(false, [true, true, true], noErrors, [4, 4, 4]), true);
+  assert.equal(spatialFrameReadyDuringRefresh(false, [false, true, true], noErrors, [0, 4, 4], false), false);
+  assert.equal(spatialFrameReadyDuringRefresh(false, [true, true, true], noErrors, [0, 4, 4], true), false);
+  assert.equal(spatialFrameReadyDuringRefresh(false, [true, true, true], noErrors, [4, 4, 4], true), true);
 });
 
 test("completed errored refresh is rejected and dry tiles remain valid", () => {
   const counts = [4, 4, 4];
-  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], new Set([0]), counts), false);
-  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], new Set(), counts), true);
+  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], new Set([0]), counts, true), false);
+  assert.equal(spatialFrameReadyDuringRefresh(true, [true, true, true], new Set(), counts, true), true);
 });
 
 test("ECMWF cloud preview starts after real cloud tiles arrive even while precipitation and snow are decoding", () => {
