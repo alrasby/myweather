@@ -104,7 +104,11 @@ test("model crop covers each COMPLETE Leaflet image tile even if viewport is onl
  assert.ok(b[0] <= 0 && b[2] >= 45, JSON.stringify(b));
  assert.ok(b[1] < 40.98 && b[3] > 66.5,JSON.stringify(b));
  // A pan within the SAME tile grid must never change source crop window.
- assert.deepEqual(spatialTileAlignedBounds({west:13,east:25,south:46,north:55},5,512),b);
+ assert.deepEqual(spatialTileAlignedBounds({west:13,east:25,south:46,north:57},5,512),b);
+ // Crossing the actual z4 tile boundary at latitude ≈56° MUST produce a
+ // different dataset window; this is what prevents reused tiles from
+ // containing unrendered transparent strips.
+ assert.notDeepEqual(spatialTileAlignedBounds({west:13,east:25,south:46,north:54},5,512),b);
 });
 test("world copies resolve to the same aligned ECMWF source window",()=>{
  const a=spatialTileAlignedBounds({west:12,east:28,south:43,north:58},5,512);
