@@ -4,6 +4,7 @@ import { MoonDisc } from "@/components/weather/SkyBackdrop";
 import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress } from "@/weather/astro";
 import { hasDisplayableCoastalTide, modelTideForecast } from "@/weather/marineTides";
 import { fetchEot20Forecast, isEot20GatewayEnabled, type Eot20Forecast } from "@/weather/eot20TideClient";
+import { coastalDistanceKm, COASTAL_CITY_MAX_KM } from "@/weather/coastline";
 import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
 import {
@@ -42,10 +43,26 @@ export function DetailCards({
   const lunar = moonRiseSet(place.lat, place.lon, now);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
-  const showTides = bundle.marineVersion === 3 && (
-    hasDisplayableCoastalTide(bundle.marine, now) ||
-    (isEot20GatewayEnabled() && bundle.marine?.coastal === true)
-  );
+  // The global PyFES path is independent of the marine API. A coastal city
+  // must still receive a genuine global astronomical result when Open-Meteo
+  // has no matching sea-level grid. Never request on unverified inland places.
+  const tideHorizon = Math.floor(now / (6 * 3600000));
+  const tideKey = `${place.lat}:${place.lon}:${tideHorizon}`;
+  const [eotState, setEotState] = useState<{key:string;data:Eot20Forecast}|null>(null);
+  useEffect(() => {
+    if (!isEot20GatewayEnabled()) return;
+    const controller = new AbortController();
+    void coastalDistanceKm(place.lat, place.lon).then((km) => {
+      if (controller.signal.aborted || km > COASTAL_CITY_MAX_KM) return null;
+      return fetchEot20Forecast(place.lat, place.lon, now, controller.signal);
+    }).then((data) => {
+      if (data && !controller.signal.aborted) setEotState({key:tideKey,data});
+    }).catch(() => { /* no atlas/shoreline/service: preserve Marine fallback */ });
+    return () => controller.abort();
+  }, [tideKey, place.lat, place.lon]);
+  const astronomicalTide = eotState?.key === tideKey ? eotState.data : null;
+  const showTides = (bundle.marineVersion === 3 &&
+    hasDisplayableCoastalTide(bundle.marine, now)) || astronomicalTide !== null;
   const pressureUnit = useWeather((s) => s.prefs.pressure);
   const windUnit = useWeather((s) => s.prefs.wind);
 
@@ -127,7 +144,7 @@ export function DetailCards({
         </article>
       </div>
 
-      {showTides ? <TideCard bundle={bundle} place={place} lang={lang} now={now} /> : null}
+      {showTides ? <TideCard bundle={bundle} place={place} lang={lang} now={now} astronomicalTide={astronomicalTide} /> : null}
     </div>
   );
 }
@@ -336,28 +353,16 @@ function TideCard({
   place,
   lang,
   now,
+  astronomicalTide,
 }: {
   bundle: WeatherBundle;
   place: Place;
   lang: Lang;
   now: number;
+  astronomicalTide: Eot20Forecast | null;
 }) {
   const tidePoints = bundle.marine?.tide?.points ?? null;
-  // Only an operator-enabled and physically sourced PyFES service can replace
-  // modelled total sea-level estimates. Old-city replies cannot flash into the
-  // next city's tide card. No network request is made in default APK builds.
-  const horizon = Math.floor(now / (6 * 3600000));
-  const requestKey = `${place.lat}:${place.lon}:${horizon}`;
-  const [eotState, setEotState] = useState<{ key: string; data: Eot20Forecast } | null>(null);
-  useEffect(() => {
-    if (!isEot20GatewayEnabled()) return;
-    const controller = new AbortController();
-    void fetchEot20Forecast(place.lat, place.lon, now, controller.signal).then((data) => {
-      if (data && !controller.signal.aborted) setEotState({key:requestKey,data});
-    });
-    return () => controller.abort();
-  }, [requestKey, place.lat, place.lon]);
-  const eot = eotState?.key === requestKey ? eotState.data : null;
+  const eot = astronomicalTide;
   const rawTide = modelTideForecast(tidePoints, now);
   const eotEvents = eot?.extrema.map(({kind,t,levelM}) => ({kind,t,level:levelM})) ?? [];
   const tide = eot ? {
