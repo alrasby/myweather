@@ -42,46 +42,89 @@ export function needsRasterSeamGuard(agent: string, dpr: number): boolean {
   return /Android/i.test(agent) && Number.isFinite(dpr) && dpr >= 1.5;
 }
 
-/** Read-only, opt-in coverage for Esri IMG tiles, independent of ECMWF.
- * Never log imagery tile URLs, tile coordinates or precise device location. */
+/** Read-only Esri image coverage, separate from ECMWF. No tile URLs, geographic
+ * coordinates, or precise device location are ever included in the report.
+ *
+ * Leaflet's tile.current set includes buffered offscreen images and can omit
+ * tiles that have not even been created for the latest screen. Therefore an
+ * apparent 6/6 loaded 'current' set does NOT prove the visible screen is covered.
+ * Count every expected grid position from the actual map pixel bounds, then
+ * demand a real, successfully decoded image at the matching tile coordinate.
+ */
 export type SatelliteRasterLayerLike = {
   _tileZoom?: number;
   _tiles?: Record<string, {
-    current?: boolean; loaded?: number; coords?: { z?: number };
+    current?: boolean; loaded?: number;
+    coords?: { x?: number; y?: number; z?: number };
     el?: object & { complete?: boolean; naturalWidth?: number };
   }>;
   isLoading?: () => boolean;
 };
+export type SatelliteRasterViewport = Readonly<{
+  minX: number; maxX: number; minY: number; maxY: number;
+  tileWidth: number; tileHeight: number;
+}>;
 export type SatelliteRasterCoverage = Readonly<{
   active: boolean; required: number; delivered: number; pending: number;
-  failed: number; loading: boolean; complete: boolean;
+  missing: number; failed: number; loading: boolean; complete: boolean;
 }>;
 export function snapshotSatelliteRasterCoverage(
-  layer: SatelliteRasterLayerLike | null, zoom: number, failedTiles?: WeakSet<object>,
+  layer: SatelliteRasterLayerLike | null,
+  zoom: number,
+  failedTiles: WeakSet<object> | undefined,
+  viewport: SatelliteRasterViewport,
 ): SatelliteRasterCoverage {
-  if (!layer) return {
-    active: false, required: 0, delivered: 0, pending: 0,
-    failed: 0, loading: false, complete: false,
-  };
-  const tiles = Object.values(layer._tiles ?? {}).filter((tile) => tile.current === true);
-  const compatible = Number.isFinite(zoom) && Number.isFinite(layer._tileZoom) &&
-    Math.abs(layer._tileZoom! - zoom) <= 0.01;
-  let delivered = 0, failed = 0;
-  for (const tile of tiles) {
-    const img = tile.el;
-    if (!img) continue;
-    const broken = failedTiles?.has(img) === true ||
-      (img.complete === true && img.naturalWidth === 0);
-    if (broken) { failed++; continue; }
-    if (compatible && tile.coords?.z === layer._tileZoom && tile.loaded &&
-      img.complete === true && typeof img.naturalWidth === "number" &&
-      img.naturalWidth > 0) delivered++;
+  const loading = layer?.isLoading?.() === true;
+  const empty = (active: boolean): SatelliteRasterCoverage => ({
+    active, required: 0, delivered: 0, pending: 0,
+    missing: 0, failed: 0, loading, complete: false,
+  });
+  if (!layer) return empty(false);
+  const tileZoom = layer._tileZoom;
+  if (!Number.isInteger(zoom) || !Number.isInteger(tileZoom) ||
+      tileZoom !== zoom ||
+      !Object.values(viewport).every(Number.isFinite) ||
+      viewport.tileWidth <= 0 || viewport.tileHeight <= 0 ||
+      viewport.maxX <= viewport.minX || viewport.maxY <= viewport.minY) {
+    return empty(true);
   }
-  const required = tiles.length;
-  const pending = Math.max(0, required - delivered - failed);
-  const loading = layer.isLoading?.() === true;
+  const minX = Math.floor(viewport.minX / viewport.tileWidth);
+  const maxX = Math.ceil(viewport.maxX / viewport.tileWidth) - 1;
+  // EPSG:3857 is periodic in x, but it has no valid polar tiles beyond the
+  // native mercator world. Preserve negative and >world x across long pans.
+  const nativeMaxY = 2 ** tileZoom! - 1;
+  const minY = Math.max(0, Math.floor(viewport.minY / viewport.tileHeight));
+  const maxY = Math.min(nativeMaxY, Math.ceil(viewport.maxY / viewport.tileHeight) - 1);
+  const required = (maxX - minX + 1) * (maxY - minY + 1);
+  // This is an opt-in diagnostic, not a rendering operation. Fail closed on
+  // invalid or unexpectedly massive screen geometry rather than iterating.
+  if (!Number.isSafeInteger(required) || required <= 0 || required > 4096) return empty(true);
+
+  const tiles = new Map<string, NonNullable<SatelliteRasterLayerLike["_tiles"]>[string]>();
+  for (const tile of Object.values(layer._tiles ?? {})) {
+    if (tile.current !== true || tile.coords?.z !== tileZoom ||
+        !Number.isInteger(tile.coords?.x) || !Number.isInteger(tile.coords?.y)) continue;
+    tiles.set(`${tile.coords!.x},${tile.coords!.y}`, tile);
+  }
+  let delivered = 0, failed = 0, missing = 0;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const tile = tiles.get(`${x},${y}`);
+      if (!tile) { missing++; continue; }
+      const image = tile.el;
+      if (!image) continue;
+      if (failedTiles?.has(image) === true ||
+          (image.complete === true && image.naturalWidth === 0)) {
+        failed++;
+        continue;
+      }
+      if (tile.loaded && image.complete === true &&
+          typeof image.naturalWidth === "number" && image.naturalWidth > 0) delivered++;
+    }
+  }
+  const pending = required - delivered - failed;
   return {
-    active: true, required, delivered, pending, failed, loading,
-    complete: compatible && required > 0 && pending === 0 && failed === 0 && !loading,
+    active: true, required, delivered, pending, missing, failed, loading,
+    complete: delivered === required && missing === 0 && failed === 0 && !loading,
   };
 }
