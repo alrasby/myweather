@@ -40,7 +40,7 @@ Before calling a station/model **high accuracy**, require:
 - Compared benchmarks: PyFES alone, PyFES + persistent station bias, PyFES + learned meteorological residual;
 - AI activates **only where its out-of-sample errors improve upon FES + bias**; never train on generated/guessed gauges or fabricate missing predictions.
 
-A compact residual learner could use preceding trusted gauge readings and forecast pressure, wind vector, air pressure trend, and tidal phase to estimate *non-astronomical residual*, with a strictly capped correction, calibration and automatic shutoff on data drift. ML must never replace PyFES's lunar/solar harmonic forecast. AI correction **is not implemented or active yet** because the project lacks trusted gauge feeds and cross-validated training data.
+A compact residual learner could use preceding trusted gauge readings and forecast pressure, wind vector, air pressure trend, and tidal phase to estimate *non-astronomical residual*, with a strictly capped correction, calibration and automatic shutoff on data drift. ML must never replace PyFES's lunar/solar harmonic forecast. A **dormant 4-weight ridge residual learner** is now implemented in `gauge_residual.py` and tested with synthetic *contract-only* fixtures. It requires at least 30 days of datum-aligned, verified gauge observations and a chronological held-out segment, and refuses activation unless it beats an independent constant-bias baseline by at least 10% and 1.5 cm MAE. It predicts only the meteorological residual; it is not integrated or active in Android or the FES production adapter, because no genuine gauge source or model data has been provided. The synthetic tests are **not** tide accuracy validation.
 
 ## Existing card
 
