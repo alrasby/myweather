@@ -36,16 +36,22 @@ export function upgradeInitialCities(
   saved: readonly Place[], activeId: string,
 ): { places: Place[]; activeId: string; changed: boolean } {
   if (!saved.length) return { places: INITIAL_CITIES.map((p) => ({ ...p })), activeId: MUSCAT.id, changed: true };
-  const replacesKhoud = saved.some(isKhoud);
-  const replacesPrague = saved.some(isPrague);
-  if (!replacesKhoud && !replacesPrague) return { places: saved.slice(), activeId, changed: false };
-  // Preserve extra user-added cities and their order, replacing only the two
-  // explicitly requested sample locations. Never silently change elsewhere.
-  const upgraded = saved.map((p) => isKhoud(p) ? { ...MUSCAT } : isPrague(p) ? { ...LONDON } : { ...p });
-  if (!upgraded.some((p) => sameCity(p, MUSCAT))) upgraded.unshift({ ...MUSCAT });
+  // Never overwrite a real user's saved city merely because it is named
+  // Prague or Al Khoud. Only migrate the recognizable original starter set.
+  const oldStarter = saved.some(p => p.primary && isKhoud(p))
+    && saved.some(isPrague)
+    && saved.some(p => sameCity(p, NEW_YORK))
+    && saved.some(p => sameCity(p, BEIJING));
+  if (!oldStarter) return { places: saved.slice(), activeId, changed: false };
+  const upgraded = saved.map(p => isKhoud(p) ? { ...MUSCAT } : isPrague(p) ? { ...LONDON } : { ...p });
   const dedup: Place[] = [];
-  for (const p of upgraded) if (!dedup.some((item) => sameCity(item, p))) dedup.push(p);
-  const muscat = dedup.find((p) => sameCity(p, MUSCAT))!;
-  const places = [muscat, ...dedup.filter((p) => p !== muscat)].map((p, i) => ({ ...p, primary: i === 0 }));
-  return { places, activeId: muscat.id, changed: true };
+  for (const p of upgraded) if (!dedup.some(item => sameCity(item, p))) dedup.push(p);
+  const muscat = dedup.find(p => sameCity(p, MUSCAT));
+  if (!muscat) return { places: saved.slice(), activeId, changed: false };
+  const places = [muscat, ...dedup.filter(p => p !== muscat)].map((p, i) => ({ ...p, primary: i === 0 }));
+  const selected = saved.find(p => p.id === activeId);
+  const mappedActive = selected
+    ? isKhoud(selected) ? MUSCAT.id : isPrague(selected) ? LONDON.id : activeId
+    : activeId;
+  return { places, activeId: mappedActive, changed: true };
 }
