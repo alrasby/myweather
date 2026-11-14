@@ -58,8 +58,9 @@ def query_prediction(raw_path: str) -> tuple[float, float, datetime, int]:
     return lat, lon, start, hours
 
 
-def serialized_prediction(payload: dict) -> bytes:
-    if (not isinstance(payload, dict) or payload.get("source") != "FES2022b" or
+def serialized_prediction(payload: dict, source: str = "FES2022b") -> bytes:
+    if (source not in ("FES2022b", "EOT20") or
+        not isinstance(payload, dict) or payload.get("source") != source or
         payload.get("datum") != "atlas_mean_sea_level" or
         payload.get("height_unit") != "m" or
         payload.get("status") != "physical_model_unvalidated_at_local_gauge" or
@@ -77,7 +78,11 @@ def serialized_prediction(payload: dict) -> bytes:
 
 class TideGateway:
     def __init__(self, predictor: Callable, *,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 source: str = "FES2022b"):
+        if source not in ("FES2022b", "EOT20"):
+            raise ValueError("unsupported-tide-source")
+        self.source = source
         self.predictor = predictor
         self.clock = clock
         self.cache: OrderedDict[tuple, tuple[float, bytes]] = OrderedDict()
@@ -106,7 +111,12 @@ class TideGateway:
                 # The actual evaluator is operator-owned PyFESAtlas. The HTTP
                 # gateway does not accept client-supplied samples or models.
                 result = predict(lat, lon, start, hours, self.predictor)
-                encoded = serialized_prediction(result)
+                if self.source == "EOT20":
+                    from .eot20_global import EOT20_CITATION
+                    result.update(source="EOT20", model_version="EOT20-final",
+                                  method="PyFES Darwin global astronomical tide",
+                                  license="CC-BY-4.0", citation=EOT20_CITATION)
+                encoded = serialized_prediction(result, self.source)
             except (TideUnavailable, ValueError, TypeError, OverflowError):
                 return 503, b'{"status":"unavailable"}'
             with self.cache_lock:
@@ -148,7 +158,8 @@ def handler_for(gateway: TideGateway, origins: frozenset[str] = frozenset()):
                 return
             parsed = urlsplit(self.path)
             if parsed.path == "/healthz" and not parsed.query:
-                self._reply(200, b'{"ready":true,"source":"FES2022b","public":false}')
+                self._reply(200, json.dumps({"ready": True, "source": gateway.source,
+                                             "public": False}).encode("utf-8"))
                 return
             try:
                 lat, lon, start, hours = query_prediction(self.path)
