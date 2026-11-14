@@ -57,6 +57,10 @@ def prepare() -> int:
 
 
 if __name__ == "__main__":
+    import sys
+    if "--prepare" in sys.argv:
+        sys.argv.remove("--prepare")
+        raise SystemExit(prepare())
     try:
         listen()
     except (TideUnavailable, ValueError) as error:
