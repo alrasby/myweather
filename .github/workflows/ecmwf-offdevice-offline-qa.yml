@@ -1,0 +1,31 @@
+name: ECMWF Off-Device — Offline Integrity QA
+on:
+  pull_request:
+    paths:
+      - 'project/forecast-tiles/**'
+      - 'project/src/weather/readyTile*.ts'
+      - 'project/src/weather/tinyTileDemandModel*.ts'
+      - '.github/workflows/ecmwf-offdevice-offline-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ecmwf-offdevice-offline-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-backed-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify bounded PNG storage, immutable HTTP raster gateway, model metadata and geographic metatiles
+        working-directory: project
+        run: |
+          node --test forecast-tiles/diskTileCache.test.mjs forecast-tiles/gateway.test.mjs forecast-tiles/metatiles.test.mjs forecast-tiles/pngIntegrity.test.mjs
+      - name: Verify Android ready-tile prototype without enabling it
+        working-directory: project
+        run: |
+          node --experimental-strip-types --test src/weather/readyTileClient.test.ts src/weather/readyTilePlan.test.ts src/weather/readyTilePilotConfig.test.ts src/weather/tinyTileDemandModel.test.ts
