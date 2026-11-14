@@ -540,7 +540,14 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(model.includes("if (!this.visible || !this.spatialBudget.allow) return;"));
  assert.ok(model.includes("this.viewportRenderer?.clear();"));
  assert.ok(model.includes("majorCoverageChange = zoomChanged || cancelledSpeculation"));
- assert.ok(model.includes("invalidateZoom?.(zoom, cancelledSpeculation)"));
+ assert.ok(!model.includes("invalidateZoom?.(zoom, cancelledSpeculation)"),
+   "never reset raster counters and then await tileload on cached Leaflet canvases");
+ assert.ok(model.includes("for (const step of [...this.frames.keys()]) this.discardFrame(step);"),
+   "a major pan needs fresh model image-layer instances");
+ assert.ok(model.includes("cancelledSpeculation = significantSpatialMove(origin,"),
+   "quick flings must be checked at the final camera position, not sampled move only");
+ assert.ok(model.includes("if (this.visible) this.pump();"),
+   "new requested model hour must actually mount and load");
  assert.ok(screen.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
  assert.ok(screen.includes("if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.()"));
 });
