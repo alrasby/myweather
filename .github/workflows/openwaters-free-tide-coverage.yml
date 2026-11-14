@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Probe open no-key tide stations and prediction coverage
         run: |
           python - <<'PY'
@@ -80,3 +84,37 @@ jobs:
                   print("OPEN_WATERS_CORS",origin,repr(allowed),r.status)
                   assert allowed=="*" or allowed==origin, "browser fetch origin not permitted"
           PY
+
+      - name: Actual Open Waters API must pass Android source validator
+        working-directory: project
+        run: |
+          node --experimental-strip-types --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import {parseOpenWatersTide} from "./src/weather/openWatersTideClient.ts";
+          const h=3600000, now=Date.now();
+          const qs=(lat,lon)=>new URLSearchParams({
+            latitude:String(lat),longitude:String(lon),
+            start:new Date(now-6*h).toISOString(),
+            end:new Date(now+42*h).toISOString(),units:"meters"
+          });
+          for(const [label,lat,lon,expected] of [
+            ["Muscat",23.588,58.3829,true],
+            ["CapeTown",-33.925,18.423,true],
+            ["Rabat",34.021,-6.841,false],
+            ["NewYork",40.713,-74.006,true],
+            ["Hammerfest",70.663,23.682,true]
+          ]){
+            const query=qs(lat,lon);
+            const urls=["timeline","extremes"].map(
+              path=>"https://api.openwaters.io/tides/"+path+"?"+query);
+            const bodies=await Promise.all(urls.map(async u=>{
+              const response=await fetch(u,{headers:{Accept:"application/json"}});
+              assert.equal(response.status,200,u);
+              return await response.json();
+            }));
+            const parsed=parseOpenWatersTide(bodies[0],bodies[1],now);
+            console.log(label,"VERIFIED_NEARBY_STATION",!!parsed,
+              parsed?.stationName ?? "none",parsed?.distanceKm ?? "far");
+            assert.equal(!!parsed,expected,label+" cannot lie about station proximity");
+          }
+          JS
