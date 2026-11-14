@@ -426,7 +426,7 @@ function TideCard({
               NOT astronomical gauge-calibrated tide predictions. */}
           <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? eot ? "فلكي" : "تقديري" : eot ? "Model" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
           <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? eot ? "فلكي" : "تقديري" : eot ? "Model" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
-          <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
+          <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={eot ? "Open-Meteo Marine" : t(lang, "now")} />
         </div>
       <div dir="ltr">
         <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={lang === "ar" ? "مستوى سطح البحر النموذجي التقديري" : "Estimated modelled sea level"}>
