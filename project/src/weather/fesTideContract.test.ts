@@ -50,6 +50,8 @@ test("reject missing/out-of-order forecast samples, wrong station, and false ext
  assert.equal(validate({...p,samples:p.samples.map((s,i)=>i===12?{...s,time:stamp(start+13*300000)}:s)}),null);
  assert.equal(validate({...p,samples:p.samples.map((s,i)=>i===12?{...s,level_m:Number.NaN}:s)}),null);
  assert.equal(validate({...p,extrema:[{kind:"high",time:stamp(start+18*300000),level_m:10,time_resolution_minutes:5}]}),null);
+ assert.equal(validate({...p,extrema:[{kind:"high",time:p.samples[36].time,level_m:p.samples[36].level_m,time_resolution_minutes:5}]}),null,
+  "a real low cannot be relabelled as a high, even with exact source values");
  assert.equal(validate({...p,extrema:[...p.extrema].reverse()}),null);
  assert.equal(validate({...p,start:stamp(start+300000)}),null);
 });
