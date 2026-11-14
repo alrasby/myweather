@@ -137,16 +137,21 @@ try{
   // cloud PNG ALPHA directly at the city's coordinates for matching UTC hours.
   // Alpha is a VISUAL palette channel, never meteorological cloud percent,
   // and cannot establish which independent model is observationally correct.
-  const london={lat:51.5074,lon:-0.1278},londonTile=tileAt(7,london.lat,london.lon);
+  const london={lat:51.5074,lon:-0.1278};
   const disputedUtcTimes=['2026-11-14T16:00:00.000Z','2026-11-15T01:00:00.000Z'];
   const sampleTimes=disputedUtcTimes.filter(t=>manifest.validTimes.includes(t));
   if(!sampleTimes.length)sampleTimes.push(manifest.validTimes[hour]);
-  for(const validTime of sampleTimes){
-    const sourceHour=manifest.validTimes.indexOf(validTime);
-    const real=await tile('london-cloud-'+validTime,londonTile,'cloud_cover',sourceHour);
-    report.cityCloudSamples.push({city:'London, UK',validTime,runId:manifest.runId,
-      ...sourceCloudPixel(real.bytes,londonTile.z,london.lat,london.lon),
-      interpretation:'alpha-0..255-is-visual-cloud-opacity-not-cloud-percentage'});
+  // The reported screenshot was at map zoom 5. A single z7 point sample
+  // cannot prove what z5 actually renders, so compare BOTH native zooms.
+  for(const z of [5,7]){
+    const londonTile=tileAt(z,london.lat,london.lon);
+    for(const validTime of sampleTimes){
+      const sourceHour=manifest.validTimes.indexOf(validTime);
+      const real=await tile('london-z'+z+'-cloud-'+validTime,londonTile,'cloud_cover',sourceHour);
+      report.cityCloudSamples.push({city:'London, UK',zoom:z,validTime,runId:manifest.runId,
+        ...sourceCloudPixel(real.bytes,londonTile.z,london.lat,london.lon),
+        interpretation:'alpha-0..255-is-visual-cloud-opacity-not-cloud-percentage'});
+    }
   }
   // A subsequent immutable GET must yield exactly the same PNG bytes; no
   // second render, no substitution of a later run or altered image colors.
