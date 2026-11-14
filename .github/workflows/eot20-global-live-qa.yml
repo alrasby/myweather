@@ -1,0 +1,96 @@
+name: PyFES EOT20 — Real Global Atlas QA
+on:
+  push:
+    branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
+    paths:
+      - 'project/tide_service/eot20_bootstrap.py'
+      - 'project/tide_service/eot20_global.py'
+      - 'project/tide_service/eot20_server.py'
+      - 'project/tide_service/requirements-tide.txt'
+      - '.github/workflows/eot20-global-live-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: eot20-global-live-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-global-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install production library and NetCDF reader
+        run: python -m pip install --only-binary=:all: -r tide_service/requirements-tide.txt
+      - name: Verify official PyFES imported and offline contracts
+        run: |
+          python -c 'import pyfes; assert hasattr(pyfes, "evaluate_tide")'
+          python -m unittest tide_service.test_eot20_global -v
+      - name: Download and SHA256 verify genuine modified EOT20 grids
+        run: |
+          python -m tide_service.eot20_bootstrap \
+            --root "${{ runner.temp }}/myweather-eot20" --download-pinned-modified
+      - name: Live ocean harmonic prediction at worldwide test points
+        env:
+          EOT20_CONFIG: ${{ runner.temp }}/myweather-eot20/eot20.yaml
+          EOT20_MANIFEST: ${{ runner.temp }}/myweather-eot20/eot20.json
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from tide_service.eot20_global import PyFESEOT20Atlas, predict_eot20
+          atlas = PyFESEOT20Atlas(__import__('os').environ['EOT20_CONFIG'],
+                                  __import__('os').environ['EOT20_MANIFEST'])
+          now = datetime.now(timezone.utc)
+          start = now.replace(minute=(now.minute // 5) * 5, second=0, microsecond=0)
+          probes = {
+            "Gulf_of_Oman": (23.65, 58.7),
+            "North_Atlantic_US": (39.7, -72.5),
+            "Cape_Town_ocean": (-34.5, 17.0),
+            "Rabat_ocean": (34.0, -7.5),
+            "Norwegian_sea": (71.0, 24.0),
+          }
+          good = 0
+          for name,(lat,lon) in probes.items():
+              try:
+                  result = predict_eot20(lat,lon,start,12,atlas)
+                  assert result['source'] == 'EOT20'
+                  assert result['interpolation_points_min'] > 0
+                  assert len(result['samples']) == 145
+                  assert result['height_unit'] == 'm'
+                  assert result['not_for_navigation']
+                  print(name, 'REAL_EOT20', len(result['samples']),
+                        'extrema', len(result['extrema']),
+                        'range_m', round(min(p['level_m'] for p in result['samples']),3),
+                        round(max(p['level_m'] for p in result['samples']),3))
+                  good += 1
+              except Exception as ex:
+                  print(name, 'UNAVAILABLE', type(ex).__name__, str(ex)[:90])
+          assert good >= 3, f'only {good} global ocean stations accepted'
+          PY
+      - name: HTTP gateway parity with live atlas
+        env:
+          EOT20_CONFIG: ${{ runner.temp }}/myweather-eot20/eot20.yaml
+          EOT20_MANIFEST: ${{ runner.temp }}/myweather-eot20/eot20.json
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from tide_service.eot20_global import PyFESEOT20Atlas
+          from tide_service.gateway import TideGateway
+          start = datetime.now(timezone.utc)
+          start = start.replace(minute=(start.minute//5)*5,second=0,microsecond=0)
+          atlas = PyFESEOT20Atlas(os.environ['EOT20_CONFIG'], os.environ['EOT20_MANIFEST'])
+          code,payload = TideGateway(atlas,source='EOT20').response(23.65,58.7,start,12)
+          assert code == 200, code
+          model = json.loads(payload)
+          assert model['source']=='EOT20' and model['model_version']=='EOT20-final'
+          assert len(model['samples'])==145 and model['extrema']
+          assert model['license']=='CC-BY-4.0'
+          print('EOT20_LIVE_HTTP_PASSED',len(model['samples']),len(model['extrema']))
+          PY
