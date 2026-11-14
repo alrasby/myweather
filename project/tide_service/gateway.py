@@ -10,7 +10,6 @@ every query, never serializes model files, and returns no synthetic forecasts.
 """
 from __future__ import annotations
 
-import hmac
 import json
 import os
 import threading
@@ -87,7 +86,7 @@ class TideGateway:
         self.requests: deque[float] = deque()
 
     def response(self, lat: float, lon: float, start: datetime, hours: int) -> tuple[int, bytes]:
-        key = (round(lat, 4), round(lon, 4), start.isoformat(), hours)
+        key = (lat, lon, start.isoformat(), hours)  # never alias two distinct coastal points
         now = self.clock()
         with self.cache_lock:
             while self.requests and now - self.requests[0] >= 60:
