@@ -581,8 +581,11 @@ export class ModelField {
       this.viewportMoving = true;
     };
     const onMove = () => {
-      if (!this.visible || !this.viewportMoving || !origin || cancelledSpeculation ||
-          !this.frames.get(this.base)?.ready) return;
+      // A user jumping across continents must retire old-hour speculative
+      // .om reads even when the visible hour is still decoding. The old
+      // ready-only guard left huge stale future-hour datasets in flight,
+      // competing with the viewport the user actually requested.
+      if (!this.visible || !this.viewportMoving || !origin || cancelledSpeculation) return;
       const now = performance.now();
       if (now - lastSampleAt < 90) return;
       lastSampleAt = now;
