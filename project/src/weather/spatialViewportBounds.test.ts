@@ -29,6 +29,16 @@ test("dateline/wrapped views use correct global coverage, not a missing rectangu
   }
 });
 
+test("wrapped dateline map bounds preserve a narrow latitude band", () => {
+  const wrapped = spatialViewportBounds({ west: 170, east: -170, south: 12, north: 28 });
+  const unwrapped = spatialViewportBounds({ west: 170, east: 190, south: 12, north: 28 });
+  assert.deepEqual(wrapped, unwrapped);
+  assert.equal(wrapped[0], -180);
+  assert.equal(wrapped[2], 180);
+  assert.ok(wrapped[1] <= 12 && wrapped[3] >= 28);
+  assert.ok(wrapped[3] - wrapped[1] < 25, "avoid decoding both polar caps");
+});
+
 test("high latitudes remain in Web Mercator limits", () => {
   const bounds = spatialViewportBounds({ west: 5, east: 25, south: 75, north: 85 });
   assert.ok(bounds[3] <= 85.051129);
