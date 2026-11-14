@@ -155,3 +155,35 @@ provided or activated; no marine accuracy or navigation claim is implied.
 ### Leakage prevention enforced by code
 
 GaugeRecord now includes meteo_issued_at_utc and meteo_source. The residual learner rejects every pressure/wind training record unless it identifies a source forecast issued **at least one hour before** the predicted tide target and no more than ten days earlier. Historic observed pressure or wind recorded at/after the event cannot prove future prediction skill. FES-only and station-bias evaluation is still possible without archived meteorological forecasts. The unit fixtures merely exercise this contract, and cannot prove observations were genuinely obtained before issuance.
+
+## PyFES without AVISO+ — genuine NOAA station harmonics (pilot)
+
+PyFES Darwin also accepts known harmonic constituents from observed tide
+stations. A station-only adapter (noaa_station_pyfes.py) now supports
+verified NOAA CO-OPS harmonic metadata, without mislabelling it FES2022b:
+- Fixed NOAA HTTPS URLs, seven-digit station ID only, and exactly one real
+  tidal station metadata record.
+- NOAA metric harmonic amplitudes converted from metres to PyFES centimetres;
+  Greenwich (GMT) phases and eight or more finite named constituents.
+- Calls the official PyFES evaluate_tide_from_constituents when installed;
+  computes only for the exact published station location, never an arbitrary
+  nearby city or coastline. Not a global atlas.
+- Returns source, station, harmonic-zero datum (not chart datum), five-minute
+  values and physical turning points; never suitable for navigation.
+
+Operator-only smoke (needs official PyFES and NOAA network):
+    cd project
+    python -m tide_service.noaa_station_pyfes --station 9414290 --start 2026-11-14T00:00:00Z --hours 24
+
+Compare the harmonic forecast with NOAA's published predictions under a
+common vertical datum before public activation. No PyFES model data, NOAA
+station constants, credentials, or fabricated world coverage ship in APK.
+The default Android card is NOT connected to this pilot; the FES2022b
+licensing, dataset, HTTPS deployment and gauge-validation requirements remain.
+
+The Open-Meteo Marine line chart remains clearly attributed as modelled sea
+level, but its coarse turning points are no longer presented as verified
+astronomical high/low tides. Verified astronomical tides await a real source.
+Official docs:
+https://cnes.github.io/aviso-fes/user_guide.html
+https://api.tidesandcurrents.noaa.gov/mdapi/prod/
