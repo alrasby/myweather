@@ -78,7 +78,9 @@ test("worker cache keeps ECMWF variables resident without increasing active rast
 test("raster model state resolution and bounded cache locality are protected", () => {
   const src = read("project/src/weather/spatialViewportRenderer.ts");
   assert.ok(src.includes("postReadCallback: recordRead"));
-  assert.ok(src.includes("chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable)"));
+  assert.ok(src.includes("chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable, requestedBounds)"));
+  assert.ok(src.includes("spatialStateCoversBounds(s.dataOptions.bounds, wantedBounds)"),
+    "reject cached arrays from another continent before painting a tile");
   assert.ok(src.includes("nowMs - oldest.queuedAt >= 550"));
   assert.ok(src.includes("datasetReuses: this.reused"));
   assert.ok(src.includes("capturedReadRecoveries: this.recovered"));
