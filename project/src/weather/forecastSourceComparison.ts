@@ -19,7 +19,11 @@ export type PointSpatialComparison = {
   sameForecastHour:boolean;
   comparisonScope:"same-hour-different-models"|"different-forecast-hours"|"time-unavailable";
 };
-const iso=(ms:number)=>Number.isFinite(ms)?new Date(ms).toISOString():null;
+const iso=(ms:number)=>{
+  if(!Number.isFinite(ms))return null;
+  const date=new Date(ms);
+  return Number.isFinite(date.getTime())?date.toISOString():null;
+};
 export function comparePointWithSpatial(
   point:CityForecastPoint|null|undefined,
   ecmwfValidTime:string|null|undefined,
