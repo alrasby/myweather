@@ -55,7 +55,7 @@ export function createDiskTileCache({root, maxBytes = 384 * 1024 * 1024, maxEntr
         const info = await stat(full).catch(() => null);
         if (info?.isFile()) found.push({key, bytes: info.size, modified: info.mtimeMs});
       }
-      found.sort((a, b) => a.modified - b.modified);
+      found.sort((a, b) => a.modified - b.modified || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
       for (const file of found) {entries.set(file.key, {bytes: file.bytes}); storedBytes += file.bytes;}
       await makeRoom(0, 0);
     });
