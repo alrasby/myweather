@@ -91,3 +91,19 @@ test("satellite viewport follows repeated westward world copies and ignores offs
   assert.equal(snapshotSatelliteRasterCoverage(layer, 3, undefined, polar).required, 1,
     "imagery beyond north pole is not a valid Esri Mercator tile");
 });
+
+test("real native-z2 parent imagery covers zoom4 map when pixel scale is respected", () => {
+ const el={complete:true,naturalWidth:256};
+ const layer={_tileZoom:2,isLoading:()=>false,_tiles:{
+  a:{current:true,loaded:1,coords:{x:0,y:0,z:2},el},
+  b:{current:true,loaded:1,coords:{x:1,y:0,z:2},el},
+ }};
+ const region={minX:0,maxX:2048,minY:0,maxY:1024,tileWidth:256,tileHeight:256};
+ const ok=snapshotSatelliteRasterCoverage(layer,4,undefined,region);
+ assert.equal(ok.required,2);
+ assert.equal(ok.complete,true);
+ assert.equal(snapshotSatelliteRasterCoverage(layer,1,undefined,region).complete,false);
+ const shifted=snapshotSatelliteRasterCoverage(layer,4,undefined,{...region,maxX:3072});
+ assert.equal(shifted.missing,1);
+ assert.equal(shifted.complete,false);
+});
