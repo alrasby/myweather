@@ -32,5 +32,10 @@ jobs:
           python -m unittest tide_service.test_noaa_station_pyfes -v
       - name: Real NOAA San Francisco harmonic forecast, 12 hours (not app release)
         run: |
+          set +e
           python -m tide_service.noaa_station_pyfes --station 9414290 --start 2026-11-14T00:00:00Z --hours 12 > /tmp/pyfes-station.json
+          rc=$?
+          set -e
+          python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); print("PyFES station QA:", p.get("status", "success"), p.get("reason", ""))'
+          test "$rc" -eq 0
           python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); assert p["source"]=="NOAA_COOPS_STATION_HARMONICS" and p["method"].startswith("PyFES") and p["station_id"]=="9414290" and len(p["samples"])==145 and p["not_for_navigation"]'
