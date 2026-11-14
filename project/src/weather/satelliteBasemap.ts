@@ -5,6 +5,15 @@
  * may appear at the boundaries between separately transformed images.
  */
 export const SATELLITE_UNDERLAY_NATIVE_ZOOM = 4;
+/** Broad world pans must not display the dark map host while all detailed
+ * Esri tile requests are still pending. A z2 parent is a REAL satellite tile,
+ * not a fake background; it is kept only while low-zoom detail is incomplete.
+ * Importantly, do not request a third satellite grid at close zoom levels. */
+export const SATELLITE_WORLD_PARENT_NATIVE_ZOOM = 2;
+export function shouldKeepWorldSatelliteParent(zoom: number, detailedReady: boolean): boolean {
+  return Number.isFinite(zoom) && zoom >= 0 && zoom <= 5 && !detailedReady;
+}
+
 /** Retain the parent imagery while the detailed base layer is loading,
  * including when zooming OUT to z4. Removing it on zoomend exposed vertical
  * dark gaps before Esri's detail tiles had arrived. */
