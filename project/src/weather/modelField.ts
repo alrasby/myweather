@@ -1129,7 +1129,13 @@ export class ModelField {
       // Preserve the last fully rendered spatial frame while Leaflet refreshes
       // the visible viewport; do not expose the low-resolution global fallback
       // every time a cloud/rain/snow tile queue enters "loading".
-      const ready = spatialFrameReadyDuringRefresh(frame.ready, frame.loaded, frame.errored, frame.tileCounts);
+      // All three Leaflet grids must actually cover the CURRENT map, not
+      // merely have completed a previous region. This rejects a half-filled
+      // cloud/rain/snow frame before it can replace the genuine fallback.
+      const coverageCertified = made.every((layer, index) =>
+        certifiedCurrentLeafletTiles(layer, map.getZoom(), certifiedTiles[index]!) > 0);
+      const ready = spatialFrameReadyDuringRefresh(
+        frame.ready, frame.loaded, frame.errored, frame.tileCounts, coverageCertified);
       // Keep current genuine fallback until all three ECMWF layers finish,
       // rather than visibly replacing them in three separate passes.
       const preview = !this.compactSpatialTiles &&
@@ -1319,6 +1325,17 @@ export class ModelField {
         refreshBatch = (frame.ready || frame.previewReady) &&
           canStageSpatialRefresh(lastCompletedView, rasterView());
         frame.loaded[index] = false;
+        // A previously completed frame can start fetching fresh geography.
+        // Re-add this model hour to "loading" so the time player cannot
+        // advance and cancel it while new tiles are still in flight.
+        if (!this.loading.has(step)) {
+          this.loading.add(step);
+          startedAt = Date.now();
+          lastProgressAt = startedAt;
+          const prior = this.pendingTimers.get(step);
+          if (prior !== undefined) window.clearTimeout(prior);
+          this.pendingTimers.set(step, window.setTimeout(checkProgress, 1_500));
+        }
         frame.layerStartedAt[index] = Date.now();
         frame.layerFirstTileAt[index] = 0;
         frame.layerLastTileAt[index] = 0;
@@ -1338,14 +1355,12 @@ export class ModelField {
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
         if (frame.renderGeneration.ready() && frame.loaded.every(Boolean)) {
+          // Reveal staged genuine tiles BEFORE letting ECMWF replace the
+          // fallback. The previous 85-ms deferred release could switch the
+          // source while tiles were still CSS-hidden, exposing a dark block.
           if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
-          const expected = frame.renderGeneration.id;
-          frame.revealTimer = window.setTimeout(() => {
-            frame.revealTimer = undefined;
-            if (alive() && expected === frame.renderGeneration.id && frame.renderGeneration.ready()) {
-              frame.tileGates.forEach((gate) => gate.release());
-            }
-          }, 85);
+          frame.revealTimer = undefined;
+          frame.tileGates.forEach((gate) => gate.release());
         }
         refresh();
       });
