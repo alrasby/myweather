@@ -125,6 +125,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const sliderRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
   const timelineUtcRef = useRef<number | null>(null);
+  const visualClockRef = useRef<{timeMs:number;status:string;gapMinutes:number|null}|null>(null);
   const valueRef = useRef<HTMLSpanElement>(null);
   const clickTimer = useRef(0);
   const popupAbort = useRef<AbortController | null>(null);
@@ -196,6 +197,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
       timelineUtcRef.current = Number.isFinite(info.timeMs) ? info.timeMs : null;
+      visualClockRef.current = kindRef.current === 2
+        ? modelRef.current?.getMapClock(info.timeMs) ?? null : null;
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -228,7 +231,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       const current = prefsRef.current;
       const language = langRef.current;
       if (timeRef.current) {
-        timeRef.current.textContent = formatClock(info.timeMs, tzRef.current, language);
+        timeRef.current.textContent = formatClock(
+          visualClockRef.current?.timeMs ?? info.timeMs, tzRef.current, language);
       }
       if (valueRef.current) {
         if (kindRef.current === 2) {
@@ -1271,6 +1275,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 mapZoom: currentZoom ?? null,
                 viewportSpanDegrees,
                 mapTimelineUtc: timelineUtcRef.current === null ? null : new Date(timelineUtcRef.current).toISOString(),
+                mapLabelUtc: visualClockRef.current && Number.isFinite(visualClockRef.current.timeMs)
+                  ? new Date(visualClockRef.current.timeMs).toISOString() : null,
+                mapClockStatus: visualClockRef.current?.status ?? null,
+                mapClockGapMinutes: visualClockRef.current?.gapMinutes ?? null,
                 satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
                 // Local point forecast vs global ECMWF can legitimately differ.
@@ -1313,6 +1321,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
           </p>
           <p>{lang === "ar" ? "وقت شريط الخريطة (UTC)" : "Map timeline clock (UTC)"}: {timelineUtcRef.current === null ? "—" : new Date(timelineUtcRef.current).toISOString()}</p>
+          <p>{lang === "ar" ? "الوقت المكتوب على الصورة (UTC)" : "Visible map label UTC"}: {visualClockRef.current ? new Date(visualClockRef.current.timeMs).toISOString() : "—"}
+            {" · "}{visualClockRef.current?.status ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المطلوب" : "Requested model time"}: {weatherDiagnostics?.requestedValidTime ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المعروض" : "Displayed model time"}: {weatherDiagnostics?.displayedValidTime ?? "—"}</p>
           {(weatherDiagnostics?.compositedFrames?.length ?? 0) > 1 ? (
