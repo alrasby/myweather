@@ -1,0 +1,35 @@
+name: FES2022 Scientific Tide Adapter — Contract QA
+on:
+  push:
+    branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
+    paths:
+      - 'project/tide_service/**'
+      - '.github/workflows/fes2022-adapter-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fes2022-qa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tide-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test physical FES adapter contracts (no atlas available)
+        run: python -m unittest discover -s tide_service -p 'test_*.py' -v
+      - name: Verify operator atlas required (fail closed)
+        run: |
+          set +e
+          output=$(python -m tide_service.fes2022_predict --lat 23.588 --lon 58.3829 --start 2026-11-14T00:00:00Z --hours 48)
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          printf '%s\n' "$output" | python -c 'import json,sys; r=json.load(sys.stdin); assert r["status"]=="unavailable" and r["reason"]=="fes2022-atlas-config-required" and not r["samples"]'
