@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {decideSpatialViewport,ECMWF_REGIONAL_MIN_ZOOM} from "./spatialViewportBudget.ts";
 const view=(zoom:number,lonSpan:number,latSpan:number)=>({
- zoom,west:-15,east:-15+lonSpan,south:5,north:5+latSpan
+ zoom,west:-15,east:-15+lonSpan,south:-latSpan/2,north:latSpan/2
 });
 test("real Android video zoom 3 and zoom 5 must never trigger huge ECMWF data reads",()=>{
  assert.deepEqual(decideSpatialViewport(view(3,63.3,108.4)),{allow:false,reason:"world-scale"});
