@@ -45,3 +45,25 @@ A compact residual learner could use preceding trusted gauge readings and foreca
 ## Existing card
 
 Keep the established bottom-of-page tide-card position and auto-hide for true inland/no-data locations. When the service eventually becomes available, show provider, datum, reference location and confidence. Do not mix FES astronomical heights with Open-Meteo combined sea-level values; they represent different physical quantities and references.
+
+
+## Integrity attestation is mandatory for production
+PyFES by itself ships only the algorithm, NOT the FES2022b model. A production
+entrypoint now requires BOTH FES2022_CONFIG and FES2022_MANIFEST. The private
+manifest must contain:
+- edition = FES2022b
+- producer = CNES/LEGOS/Noveltis/CLS
+- quantity = ocean_tide_height
+- units = cm
+- datum = atlas_msl
+- format = cartesian-34 with **34 actual files**, or native-34 with one full native atlas
+- config_sha256 = actual SHA-256 of loaded YAML
+- files = full list of {path, sha256} objects, pointing at **real** atlas grids.
+
+All SHA-256 values are checked on service initialization, and tiny
+demonstration grids (total size under 500 MB) are rejected. This is
+**operator-attested integrity**, not a digital signature from CNES. Obtain
+and independently verify all the source data via AVISO. Do not commit
+the manifest or source grids to the public repository. Missing or invalid
+metadata means the program produces an explicit unavailable response with
+no fake sea-level points.
