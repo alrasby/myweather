@@ -533,6 +533,9 @@ export class ModelField {
     if (this.map && this.moveListener) this.map.off("move", this.moveListener);
     this.viewportMoving = false;
     this.viewportHoldUntil = 0;
+    if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
+    this.viewportSettleTimer = null;
+    this.viewportSettleUntil = 0;
     this.compactSpatialTiles = useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true);
     // A/B rollback for diagnosing vendor/device-specific worker regressions.
     // Never assume an experimental custom worker is available in every
@@ -925,6 +928,9 @@ export class ModelField {
       this.refreshSince = 0;
       this.viewportMoving = false;
       this.viewportHoldUntil = 0;
+      if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
+      this.viewportSettleTimer = null;
+      this.viewportSettleUntil = 0;
       this.playbackActive = false;
       this.lastScheduledAt = 0;
       this.fallbackForMissingHour = false;
@@ -1194,6 +1200,9 @@ export class ModelField {
     // A spatial frame may require dozens of range reads. Continue while real
     // tiles arrive, but terminate after a prolonged idle or bounded total time.
     const checkProgress = () => {
+      const previousTick = this.pendingTimers.get(step);
+      if (previousTick !== undefined) window.clearTimeout(previousTick);
+      this.pendingTimers.delete(step);
       if (!alive() || frame.ready) return;
       // Leaflet may finish its active tile queue while a moveend has
       // invalidated the former generation's load callback. Recover only
@@ -1523,6 +1532,9 @@ export class ModelField {
     this.moveListener = null;
     this.viewportMoving = false;
     this.viewportHoldUntil = 0;
+    if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
+    this.viewportSettleTimer = null;
+    this.viewportSettleUntil = 0;
     this.visible = false;
     this.playbackActive = false;
     this.seq += 1; // invalidate asynchronous frame and metadata callbacks
