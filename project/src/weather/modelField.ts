@@ -10,9 +10,9 @@ import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
-import { spatialTileOptions, useCompactSpatialTiles } from "@/weather/spatialTilePolicy";
+import { spatialTileOptions, spatialPhysicalTileSize, useCompactSpatialTiles } from "@/weather/spatialTilePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
-import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
+import { spatialTileAlignedBounds } from "@/weather/spatialViewportBounds";
 import { spatialZoomNeedsNewCoverage } from "@/weather/spatialZoomCoverage";
 import { decideSpatialViewport, type SpatialViewportDecision } from "@/weather/spatialViewportBudget";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
@@ -565,10 +565,13 @@ export class ModelField {
     // The official Open-Meteo Leaflet example uses this exact hook.
     const updateBounds = () => {
       const bounds = map.getBounds();
-      updateCurrentBounds(spatialViewportBounds({
+      // Align the .om partial read to the ACTUAL Leaflet source tile grid.
+      // Otherwise a canvas cached after a small pan contains transparent
+      // rectangles outside the previous screen's bounded data window.
+      updateCurrentBounds(spatialTileAlignedBounds({
         west: bounds.getWest(), south: bounds.getSouth(),
         east: bounds.getEast(), north: bounds.getNorth(),
-      }));
+      }, map.getZoom(), spatialPhysicalTileSize(this.compactSpatialTiles, map.getZoom())));
     };
     updateBounds();
     // Register before GridLayer moveend listeners: when pan/zoom finishes
@@ -778,7 +781,11 @@ export class ModelField {
         this.compactSpatialTiles && next.rasterSize <= 512 ? 4 : 6;
     }
     const sampleChanged = this.compactSpatialTiles && previous.rasterSize !== next.rasterSize;
-    if (next.allow === previous.allow && !sampleChanged) return;
+    // Source grid transition at the world/regional threshold must remount:
+    // tileSize and zoomOffset are fixed when Leaflet creates its layer.
+    const worldChanged = this.compactSpatialTiles &&
+      (previous.reason === "world-scale") !== (next.reason === "world-scale");
+    if (next.allow === previous.allow && !sampleChanged && !worldChanged) return;
     // Retire in-flight model hours only when the sampling level changes
     // or the viewport is invalid. Never disable ECMWF just for zoom <=5.
     this.clear();
@@ -1070,8 +1077,9 @@ export class ModelField {
     // Use coherent ECMWF model fields for actual cloud shape, precipitation
     // and snowfall instead of inflating low-resolution point forecasts.
     // Keep already-loaded tiles during gestures; load new coverage after idle.
-    const cloudOpts = spatialTileOptions("wx-clouds", this.compactSpatialTiles);
-    const rainOpts = spatialTileOptions("wx-model", this.compactSpatialTiles);
+    const worldCompact = this.compactSpatialTiles && this.spatialBudget.reason === "world-scale";
+    const cloudOpts = spatialTileOptions("wx-clouds", this.compactSpatialTiles, worldCompact);
+    const rainOpts = spatialTileOptions("wx-model", this.compactSpatialTiles, worldCompact);
     const renderUrl = (variable: string) => {
       const url = tileUrl(variable, step, this.pinnedRun);
       // The upstream Leaflet adapter draws an ImageBitmap of ANY size into
