@@ -40,6 +40,37 @@ class NOAAStationPyFESContract(unittest.TestCase):
         self.assertEqual(result["station_id"], "9414290")
         self.assertTrue(result["not_for_navigation"])
 
+    def test_noaa_real_collection_shape_and_metadata_request(self):
+        import json
+        from tide_service.noaa_station_pyfes import NOAA_API
+        class FakeResponse:
+            def __init__(self, data):
+                self.data = json.dumps(data).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+            def read(self, n):
+                return self.data[:n]
+        class FakeOpener:
+            def __init__(self):
+                self.paths = []
+            def open(self, req, timeout):
+                self.paths.append(req.full_url)
+                if req.full_url.endswith("9414290.json"):
+                    return FakeResponse({"count": 1, "stations": [STATION]})
+                if req.full_url.endswith("harcon.json?units=metric"):
+                    return FakeResponse(harmonic())
+                raise AssertionError("unexpected URL")
+        opener = FakeOpener()
+        station, harcon = load_noaa_station("9414290", opener)
+        self.assertEqual(station["id"], "9414290")
+        self.assertEqual(len(harcon["HarmonicConstituents"]), 8)
+        self.assertEqual(opener.paths, [
+            NOAA_API + "9414290.json",
+            NOAA_API + "9414290/harcon.json?units=metric",
+        ])
+
     def test_mismatching_or_nontidal_station_fails_closed(self):
         for value in [{**STATION, "id": "9999999"}, {**STATION, "tidal": False}]:
             with self.assertRaisesRegex(TideUnavailable, "unverified"):
