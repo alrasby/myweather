@@ -38,7 +38,8 @@ export function upgradeInitialCities(
   if (!saved.length) return { places: INITIAL_CITIES.map((p) => ({ ...p })), activeId: MUSCAT.id, changed: true };
   // Never overwrite a real user's saved city merely because it is named
   // Prague or Al Khoud. Only migrate the recognizable original starter set.
-  const oldStarter = saved.some(p => p.primary && isKhoud(p))
+  const oldStarter = saved.filter(p => p.primary).length === 1
+    && saved[0]?.primary === true && isKhoud(saved[0])
     && saved.some(isPrague)
     && saved.some(p => sameCity(p, NEW_YORK))
     && saved.some(p => sameCity(p, BEIJING));
