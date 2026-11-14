@@ -1422,7 +1422,7 @@ export class ModelField {
     // A real Open-Meteo fallback and ECMWF are separate forecast products.
     // Do not cross-fade their coarse/fine raster imagery: the overlap is seen
     // as rectangular cloud/rain patches during fast pans and time playback.
-    const { fallback: fallbackForHour, snapCompleteModel: returningToReadyModel } =
+    const { fallback: fallbackForHour } =
       chooseWeatherSource(readySteps.has(this.base), this.sourceBackedFallback, this.fallbackForMissingHour);
     this.fallbackForMissingHour = fallbackForHour;
     const plan = fallbackForHour
@@ -1489,16 +1489,15 @@ export class ModelField {
     for (const [step, frame] of this.frames) {
       if (!frame.ready) continue;
       const goal = plan.goals.get(step) ?? 0;
-      const cur = frame.opacity < 0 ? 0 : frame.opacity;
-      // On a failed model hour the forecast clock is allowed to continue
-      // using the matching global field. Hide stale ECMWF imagery immediately
-      // instead of letting it linger as a seemingly current cloud pattern.
-      // Switching between unrelated data products must be atomic, not
-      // intermediate alpha=0.5 ECMWF atop alpha=1 fallback. Keep normal
-      // temporal interpolation between fully ready ECMWF forecast hours.
-      const shown = fallbackForHour || returningToReadyModel ? goal :
-        cooldown && goal === 0 ? 0 : cur + (goal - cur) * 0.28;
-      const value = Math.abs(goal - shown) < 0.02 ? goal : shown;
+      // SpatialFramePlan already provides the exact smooth physical blend
+      // between the two *valid* adjacent hours. Applying a second easing
+      // filter to each frame retained stale previous-hour imagery after the
+      // clock advanced (e.g. hour 13 still alpha .269 at hour 14 with only
+      // .006 requested blend). It also left the new hour under-opaque and
+      // could repeatedly toggle the global fallback source. Use plan weights
+      // directly, and clear any hour no longer participating immediately.
+      // The forecast clock remains smoothly interpolated by this.blend.
+      const value = goal;
       if (Math.abs(frame.opacity - value) < 0.01) continue;
       frame.opacity = value;
       for (const [idx, layer] of frame.layers.entries()) {
