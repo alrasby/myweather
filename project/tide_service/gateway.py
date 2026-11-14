@@ -21,7 +21,7 @@ from ipaddress import ip_address
 from urllib.parse import parse_qs, urlsplit
 from typing import Callable
 
-from .fes2022_predict import PyFESAtlas, TideUnavailable, predict, utc_time, validate_position
+from .fes2022_predict import PyFESAtlas, TideUnavailable, predict, utc_time, validate_position, regional_bounds
 
 MAX_BYTES = 300_000
 MAX_CACHE_ENTRIES = 96
@@ -176,7 +176,8 @@ def listen() -> None:
     if not 1 <= port <= 65535:
         raise TideUnavailable("invalid-listen-port")
     atlas = PyFESAtlas(os.environ.get("FES2022_CONFIG", ""),
-                       os.environ.get("FES2022_MANIFEST", ""))
+                       os.environ.get("FES2022_MANIFEST", ""),
+                       regional_bounds(os.environ.get("FES2022_BBOX", "")))
     origins = frozenset(o.strip() for o in
                         os.environ.get("TIDE_ALLOWED_ORIGINS", "").split(",") if o.strip())
     # A production reverse proxy performs HTTPS, authentication and a much
