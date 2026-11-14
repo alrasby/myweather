@@ -1019,7 +1019,10 @@ export class ModelField {
     if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
     if (frame?.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
     frame?.tileGates.forEach((gate) => gate.release());
-    frame && (frame.invalidateZoom = undefined);
+    if (frame) {
+      frame.invalidateZoom = undefined;
+      frame.revalidateCurrentTiles = undefined;
+    }
     this.frames.delete(step);
     this.loading.delete(step);
     // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
@@ -1076,6 +1079,10 @@ export class ModelField {
       adapter.createTileLayer(renderUrl("precipitation"), rainOpts),
       adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
+    // DOM canvases that actually emitted a tileload in THIS model hour.
+    // Leaflet can retain/reuse them after a pan without another tileload.
+    const certifiedTiles = Array.from({ length: SPATIAL_LAYER_COUNT },
+      () => new WeakSet<object>());
     const frame = {
       layers: made, token, opacity: -1, ready: false, coverageZoom: null as number | null, requestedZoom: map.getZoom(),
       invalidateZoom: undefined as ((zoom: number, force?: boolean) => void) | undefined,
@@ -1194,10 +1201,19 @@ export class ModelField {
       // no pending tile requests. Never fabricate an ECMWF completion.
       let recovered = false;
       for (const [index, layer] of made.entries()) {
-        if (frame.loaded[index] || frame.layerLastTileAt[index] === 0 ||
-            layer.isLoading?.() !== false) continue;
+        if (frame.loaded[index] && frame.tileCounts[index]! > 0) continue;
+        if (frame.errored.has(index) || layer.isLoading?.() !== false) continue;
+        // Detect genuinely reusable current-viewport canvases. A Leaflet
+        // GridLayer can have all necessary tiles cached and emit NO new
+        // tileload/load after moveend, leaving the old epoch permanently
+        // false. Only previously certified DOM tiles at the CURRENT zoom
+        // may satisfy the new epoch; an unrelated tile count cannot.
+        const cachedCount = certifiedCurrentLeafletTiles(
+          layer, map.getZoom(), certifiedTiles[index]!);
+        if (!cachedCount && frame.layerLastTileAt[index] === 0) continue;
         const token = frame.layerGeneration[index]!;
         if (!frame.renderGeneration.loaded(index, token)) continue;
+        frame.tileCounts[index] = Math.max(frame.tileCounts[index]!, cachedCount);
         frame.loaded[index] = true;
         frame.layerFinishedAt[index] = Date.now();
         recovered = true;
@@ -1213,9 +1229,12 @@ export class ModelField {
         giveUp();
         return;
       }
-      this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+      this.pendingTimers.set(step, window.setTimeout(checkProgress, 1_500));
     };
-    this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+    // Recover cached canvases promptly, not after an apparent five-second
+    // blank interval. This is a metadata-only check, not an extra .om read.
+    frame.revalidateCurrentTiles = checkProgress;
+    this.pendingTimers.set(step, window.setTimeout(checkProgress, 1_000));
     frame.invalidateZoom = (zoom, force = false) => {
       if (!alive() || (!force && !spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom))) return;
       frame.requestedZoom = zoom;
@@ -1327,6 +1346,7 @@ export class ModelField {
           tileStart.delete(event!.tile!);
         }
         frame.tileCounts[index] += 1;
+        if (event?.tile) certifiedTiles[index]!.add(event.tile);
         lastProgressAt = Date.now();
         frame.layerFirstTileAt[index] ||= lastProgressAt;
         frame.layerLastTileAt[index] = lastProgressAt;
