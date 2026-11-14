@@ -45,7 +45,11 @@ export function spatialTileOptions(
     // scheduling two extra rings of expensive OM decoding for every hour.
     // At low zoom the physical source crop covers the visible tile grid
     // exactly. Do not pre-decode offscreen rings of entire continents.
-    keepBuffer: compact && world ? 0 : 1,
+    // The aligned .om read covers current physical raster tiles only.
+    // Offscreen buffered tiles would be drawn with partial/transparent data
+    // and then reused by Leaflet without a new tileload on later pans.
+    // Disable that cache on non-isolated mobile; web keeps its old buffer.
+    keepBuffer: compact ? 0 : 1,
     maxNativeZoom: compact && !world ? 13 : 12,
     maxZoom: 16,
   };
