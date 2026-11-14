@@ -159,7 +159,7 @@ jobs:
           # The operator manifest records ABSOLUTE paths from the host.
           # Container provision() must regenerate its own manifest after
           # mount relocation, verifying all 17 actual dataset files again.
-          rm -f "$ATLAS_DIR/eot20.yaml" "$ATLAS_DIR/eot20.json"
+          sudo rm -f "$ATLAS_DIR/eot20.yaml" "$ATLAS_DIR/eot20.json"
           docker run --detach --rm --name myweather-eot20-live             --publish 127.0.0.1:8875:8080             --volume "$ATLAS_DIR:/data/eot20"             --env RAILWAY_ENVIRONMENT_ID=github-actions-isolated-qa             --env PORT=8080             --env TIDE_EOT20_ENABLED=1             --env TIDE_EDGE_TLS_TERMINATED=1             --env EOT20_DOWNLOAD_PINNED=0             myweather-pyfes:eot20-qa
           trap 'docker logs myweather-eot20-live | tail -n 30; docker stop -t 2 myweather-eot20-live || true' EXIT
           ready=0
