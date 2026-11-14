@@ -69,9 +69,13 @@ export class ReadyTileClient{
   this.onCoverageLost=onCoverageLost;this.prefetchImages=prefetchImages;
   this.base=readyTilesBase(base);this.manifest=parseReadyManifest(manifest);
  }
- get displayedTime():string|null{return this.current?this.manifest.validTimes[this.current.hour]??null:null;}
- get displayedHour():number|null{return this.current?.hour??null;}
- isReady(hour:number):boolean{return this.current?.hour===hour||!!this.incoming&&this.incoming.hour===hour&&this.incoming.loaded.every(Boolean)&&!this.incoming.failed;}
+ get displayedTime():string|null{return this.current&&!this.current.coverageLost?this.manifest.validTimes[this.current.hour]??null:null;}
+ get displayedHour():number|null{return this.current&&!this.current.coverageLost?this.current.hour:null;}
+ isReady(hour:number):boolean{
+  return !!(this.current?.hour===hour&&!this.current.coverageLost)||
+   !!(this.incoming&&this.incoming.hour===hour&&this.incoming.loaded.every(Boolean)&&
+      !this.incoming.failed&&this.coversViewport(this.incoming));
+ }
  private disposeFrame(f:Frame|null){if(!f)return;if(f.timer)clearTimeout(f.timer);for(const layer of f.layers)layer.remove();}
  private clearPredictor(){for(const img of this.prefetched.values())img.src='';this.prefetched.clear();}
  /** A 'load' event only means Leaflet's queue drained. Count EVERY source
@@ -145,7 +149,7 @@ export class ReadyTileClient{
    // Only adjacent hours from the same pinned forecast run may blend.
    // GPU fades both complete authentic frames; no pixel generation or optical flow.
    const reduceMotion=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-   const adjacent=!!old&&Math.abs(old.hour-hour)===1&&!reduceMotion;
+   const adjacent=!!old&&!old.coverageLost&&Math.abs(old.hour-hour)===1&&!reduceMotion;
    if(old&&adjacent){
     for(const layer of [...old.layers,...frame.layers]){
      const element=layer.getContainer?.();
