@@ -350,11 +350,18 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         }).addTo(map);
         imageryRef.current = imagery;
         const detailTileErrors = new WeakSet<object>();
-        const tileCoverage = (layer: TileLayer, failed: WeakSet<object>) =>
-          snapshotSatelliteRasterCoverage(
+        const tileCoverage = (layer: TileLayer, failed: WeakSet<object>) => {
+          const pixels = map!.getPixelBounds();
+          const size = layer.getTileSize();
+          return snapshotSatelliteRasterCoverage(
             map!.hasLayer(layer) ? layer as unknown as SatelliteRasterLayerLike : null,
-            map!.getZoom(), failed,
+            map!.getZoom(), failed, {
+              minX: pixels.min.x, maxX: pixels.max.x,
+              minY: pixels.min.y, maxY: pixels.max.y,
+              tileWidth: size.x, tileHeight: size.y,
+            },
           );
+        };
         satelliteDiagnosticsRef.current = () => ({
           detail: tileCoverage(imagery, detailTileErrors),
           underlay: tileCoverage(underlay, underlayTileErrors),
