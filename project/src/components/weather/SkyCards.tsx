@@ -6,12 +6,10 @@ import { hasDisplayableCoastalTide, modelTideForecast } from "@/weather/marineTi
 import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
 import {
-  formatHour,
   formatHour24,
   formatMeters,
   formatNumber,
   formatPercent,
-  formatSignedMeters,
   formatWind,
   placeTitle,
 } from "@/weather/format";
