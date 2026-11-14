@@ -116,3 +116,37 @@ test("a short source outage reuses only verified metadata and eventually fails c
   assert.equal((await fetch(base+"/v1/manifest.json")).status,503);
  }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
 });
+
+test('HTTP gateway enforces persistent PNG disk limits while keeping pinned forecast tiles valid',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'mw-gateway-quota-'));
+ let renders=0;
+ const api=createTileGateway({cacheDir:dir,maxCacheBytes:png.length*2,maxCacheEntries:2,
+  fetchMetadata:async()=>meta,renderTile:async()=>{renders++;return png;}});
+ api.server.listen(0,'127.0.0.1');await new Promise(done=>api.server.once('listening',done));
+ const base='http://127.0.0.1:'+api.server.address().port;
+ try{
+  const urls=[0,1,2].map(x=>base+'/v1/tiles/20261113T0000Z/1/cloud_cover/2/'+x+'/1.png');
+  for(const url of urls){const res=await fetch(url);assert.equal(res.status,200);assert.equal(res.headers.get('content-type'),'image/png');}
+  const health=await(await fetch(base+'/v1/health')).json();
+  assert.equal(health.generated,3);
+  assert.equal(health.diskCache.entries,2);
+  assert.equal(health.diskCache.storedBytes,png.length*2);
+  assert.equal(health.diskCache.evictions,1);
+  assert.equal((await fetch(urls[2])).status,200);
+  assert.equal(renders,3,'warm source-backed PNG is served without new .om render');
+  assert.equal((await fetch(urls[0])).status,200);
+  assert.equal(renders,4,'evicted region is regenerated from the same verified model');
+ }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
+});
+test('HTTP gateway fails closed if one real PNG cannot fit the configured cache',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'mw-gateway-tiny-'));
+ const api=createTileGateway({cacheDir:dir,maxCacheBytes:png.length-1,
+  fetchMetadata:async()=>meta,renderTile:async()=>png});
+ api.server.listen(0,'127.0.0.1');await new Promise(done=>api.server.once('listening',done));
+ try{
+  const base='http://127.0.0.1:'+api.server.address().port;
+  const result=await fetch(base+'/v1/tiles/20261113T0000Z/1/cloud_cover/2/1/1.png');
+  assert.equal(result.status,507);
+  assert.equal((await(await fetch(base+'/v1/health')).json()).diskCache.storedBytes,0);
+ }finally{await new Promise(done=>api.server.close(done));await rm(dir,{recursive:true,force:true});}
+});
