@@ -4,7 +4,7 @@
  */
 import {parseFesPilotForecast, type FesPilotForecast} from "./fesTideContract.ts";
 
-export type Eot20Forecast = Omit<FesPilotForecast, "source" | "isApprovedForPublicDisplay"> &
+export type Eot20Forecast = Omit<FesPilotForecast, "source"> &
  Readonly<{source:"EOT20"; modelVersion:"EOT20-final"; citation:string; publiclyCalibrated:false}>;
 
 const DOI="https://doi.org/10.17882/79489";
