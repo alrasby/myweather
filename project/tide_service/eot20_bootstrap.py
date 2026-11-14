@@ -77,7 +77,18 @@ def extract_verified(archive: Path, output: Path) -> None:
                     if not entry.isfile() or entry.name.startswith("/") or "\\" in entry.name:
                         raise TideUnavailable("eot20-unsafe-archive-entry")
                     parts = Path(entry.name).parts
-                    if ".." in parts or not parts or parts[-1] not in EXPECTED:
+                    if ".." in parts or not parts:
+                        raise TideUnavailable("eot20-unsafe-archive-path")
+                    if parts[-1] == "NOTICE-EOT20.txt" and len(parts) == 1:
+                        if not 0 < entry.size < 65536:
+                            raise TideUnavailable("eot20-license-notice-size")
+                        notice = tf.extractfile(entry)
+                        if notice is None:
+                            raise TideUnavailable("eot20-license-notice-missing")
+                        with notice, (target / "NOTICE-EOT20.txt").open("xb") as note:
+                            note.write(notice.read(65536))
+                        continue
+                    if parts[-1] not in EXPECTED:
                         raise TideUnavailable("eot20-unexpected-archive-entry:" + repr(entry.name[:80]))
                     if parts[-1] in seen or not 1_000_000 < entry.size <= MAX_FILE_BYTES:
                         raise TideUnavailable("eot20-duplicate-or-oversized-grid")
