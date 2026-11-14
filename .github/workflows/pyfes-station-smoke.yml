@@ -1,0 +1,57 @@
+name: Official PyFES + NOAA Station Live Smoke (QA only)
+on:
+  push:
+    branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
+    paths:
+      - 'project/tide_service/noaa_station_pyfes.py'
+      - 'project/tide_service/test_noaa_station_pyfes.py'
+      - '.github/workflows/pyfes-station-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pyfes-station-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  station-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install official PyFES binary only (no compiling demo atlas)
+        run: "python -m pip install --only-binary=:all: 'pyfes==2026.5.2'"
+      - name: Verify official PyFES imported and station contracts
+        run: |
+          python -c 'import pyfes; assert hasattr(pyfes, "evaluate_tide_from_constituents")'
+          python -m unittest tide_service.test_noaa_station_pyfes -v
+      - name: Real NOAA San Francisco harmonic forecast, 12 hours (not app release)
+        run: |
+          set +e
+          python -m tide_service.noaa_station_pyfes --station 9414290 --start 2026-11-14T00:00:00Z --hours 12 > /tmp/pyfes-station.json
+          rc=$?
+          set -e
+          python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); print("PyFES station QA:", p.get("status", "success"), p.get("reason", ""))'
+          if [ "$rc" -ne 0 ]; then
+            # Public station harmonic input only; do not log local GPS/data.
+            python - <<'PY'
+          from tide_service.noaa_station_pyfes import load_noaa_station, parse_station_harmonics, canonical_pyfes_constituents
+          import pyfes, numpy as np
+          station, raw = load_noaa_station("9414290")
+          lat, _, cs = parse_station_harmonics(station, raw, "9414290")
+          try:
+              canonical = canonical_pyfes_constituents(cs, list(pyfes.known_constituents()))
+              pyfes.evaluate_tide_from_constituents(
+                  canonical, np.array([np.datetime64("2026-11-14T00:00:00")]),
+                  latitude=lat, settings=pyfes.FESSettings())
+          except Exception as error:
+              print("Public NOAA station PyFES exception:", type(error).__name__, str(error)[:280])
+          PY
+          fi
+          test "$rc" -eq 0
+          python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); assert p["source"]=="NOAA_COOPS_STATION_HARMONICS" and p["method"].startswith("PyFES") and p["station_id"]=="9414290" and len(p["samples"])==145 and p["not_for_navigation"]'

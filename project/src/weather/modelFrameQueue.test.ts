@@ -80,6 +80,11 @@ test("a genuinely failed spatial hour may continue only via explicit fallback", 
   assert.equal(canAdvanceSpatialTime(16, new Set([10]), new Set([16]), new Set()), true);
 });
 
+test("non-isolated Android limits speculative decode to the immediately following forecast hour", () => {
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8,9]), new Set(), new Set(), false, 0, true, false, true), { cancel: [], start: null });
+  assert.deepEqual(planSpatialRequests(8, 32, new Set([8]), new Set(), new Set(), false, 0, true, false, true), { cancel: [], start: 9 });
+});
+
 test("second-hour lookahead starts only when current and next are complete", () => {
   assert.deepEqual(
     planSpatialRequests(8, 32, new Set([8, 9]), new Set(), new Set(), false, 0, true),
@@ -140,7 +145,14 @@ test("playback never starts more than one unready frame while the next is loadin
 });
 
 test("a real precipitation fallback may advance time while ECMWF decodes without mislabeling a held frame", () => {
-  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), true), true);
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), true), false,
+    "while real model tiles are decoding, fallback must not advance/cancel the same hour");
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set(), true), true,
+    "a real fallback can advance once no model decode is in flight");
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([8]), true), false,
+    "a pending prior hour also must not be discarded to jump to a future fallback hour");
+  assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set([9]), new Set([9]), true), true,
+    "actual provider cooldown remains recoverable");
   assert.equal(canAdvanceSpatialTime(9, new Set([8]), new Set(), new Set([9]), false), false);
   assert.equal(canAdvanceSpatialTime(9, new Set([9]), new Set(), new Set([10]), false), true);
 });
@@ -153,4 +165,18 @@ test("spatial move threshold ignores tiny gestures and wraps around the dateline
   assert.equal(significantSpatialMove(a, { lat: 40, lng: 179, zoom: 6 }, 20, 30), true);
   assert.equal(significantSpatialMove(a, { lat: 40, lng: 179, zoom: 5 }, 20, 30), false);
   assert.equal(significantSpatialMove(a, { lat: 40, lng: 179, zoom: 5 }, 0, 30), true);
+});
+test("rapid globe pans never start useless future-hour ECMWF decodes while the visible hour is complete",()=>{
+ const ready=new Set([8]);
+ assert.deepEqual(planSpatialRequests(8,32,ready,new Set(),new Set(),
+   false,0,true,false,true,true),{cancel:[],start:null});
+ assert.deepEqual(planSpatialRequests(8,32,ready,new Set([9]),new Set(),
+   false,0,true,false,true,true),{cancel:[],start:null},
+   "do not abort already-running small-pan lookahead");
+ assert.deepEqual(planSpatialRequests(8,32,ready,new Set(),new Set(),
+   false,0,true,false,true,false),{cancel:[],start:9},
+   "after the idle window real next-hour prefetch resumes automatically");
+ assert.deepEqual(planSpatialRequests(8,32,new Set(),new Set([9]),new Set(),
+   false,0,true,false,true,true),{cancel:[9],start:8},
+   "missing CURRENT ECMWF image is never blocked by speculative idle throttle");
 });

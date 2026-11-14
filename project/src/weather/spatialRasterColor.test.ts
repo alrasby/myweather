@@ -43,9 +43,14 @@ test("custom ECMWF raster RGBA agrees with upstream breakpoint interpolation", (
 });
 test("pixel-center projection matches the official worker near dateline and poles", () => {
   for (const zoom of [0, 1, 5, 9, 13]) {
-    for (const x of [-2, 0, 0.125, 2**zoom-.25, 2**zoom+0.25]) {
-      const expected = (((x / Math.pow(2, zoom)) * 360 + 360) % 360) - 180;
-      assert.ok(Math.abs(spatialTileLongitude(x,zoom) - expected) < 1e-10);
+    for (const x of [-3*2**zoom-.25, -2*2**zoom, -2, -0.25, 0,
+      0.125, 2**zoom-.25, 2**zoom+0.25, 4*2**zoom+.25]) {
+      const expected = (((x / 2 ** zoom) * 360 % 360 + 540) % 360) - 180;
+      const actual = spatialTileLongitude(x,zoom);
+      assert.ok(actual >= -180 && actual < 180, `out-of-range wrap: ${actual}`);
+      assert.ok(Math.abs(actual - expected) < 1e-10);
+      // Longitude is periodic for Leaflet's repeat-world tile coordinates.
+      assert.ok(Math.abs(spatialTileLongitude(x + 2 ** zoom,zoom) - actual) < 1e-10);
     }
     for (const y of [0.01, .25, 2**zoom/2, 2**zoom-.25]) {
       const n = Math.PI - 2 * Math.PI * y / Math.pow(2, zoom);

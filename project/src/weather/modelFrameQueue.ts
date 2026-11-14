@@ -38,13 +38,15 @@ export function planSpatialRequests(
   visibleRefreshAgeMs = 0,
   playbackActive = false,
   viewportMoving = false,
+  memoryConstrained = false,
+  recentlyPanned = false,
 ): { cancel: number[]; start: number | null } {
   // Keep two upcoming hours prepared without decoding more than one
   // incomplete frame at a time. The second lookahead becomes eligible only
   // after both the requested and next forecast are fully available.
   // Second-hour lookahead is worthwhile only during active animation:
   // don't consume network and battery decoding unused hours on a still map.
-  const lookahead = playbackActive && ready.has(requested) && ready.has(requested + 1)
+  const lookahead = playbackActive && !memoryConstrained && ready.has(requested) && ready.has(requested + 1)
     ? requested + 2 : -1;
   // A paused map should decode ONLY the requested forecast hour. Without
   // shared memory, idle-hour prefetch copies huge arrays and delays panning.
@@ -60,11 +62,19 @@ export function planSpatialRequests(
   const grace = playbackActive ? SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS : SPATIAL_PREFETCH_GRACE_MS;
   const deferred = ready.has(requested) &&
     (viewportMoving || (currentViewportRefreshing && visibleRefreshAgeMs < grace));
-  const desired = deferred ? null : candidates[0] ?? null;
+  // A completed present-hour image is not a reason to speculatively load
+  // another 3-variable ECMWF hour between two rapid map flings. On Android
+  // these expensive reads get aborted on the next pan and can never help the
+  // current viewport. Keep any already-running lookahead, but launch no new
+  // speculative model until movement has been idle for a bounded interval.
+  // Missing requested-hour data always takes priority without this throttle.
+  const deferNewSpeculation = recentlyPanned && ready.has(requested);
+  const desired = deferred || deferNewSpeculation ? null : candidates[0] ?? null;
   // Don't abort an in-flight speculative hour for a *small* gesture. Only
   // large pans/zoom discard it in ModelField; otherwise retain its cached
   // ranges, while blocking additional work until visible tiles settle.
-  const cancel = deferred ? [] : [...loading].filter((step) => step !== desired);
+  const cancel = deferred || deferNewSpeculation ? [] :
+    [...loading].filter((step) => step !== desired);
   return {
     cancel,
     start: desired !== null && !loading.has(desired) ? desired : null,
@@ -91,7 +101,17 @@ export function canAdvanceSpatialTime(
   // A real source-backed precipitation grid can display the requested time
   // while the heavier ECMWF spatial tiles finish. This never authorizes an
   // artificial grid or stale held ECMWF frame to masquerade as current.
-  if (sourceBackedFallback) return true;
+  // A real fallback is allowed when the requested ECMWF hour is NOT being
+  // decoded. Previously its presence unconditionally advanced the forecast
+  // clock every four seconds, cancelling still-running .om loads over and
+  // over. ECMWF then NEVER reached a ready frame during world playback even
+  // after removing the old zoom gate. Wait for active source work to settle,
+  // but continue through an actual provider cooldown (checked above).
+  // A different model hour is still in flight: even if the prospective
+  // requested hour has not been mounted yet, advancing the clock would
+  // cancel that work in planSpatialRequests on the next sync tick. Do not
+  // conflate "this hour not loading" with "no model decoding underway".
+  if (sourceBackedFallback && loading.size === 0) return true;
   // No spatial frame exists: allow global fallback only when no model request
   // is in progress, so playback never silently outruns an active decode.
   return ready.size === 0 && loading.size === 0;

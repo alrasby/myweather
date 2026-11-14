@@ -104,6 +104,8 @@ export type AirQuality = {
 export type MarineSnap = {
   coastal: boolean;
   wave: number | null;
+  /** Actual Open-Meteo sea_level_height_msl samples; MSL, not chart datum. */
+  tide?: { fetchedAt: number; points: { t: number; level: number }[] } | null;
 };
 
 export type WeatherBundle = {
@@ -116,6 +118,8 @@ export type WeatherBundle = {
   daily: DayPoint[];
   air: AirQuality | null;
   marine: MarineSnap | null;
+  /** Cache migration marker: legacy bundles did not request tide series. */
+  marineVersion?: 1 | 2 | 3;
 };
 
 /** شبكة Open-Meteo: كل مصفوفة بطول hours*rows*cols، الصف 0 = الجنوب. */

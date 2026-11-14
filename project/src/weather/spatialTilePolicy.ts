@@ -20,19 +20,37 @@ export function useCompactSpatialTiles(native: boolean, isolated: boolean): bool
   return native && !isolated;
 }
 
-export function spatialTileOptions(pane: "wx-clouds" | "wx-model", compact = false) {
+/** World views need smaller REAL tile footprints, not merely smaller
+ * bitmap samples. A 1024px tile spans 90° at map zoom 4; after a pan its
+ * cached canvas contains a huge formerly invisible region. A 512px tile
+ * spans 45°, allowing a much smaller aligned .om source read and worker
+ * cache. This changes no weather values, just the geographic tile grid. */
+export function spatialPhysicalTileSize(compact: boolean, mapZoom: number): 512 | 1024 {
+  return compact && mapZoom > 5 ? COMPACT_SPATIAL_TILE_SIZE : 512;
+}
+
+export function spatialTileOptions(
+  pane: "wx-clouds" | "wx-model", compact = false, world = false,
+) {
+  const pixels = compact && !world ? COMPACT_SPATIAL_TILE_SIZE : 512;
   return {
     pane,
-    tileSize: compact ? COMPACT_SPATIAL_TILE_SIZE : 512,
-    zoomOffset: compact ? -2 : -1,
+    tileSize: pixels,
+    zoomOffset: pixels === 1024 ? -2 : -1,
     opacity: 0,
     updateWhenIdle: true,
     updateWhenZooming: false,
     updateInterval: 400,
     // A single surrounding ring covers normal short drags without
     // scheduling two extra rings of expensive OM decoding for every hour.
-    keepBuffer: 1,
-    maxNativeZoom: compact ? 13 : 12,
+    // At low zoom the physical source crop covers the visible tile grid
+    // exactly. Do not pre-decode offscreen rings of entire continents.
+    // The aligned .om read covers current physical raster tiles only.
+    // Offscreen buffered tiles would be drawn with partial/transparent data
+    // and then reused by Leaflet without a new tileload on later pans.
+    // Disable that cache on non-isolated mobile; web keeps its old buffer.
+    keepBuffer: compact ? 0 : 1,
+    maxNativeZoom: compact && !world ? 13 : 12,
     maxZoom: 16,
   };
 }

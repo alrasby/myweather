@@ -22,7 +22,9 @@
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "build:android": "vite build --config vite.android.config.ts && npx cap sync android"
+    "build:android": "vite build --config vite.android.config.ts && npx cap sync android",
+    "prebuild": "node scripts/build-shoreline.mjs",
+    "prebuild:android": "node scripts/build-shoreline.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",

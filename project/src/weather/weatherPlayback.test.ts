@@ -25,7 +25,9 @@ test("loading indicator ignores short tile refreshes and explains long delays", 
   assert.equal(weatherLoadingPhase(1799), 0);
   assert.equal(weatherLoadingPhase(1800), 1);
   assert.equal(weatherLoadingPhase(7999), 1);
-  assert.equal(weatherLoadingPhase(8000), 2);
+  assert.equal(weatherLoadingPhase(8000), 1);
+  assert.equal(weatherLoadingPhase(17999), 1);
+  assert.equal(weatherLoadingPhase(18000), 2);
 });
 
 test("only covered rain/snow skips redundant fallback RAF paints", () => {
