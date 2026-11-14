@@ -387,10 +387,13 @@ test("one viewport generation publishes consistent model layers and retains sate
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"));
   assert.ok(generation.includes("for (const index of inFlight) this.started.add(index)"));
   assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
-  assert.ok(map.includes("shouldKeepSatelliteParent(map.getZoom(), detailedReady)"));
-  assert.ok(map.includes("underlay.setOpacity(keep ? 1 : 0)"));
+  assert.ok(map.includes("shouldKeepSatelliteParent(zoom, detailedReady)"));
+  assert.ok(map.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
+  assert.ok(map.includes("underlay.setOpacity(shouldKeepSatelliteParent(zoom, detailedReady) ? 1 : 0)"));
   assert.ok(!map.includes("underlay.remove()"), "retain satellite parent tiles across zooms");
-  assert.ok(map.includes('imagery.on("load", () => { detailedReady = true; syncUnderlay(); })'));
+  assert.ok(map.includes('imagery.on("load", () => {'));
+  assert.ok(map.includes("detailedReady = !detailedErrors;"),
+    "a drained imagery queue with tile errors must not hide real satellite parent coverage");
 });
 
 test("ECMWF viewport renderer reuses decoded data, limits retained states and supports rollback", () => {
@@ -525,4 +528,16 @@ test("keyless Open Waters is restricted to verified nearby tide stations, with f
   assert.ok(ui.includes('station.attribution'));
   assert.ok(ui.includes("PyFES") && ui.includes("Open-Meteo Marine"));
   assert.ok(ui.includes("astronomicalTide !== null"));
+});
+
+test("continent-scale map pans use actual world weather rather than crushing on-device ECMWF workers",()=>{
+ const model=read("project/src/weather/modelField.ts");
+ const screen=read("project/src/components/weather/MapScreen.tsx");
+ assert.ok(model.includes("decideSpatialViewport({"));
+ assert.ok(model.includes("if (!this.visible || !this.spatialBudget.allow) return;"));
+ assert.ok(model.includes("this.viewportRenderer?.clear();"));
+ assert.ok(model.includes("majorCoverageChange = zoomChanged || cancelledSpeculation"));
+ assert.ok(model.includes("invalidateZoom?.(zoom, cancelledSpeculation)"));
+ assert.ok(screen.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
+ assert.ok(screen.includes("if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.()"));
 });
