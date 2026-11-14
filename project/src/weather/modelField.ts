@@ -20,7 +20,7 @@ import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLa
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
 import { SpatialViewportRenderer, type ViewportRendererStats } from "@/weather/spatialViewportRenderer";
 import { SpatialRenderGeneration } from "@/weather/spatialRenderGeneration";
-import { certifiedCurrentLeafletTiles, type CachedRasterLayer } from "@/weather/spatialLeafletCoverage";
+import { certifiedCurrentLeafletTiles, currentLeafletCoverage, type CachedRasterLayer, type CurrentTileCoverage } from "@/weather/spatialLeafletCoverage";
 import { CapacitorHttp } from "@capacitor/core";
 import {
   addLeafletProtocolSupport,
@@ -56,6 +56,9 @@ export type WeatherModelDiagnostics = {
   holdingPreviousFrame: boolean;
   loaded: boolean[];
   tileCounts: number[];
+  /** Actual current Leaflet DOM raster coverage, unlike cumulative tileCounts. */
+  currentTileCoverage?: CurrentTileCoverage[];
+  stagedTileCount?: number;
   errors: number[];
   visibleOpacity: number;
   metadataAvailable: boolean;
@@ -475,7 +478,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; revalidateCurrentTiles?: () => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; revalidateCurrentTiles?: () => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; coverageSnapshot?: () => CurrentTileCoverage[]; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -869,6 +872,8 @@ export class ModelField {
       holdingPreviousFrame: this.holdingPreviousFrame,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
+      currentTileCoverage: frame?.coverageSnapshot?.(),
+      stagedTileCount: frame?.tileGates.reduce((total, gate) => total + gate.pending, 0),
       errors: frame?.errorCounts.slice() ?? [0, 0, 0],
       visibleOpacity: frame?.opacity ?? 0,
       metadataAvailable: this.times.length > 0,
@@ -1102,6 +1107,8 @@ export class ModelField {
       invalidateZoom: undefined as ((zoom: number, force?: boolean) => void) | undefined,
       revalidateCurrentTiles: undefined as (() => void) | undefined,
       previewReady: false, previewMask: 0, previewOpacityKey: "",
+      coverageSnapshot: () => made.map((layer, index) =>
+        currentLeafletCoverage(layer, map.getZoom(), certifiedTiles[index]!)),
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
       tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
@@ -1132,8 +1139,12 @@ export class ModelField {
       // All three Leaflet grids must actually cover the CURRENT map, not
       // merely have completed a previous region. This rejects a half-filled
       // cloud/rain/snow frame before it can replace the genuine fallback.
-      const coverageCertified = made.every((layer, index) =>
-        certifiedCurrentLeafletTiles(layer, map.getZoom(), certifiedTiles[index]!) > 0);
+      const coverage = frame.coverageSnapshot();
+      // A certified Leaflet tile may still be held by the independent
+      // three-layer reveal barrier. Never mark a frame ready until every
+      // CURRENT image has actual pixels and no tile remains CSS-hidden.
+      const coverageCertified = coverage.every(item => item.complete) &&
+        frame.tileGates.every(gate => gate.pending === 0);
       const ready = spatialFrameReadyDuringRefresh(
         frame.ready, frame.loaded, frame.errored, frame.tileCounts, coverageCertified);
       // Keep current genuine fallback until all three ECMWF layers finish,
