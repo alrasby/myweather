@@ -78,7 +78,7 @@ def extract_verified(archive: Path, output: Path) -> None:
                         raise TideUnavailable("eot20-unsafe-archive-entry")
                     parts = Path(entry.name).parts
                     if ".." in parts or not parts or parts[-1] not in EXPECTED:
-                        raise TideUnavailable("eot20-unexpected-archive-entry")
+                        raise TideUnavailable("eot20-unexpected-archive-entry:" + repr(entry.name[:80]))
                     if parts[-1] in seen or not 1_000_000 < entry.size <= MAX_FILE_BYTES:
                         raise TideUnavailable("eot20-duplicate-or-oversized-grid")
                     seen.add(parts[-1])
