@@ -1,7 +1,6 @@
 /** Bounded immutable raster gateway. Never fabricates model pixels. */
 import {createServer} from 'node:http';
-import {mkdir,readFile,rename,writeFile,unlink} from 'node:fs/promises';
-import {join,dirname} from 'node:path';
+import {createDiskTileCache} from './diskTileCache.mjs';
 import {parseModelMetadata,tilePath,validTile} from './contracts.mjs';
 import {validPng} from './pngIntegrity.mjs';
 const META='https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/latest.json';
@@ -10,8 +9,10 @@ export function createTileGateway({renderTile,cacheDir,fetchMetadata=async()=>{
  const r=await fetch(META,{signal:AbortSignal.timeout(12000)});
  if(!r.ok)throw new Error('model-metadata-http-'+r.status);return r.json();
 },maxActive=2,maxWaiting=24,manifestTtlMs=300000,
-retiredRunMs=6*60*60*1000,staleManifestMs=10*60*1000,now=()=>Date.now()}){
+retiredRunMs=6*60*60*1000,staleManifestMs=10*60*1000,
+maxCacheBytes=384*1024*1024,maxCacheEntries=30000,now=()=>Date.now()}){
  if(typeof renderTile!=='function'||!cacheDir||!Number.isInteger(maxActive)||maxActive<1||!Number.isInteger(maxWaiting)||maxWaiting<0||!Number.isFinite(retiredRunMs)||retiredRunMs<0||!Number.isFinite(staleManifestMs)||staleManifestMs<0)throw new Error('invalid-tile-gateway');
+ const diskCache=createDiskTileCache({root:cacheDir,maxBytes:maxCacheBytes,maxEntries:maxCacheEntries});
  let active=0,manifest=null,due=0,refreshing=null,lastGoodAt=0;
  const retired=new Map();
  const prune=()=>{for(const [id,p] of retired)if(now()>=p.expires)retired.delete(id);};
@@ -57,21 +58,21 @@ retiredRunMs=6*60*60*1000,staleManifestMs=10*60*1000,now=()=>Date.now()}){
   finally{if(waiters.length)waiters.shift()();else active--;}
  }
  async function getTile(m,r){
-  const relative=tilePath(m,r),full=join(cacheDir,relative);
-  try{const began=performance.now(),b=await readFile(full);if(validPng(b)){stats.cacheHits++;record(cacheMs,performance.now()-began);return b;}}
-  catch(e){if(e?.code!=='ENOENT')throw e;}
+  const relative=tilePath(m,r);
+  const began=performance.now(),cached=await diskCache.read(relative);
+  if(cached){stats.cacheHits++;record(cacheMs,performance.now()-began);return cached;}
   if(inflight.has(relative))return inflight.get(relative);
   const task=limited(async()=>{
-   try{const began=performance.now(),b=await readFile(full);if(validPng(b)){stats.cacheHits++;record(cacheMs,performance.now()-began);return b;}}
-   catch(e){if(e?.code!=='ENOENT')throw e;}
-   const began=performance.now(),b=await renderTile(m,r);
-   if(!validPng(b))throw fail(502,'invalid-source-raster');
+   // A coalesced request can finish while this task is in the render queue.
+   const checkedAt=performance.now(),existing=await diskCache.read(relative);
+   if(existing){stats.cacheHits++;record(cacheMs,performance.now()-checkedAt);return existing;}
+   const began=performance.now(),image=await renderTile(m,r);
+   if(!validPng(image))throw fail(502,'invalid-source-raster');
    record(renderMs,performance.now()-began);
-   await mkdir(dirname(full),{recursive:true});
-   const tmp=full+'.'+process.pid+'.'+Math.random().toString(16).slice(2)+'.tmp';
-   try{await writeFile(tmp,b,{flag:'wx'});await rename(tmp,full);}
-   catch(e){await unlink(tmp).catch(()=>{});throw e;}
-   stats.generated++;return b;
+   // Serialize quota reservation + atomic disk rename. If storage fills,
+   // fail closed instead of serving an uncached image and claiming a warm hit.
+   await diskCache.write(relative,image);
+   stats.generated++;return image;
   }).finally(()=>inflight.delete(relative));
   inflight.set(relative,task);return task;
  }
@@ -83,7 +84,8 @@ retiredRunMs=6*60*60*1000,staleManifestMs=10*60*1000,now=()=>Date.now()}){
   if(req.method!=='GET')return send(405,JSON.stringify({error:'method-not-allowed'}));
   const path=(req.url||'').split('?')[0];
   try{
-   if(path==='/v1/health')return send(200,JSON.stringify({ready:!!manifest,...stats,active,waiting:waiters.length,retainedRuns:retired.size,cacheP95Ms:p95(cacheMs),renderP95Ms:p95(renderMs)}));
+   if(path==='/v1/health')return send(200,JSON.stringify({ready:!!manifest,...stats,active,waiting:waiters.length,retainedRuns:retired.size,
+    diskCache:diskCache.snapshot(),cacheP95Ms:p95(cacheMs),renderP95Ms:p95(renderMs)}));
    if(path==='/v1/manifest.json')return send(200,JSON.stringify(await catalog()));
    const match=/^\/v1\/tiles\/([0-9]{8}T[0-9]{4}Z)\/(\d{1,3})\/(cloud_cover|precipitation|snowfall_water_equivalent)\/(\d{1,2})\/(\d{1,4})\/(\d{1,4})\.png$/.exec(path);
    if(!match)return send(404,JSON.stringify({error:'not-found'}));
