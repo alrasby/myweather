@@ -81,20 +81,24 @@ export function snapshotSatelliteRasterCoverage(
   });
   if (!layer) return empty(false);
   const tileZoom = layer._tileZoom;
-  if (!Number.isInteger(zoom) || !Number.isInteger(tileZoom ?? NaN) ||
-      tileZoom !== zoom ||
+  // maxNativeZoom underlays may be at a coarser actual image tile zoom.
+  // Convert map pixel bounds to their native image grid before verifying.
+  const nativeZoom = tileZoom ?? NaN;
+  if (!Number.isInteger(zoom) || !Number.isInteger(nativeZoom) ||
+      nativeZoom < 0 || nativeZoom > zoom ||
       !Object.values(viewport).every(Number.isFinite) ||
       viewport.tileWidth <= 0 || viewport.tileHeight <= 0 ||
       viewport.maxX <= viewport.minX || viewport.maxY <= viewport.minY) {
     return empty(true);
   }
-  const minX = Math.floor(viewport.minX / viewport.tileWidth);
-  const maxX = Math.ceil(viewport.maxX / viewport.tileWidth) - 1;
+  const pixelScale = 2 ** (nativeZoom - zoom);
+  const minX = Math.floor(viewport.minX * pixelScale / viewport.tileWidth);
+  const maxX = Math.ceil(viewport.maxX * pixelScale / viewport.tileWidth) - 1;
   // EPSG:3857 is periodic in x, but it has no valid polar tiles beyond the
   // native mercator world. Preserve negative and >world x across long pans.
-  const nativeMaxY = 2 ** tileZoom! - 1;
-  const minY = Math.max(0, Math.floor(viewport.minY / viewport.tileHeight));
-  const maxY = Math.min(nativeMaxY, Math.ceil(viewport.maxY / viewport.tileHeight) - 1);
+  const nativeMaxY = Math.ceil(256 * 2 ** nativeZoom / viewport.tileHeight) - 1;
+  const minY = Math.max(0, Math.floor(viewport.minY * pixelScale / viewport.tileHeight));
+  const maxY = Math.min(nativeMaxY, Math.ceil(viewport.maxY * pixelScale / viewport.tileHeight) - 1);
   const required = (maxX - minX + 1) * (maxY - minY + 1);
   // This is an opt-in diagnostic, not a rendering operation. Fail closed on
   // invalid or unexpectedly massive screen geometry rather than iterating.
@@ -102,7 +106,7 @@ export function snapshotSatelliteRasterCoverage(
 
   const tiles = new Map<string, NonNullable<SatelliteRasterLayerLike["_tiles"]>[string]>();
   for (const tile of Object.values(layer._tiles ?? {})) {
-    if (tile.current !== true || tile.coords?.z !== tileZoom ||
+    if (tile.current !== true || tile.coords?.z !== nativeZoom ||
         !Number.isInteger(tile.coords?.x ?? NaN) || !Number.isInteger(tile.coords?.y ?? NaN)) continue;
     tiles.set(`${tile.coords!.x},${tile.coords!.y}`, tile);
   }
