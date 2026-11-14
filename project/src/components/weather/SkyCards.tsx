@@ -41,7 +41,7 @@ export function DetailCards({
   const aqi = bundle.air?.aqi ?? null;
   const dust = bundle.air?.dust ?? null;
   const moon = moonState(now);
-  const lunar = moonRiseSet(place.lat, place.lon, now);
+  const lunar = moonRiseSet(place.lat, place.lon, now, bundle.timezone);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
   // The global PyFES path is independent of the marine API. A coastal city
@@ -409,31 +409,31 @@ function TideCard({
             ? eot ? "المد الفلكي · PyFES / EOT20" : station ? "مد فلكي من محطة قريبة" : "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
             : eot ? "Astronomical tide · PyFES / EOT20" : station ? "Astronomical tide · Nearby station" : "Estimated high/low times from modelled sea level"}
         </p>
-        {/* Source/limits stay accessible, but the long recurring warning
-            does not occupy the weather card on every city selection.
-            Until FES is licensed, validated and deployed, never imply this
-            is a calibrated astronomical tide or hide its real provider. */}
-        <details className="mt-1 text-[0.66rem] text-muted">
-          <summary className="cursor-pointer select-none">
-            {eot ? (lang === "ar" ? "PyFES · EOT20 عالمي (CC BY 4.0)" : "PyFES · Global EOT20 (CC BY 4.0)") :
-              station ? (lang === "ar" ? `Open Waters · ${station.stationName} · ${formatNumber(station.distanceKm,lang,1)} كم` : `Open Waters · ${station.stationName} · ${station.distanceKm.toFixed(1)} km`) :
-              (lang === "ar" ? "Open-Meteo Marine · نموذج بحري تقديري" : "Open-Meteo Marine · Estimated sea-level model")}
-          </summary>
-          <p className="mt-1">{eot
-            ? (lang === "ar"
-              ? "توقع مد فلكي من أطلس EOT20 العالمي (DGFI-TUM، Hart-Davis 2021) بمحرك PyFES؛ الارتفاع نسبة إلى متوسط سطح الأطلس وليس مرجع الميناء. غير معاير بمحطات محلية ولا يصلح للملاحة."
-              : "Astronomical tide from DGFI-TUM EOT20 (Hart-Davis 2021) via PyFES. Heights use atlas mean sea surface, not harbour chart datum; not locally gauge-calibrated or for navigation.")
-            : station ? (lang === "ar"
-              ? `توقع فلكي لمحطة ${station.stationName} على بعد ${formatNumber(station.distanceKm,lang,1)} كم، مرجع الارتفاع ${station.datum}. لا يمثل بالضرورة مستوى المياه الفعلي لمدينتك ولا يصلح للملاحة.`
-              : `Astronomical station tide at ${station.stationName}, ${station.distanceKm.toFixed(1)} km away, vertical datum ${station.datum}. Not a local measured water level or for navigation.`)
-            : (lang === "ar"
-              ? "الأوقات المعروضة هي قمم وقيعان من بيانات مستوى البحر البحرية الفعلية للنموذج (MSL)، وليست مدًّا فلكيًّا محليًّا معتمدًا. دقة السواحل محدودة ولا تصلح للملاحة. سيحل PyFES محل هذا التقدير عند توفر بيانات توافقية مُتحقق منها وخدمة تشغيلية."
-              : "Times shown are estimated turning points of the source-backed modelled sea-level curve (MSL), not locally validated astronomical high/low tides. Coastal accuracy is limited. Not for navigation. PyFES replaces estimates only when verified harmonics and a deployed service are available.")}</p>
-          {station ? <p className="mt-1 break-words">{station.attribution} · {station.license}
-            <a className="underline ms-1" href="https://openwaters.io/api/tides/" target="_blank" rel="noopener noreferrer">Open Waters</a>
-            {station.stationId.startsWith("kartverket/") ? <a className="underline ms-1" href="https://www.kartverket.no/" target="_blank" rel="noopener noreferrer">© Kartverket</a> : null}
-          </p> : null}
-        </details>
+        {/* Source is ONE compact, non-expandable line. Keep license credit
+            on this line; no repeated paragraph or expandable sheet. */}
+        <p className="mt-1 truncate text-[0.66rem] text-muted" title={
+          station ? station.attribution : eot
+            ? "Hart-Davis et al. (2021), EOT20, CC BY 4.0; not for navigation"
+            : "Open-Meteo Marine: modelled sea level (MSL), not for navigation"
+        }>
+          {eot ? (
+            <a href="https://doi.org/10.17882/79489" target="_blank" rel="noopener noreferrer" className="underline">
+              PyFES · EOT20 · Hart-Davis 2021 · CC BY 4.0
+            </a>
+          ) : station ? (
+            <a href="https://openwaters.io/api/tides/" target="_blank" rel="noopener noreferrer" className="underline">
+              Open Waters · {station.stationName} · {formatNumber(station.distanceKm, lang, 1)} {lang === "ar" ? "كم" : "km"} · {station.datum} · {
+                station.stationId.startsWith("kartverket/") ? "© Kartverket" :
+                station.stationId.startsWith("ticon/") ? "TICON-4 · Hart-Davis 2025 · CC BY" :
+                station.stationId.startsWith("noaa/") ? "NOAA" : "CC BY"
+              }
+            </a>
+          ) : (
+            <a href="https://marine-api.open-meteo.com/" target="_blank" rel="noopener noreferrer" className="underline">
+              Open-Meteo Marine · {lang === "ar" ? "نموذج تقديري (MSL)" : "Estimated (MSL)"}
+            </a>
+          )}
+        </p>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           {/* These are estimated sea-level extrema from real provider samples,
