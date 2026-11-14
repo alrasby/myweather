@@ -150,7 +150,7 @@ const ar = {
   tideLow: "جزر",
   sources: "المصادر والإسناد",
   sourcesBody:
-    "الطقس وجودة الهواء والبحث عن المدن من Open-Meteo برخصة المشاع الإبداعي CC BY 4.0. ألوان الحرارة والرياح والمطر وحركة الهواء تُرسم من شبكة Open-Meteo للمنطقة المعروضة. مسارات الأعاصير من GDACS وهيئة الأرصاد اليابانية. ارتفاع الموج من Open-Meteo Marine. أوقات المد والجزر تقدير فلكي للسواحل وليست جدول ميناء مساحي. صور الأقمار © Esri.",
+    "الطقس وجودة الهواء والبحث عن المدن من Open-Meteo برخصة المشاع الإبداعي CC BY 4.0. ألوان الحرارة والرياح والمطر وحركة الهواء تُرسم من شبكة Open-Meteo للمنطقة المعروضة. مسارات الأعاصير من GDACS وهيئة الأرصاد اليابانية. ارتفاع الموج ومنسوب البحر المتضمن للمد والجزر من Open-Meteo Marine مع بيانات Copernicus Marine/Météo-France. الدقة محدودة قرب السواحل ولا تُستخدم للملاحة البحرية. صور الأقمار © Esri.",
   refreshAlerts: "التحديث والتنبيهات",
   autoRefresh: "تحديث تلقائي كل",
   manual: "يدوي",
@@ -349,7 +349,7 @@ const en: Record<keyof typeof ar, string> = {
   tideLow: "Low",
   sources: "Sources and attribution",
   sourcesBody:
-    "Primary weather, air quality, and city search come from Open-Meteo under the Creative Commons CC BY 4.0 license. Temperature, wind, and rain colors, and the moving air, are drawn from an Open-Meteo grid of the area on screen. Tropical-cyclone tracks come from GDACS and the Japan Meteorological Agency. Wave height comes from Open-Meteo Marine. Tide times are an astronomical estimate for coastal places, not a surveyed port table. Satellite imagery © Esri.",
+    "Primary weather, air quality, and city search come from Open-Meteo under the Creative Commons CC BY 4.0 license. Temperature, wind, and rain colors, and the moving air, are drawn from an Open-Meteo grid of the area on screen. Tropical-cyclone tracks come from GDACS and the Japan Meteorological Agency. Wave height and modelled sea level including tides come from Open-Meteo Marine with Copernicus Marine/Météo-France data. Coastal accuracy is limited and predictions are not for navigation. Satellite imagery © Esri.",
   refreshAlerts: "Refresh and alerts",
   autoRefresh: "Auto refresh every",
   manual: "Manual",

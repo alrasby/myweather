@@ -137,7 +137,8 @@ test("saved city paging works on clickable daily rows, including Android touchca
 });
 test("rain spatial failures reduce fallback delay without extra grid budgets", () => {
   const map = read("project/src/components/weather/MapScreen.tsx");
-  assert.ok(map.includes('}, 4500);'));
+  assert.ok(map.includes('map.getZoom() <= 5 ? 1600 : 4500'),
+    "broad views must use real global fallback promptly while regional ECMWF retains a bounded grace");
   assert.ok(map.includes('modelRef.current?.isSpatialVisible()'));
   assert.ok(map.includes('const budget = 4200;'));
 });
@@ -207,7 +208,7 @@ test("regression: fallback and ECMWF are switched atomically, not alpha-composit
   assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
   assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "only show cloud preview when no incompatible fallback product is visible");
   assert.ok(model.includes("(!fallbackForHour || idx === 0)"), "never duplicate fallback rain/snow with partial ECMWF precipitation");
-  assert.ok(model.includes("fallbackForHour || returningToReadyModel ? goal"));
+  assert.ok(model.includes("const value = goal;"), "model validity and temporal blend weights must be applied exactly, without ghosting previous ECMWF hours");
   assert.ok(model.includes("!fallbackForHour && this.diagnosticMode"));
 });
 
@@ -270,7 +271,8 @@ test("loaded ECMWF tiles avoid a second rectangular alpha fade on top of frame-l
   assert.ok(!css.includes("transition: opacity 160ms ease-out"), "use only Leaflet and ECMWF frame-level fading");
   assert.ok(css.includes("@media (prefers-reduced-motion: reduce)"), "existing reduced-motion support remains");
   const model = read("project/src/weather/spatialTilePolicy.ts");
-  assert.ok(model.includes("updateWhenIdle: true") && model.includes("keepBuffer: 1"));
+  assert.ok(model.includes("updateWhenIdle: true") && model.includes("keepBuffer: compact ? 0 : 1"),
+    "world raster grid uses bounded visible tiles; normal ECMWF retains its buffered region");
 });
 
 test("rain regional fallback starts slightly sooner after release without changing source budgets", () => {
@@ -387,10 +389,13 @@ test("one viewport generation publishes consistent model layers and retains sate
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"));
   assert.ok(generation.includes("for (const index of inFlight) this.started.add(index)"));
   assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
-  assert.ok(map.includes("shouldKeepSatelliteParent(map.getZoom(), detailedReady)"));
-  assert.ok(map.includes("underlay.setOpacity(keep ? 1 : 0)"));
+  assert.ok(map.includes("shouldKeepSatelliteParent(zoom, detailedReady)"));
+  assert.ok(map.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
+  assert.ok(map.includes("underlay.setOpacity(shouldKeepSatelliteParent(zoom, detailedReady) ? 1 : 0)"));
   assert.ok(!map.includes("underlay.remove()"), "retain satellite parent tiles across zooms");
-  assert.ok(map.includes('imagery.on("load", () => { detailedReady = true; syncUnderlay(); })'));
+  assert.ok(map.includes('imagery.on("load", () => {'));
+  assert.ok(map.includes("detailedReady = !detailedErrors;"),
+    "a drained imagery queue with tile errors must not hide real satellite parent coverage");
 });
 
 test("ECMWF viewport renderer reuses decoded data, limits retained states and supports rollback", () => {
@@ -398,7 +403,8 @@ test("ECMWF viewport renderer reuses decoded data, limits retained states and su
   const engine = read("project/src/weather/spatialViewportRenderer.ts");
   const worker = read("project/src/weather/spatialViewportRaster.worker.ts");
   const screen = read("project/src/components/weather/MapScreen.tsx");
-  assert.ok(model.includes("maxStatesWithData: 6"), "three current + three playback states must stay cached");
+  assert.ok(model.includes("maxStatesWithData: 6") && model.includes("rasterSize <= 512 ? 4 : 6"),
+    "protect the three current ECMWF sources with bounded model cache on global mobile maps");
   assert.ok(model.includes('new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,'),
     "custom ECMWF raster stays conditional on Android non-isolated WebView and rollback");
   assert.ok(model.includes('() => this.base'), "renderer must receive the live requested forecast hour");
@@ -428,9 +434,131 @@ test("mobile weather displays complete same-run ECMWF layers without per-variabl
   const planner = read("project/src/weather/modelFrameQueue.ts");
   assert.ok(policy.includes("COMPACT_SPATIAL_TILE_SIZE = 1024"));
   assert.ok(src.includes("useCompactSpatialTiles(nativeApp(), globalThis.crossOriginIsolated === true)"));
-  assert.ok(src.includes("tile_size=${COMPACT_SPATIAL_TILE_SIZE}"));
+  assert.ok(src.includes("tile_size=${this.spatialBudget.rasterSize}"),
+    "global cloud/rain/snow sampling reduces GPU/worker cost without removing ECMWF");
   assert.ok(src.includes("const preview = !this.compactSpatialTiles &&"));
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"),
     "small viewport reveals must be synchronized across all 3 layers");
   assert.ok(planner.includes("playbackActive ? requested + 1 : -1"));
+});
+
+test("rain map playback remains silent while the real ECMWF fallback and diagnostics work", () => {
+  const map = read("project/src/components/weather/MapScreen.tsx");
+  const model = read("project/src/weather/modelField.ts");
+  const engine = read("project/src/weather/glField.ts");
+  for (const hidden of [
+    "جاري تجهيز التوقع التالي", "تحميل التوقعات أبطأ من المعتاد",
+    "Forecast loading is slow", "Preparing next forecast", "weatherLoadPhase",
+    "weatherLoadingPhase", "aria-live=\"polite\"",
+  ]) assert.ok(!map.includes(hidden), `remove visual playback alert: ${hidden}`);
+  assert.ok(map.includes("info.playbackWaitingMs >= 1600"), "keep genuine real-data fallback timing");
+  assert.ok(map.includes("rainPlaybackQuickRef.current?.()"), "keep real rain prefetch for stalled playback");
+  assert.ok(map.includes("modelRef.current?.diagnostics()"), "keep diagnostic panel data");
+  assert.ok(engine.includes("weatherWaitSince"), "retain accurate silent playback buffering");
+  assert.ok(model.includes("canAdvanceSpatialTime("), "retain real forecast-hour readiness gate");
+});
+
+test("existing cached coastal and inland cities refresh marine tides once on upgrade", () => {
+  const api = read("project/src/weather/api.ts");
+  const store = read("project/src/weather/store.ts");
+  const types = read("project/src/weather/types.ts");
+  assert.ok(api.includes("marineVersion: 3"), "new forecasts record marine model schema");
+  assert.ok(api.includes("cached.bundle.marineVersion === 3"), "legacy cache must be upgraded");
+  assert.ok(store.includes("cached.bundle.marineVersion === 3"), "store short-circuit must honor marine cache upgrade");
+  assert.ok(types.includes("marineVersion?: 1 | 2 | 3"), "old bundles remain readable");
+});
+
+test("tidal detail card stays below weather detail cards and is hidden without actual sea data",()=>{
+ const sky=read("project/src/components/weather/SkyCards.tsx");
+ const tide=read("project/src/weather/marineTides.ts");
+ const anchor=sky.indexOf('export function DetailCards(');
+ const detailEnd=sky.indexOf('\nfunction Stat(',anchor);
+ const detail=sky.slice(anchor,detailEnd);
+ const cards=detail.indexOf('<div className="grid grid-cols-2 gap-3">');
+ const placement=detail.indexOf('{showTides ? <TideCard');
+ assert.ok(cards>=0&&placement>cards,"TideCard must follow pressure/visibility details");
+ assert.equal(detail.split('<TideCard').length-1,1,"only one tide card placement");
+ assert.ok(detail.includes('hasDisplayableCoastalTide(bundle.marine, now)'),
+  "never show for inland places or missing real sea-level data");
+ assert.ok(!sky.includes('Tide data is unavailable for this location right now'),
+  "do not surface a misleading error to a non-coastal city");
+ assert.ok(tide.includes('marineGridDistanceKm('),
+  "retain nearest marine source cell sanity check");
+});
+
+test("old coastal classifications cannot flash a stale tide card during upgrade",()=>{
+ const sky=read("project/src/components/weather/SkyCards.tsx");
+ const api=read("project/src/weather/api.ts");
+ assert.ok(sky.includes("bundle.marineVersion === 3 &&") && sky.includes("hasDisplayableCoastalTide(bundle.marine, now)"));
+ assert.ok(sky.includes("coastalDistanceKm(place.lat, place.lon)") && sky.includes("COASTAL_CITY_MAX_KM"),
+   "global PyFES must independently check the actual coastline before contacting the service");
+ assert.ok(sky.includes("astronomicalTide !== null"), "marine grid failure must not hide a sourced EOT20 tide");
+ assert.ok(api.includes("cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal"));
+});
+
+test("estimated coastal tide readings are visible and clearly distinguished from astronomical PyFES", () => {
+  const ui = read("project/src/components/weather/SkyCards.tsx");
+  assert.ok(ui.includes("modelTideForecast(tidePoints, now)"), "do not fabricate tide values");
+  assert.ok(ui.includes('time={tide.nextHigh ? formatHour24('), "display available source-derived high");
+  assert.ok(ui.includes('time={tide.nextLow ? formatHour24('), "display available source-derived low");
+  assert.ok(ui.includes('formatSignedMeters(tide.nextHigh.level, lang)'));
+  assert.ok(ui.includes('formatSignedMeters(tide.nextLow.level, lang)'));
+  assert.ok(ui.includes('تقديري') && ui.includes('Open-Meteo Marine'), "identify estimated model source");
+  assert.ok(ui.includes('PyFES') && ui.includes('Open-Meteo Marine'), "do not imply an undelivered PyFES service");
+  assert.ok(!ui.includes('<details className="mt-1'), "hide expanded source paragraphs; keep one compact line");
+  assert.ok(ui.includes("moonRiseSet(place.lat, place.lon, now, bundle.timezone)"), "calculate moon events in selected city day");
+  assert.ok(!ui.includes('time="—" sub={lang === "ar" ? "غير متاح"'),
+    "do not deliberately hide real modelled sea-level extrema");
+});
+
+test("large map gestures retire stale ECMWF next-hour reads even while requested hour loads", () => {
+  const engine = read("project/src/weather/modelField.ts");
+  const move = engine.split("const onMove = () => {")[1]?.split("const onMoveEnd = () => {")[0] ?? "";
+  assert.ok(move.includes("significantSpatialMove(origin,"));
+  assert.ok(move.includes("if (step !== this.base) this.discardFrame(step);"));
+  assert.ok(!move.includes("!this.frames.get(this.base)?.ready"),
+    "old guard kept wrong-area future-hour decodes active across global jumps");
+  assert.ok(move.includes("cancelledSpeculation = true"),
+    "cancel once, not on every pointer move");
+});
+
+test("keyless Open Waters is restricted to verified nearby tide stations, with fallback and attribution", () => {
+  const client=read("project/src/weather/openWatersTideClient.ts");
+  const ui=read("project/src/components/weather/SkyCards.tsx");
+  assert.ok(client.includes("OPEN_WATERS_STATION_MAX_KM=30"));
+  assert.ok(client.includes("commercial_use!==true"));
+  assert.ok(client.includes('ROOT="https://api.openwaters.io/tides"'));
+  assert.ok(ui.includes("fetchOpenWatersTide(place.lat, place.lon"));
+  assert.ok(ui.includes('station.attribution'));
+  assert.ok(ui.includes("PyFES") && ui.includes("Open-Meteo Marine"));
+  assert.ok(ui.includes("astronomicalTide !== null"));
+});
+
+test("continent-scale map pans use actual world weather rather than crushing on-device ECMWF workers",()=>{
+ const model=read("project/src/weather/modelField.ts");
+ const screen=read("project/src/components/weather/MapScreen.tsx");
+ assert.ok(model.includes("decideSpatialViewport({"));
+ assert.ok(model.includes("if (!this.visible || !this.spatialBudget.allow) return;"));
+ assert.ok(model.includes("this.viewportRenderer?.clear();"));
+ assert.ok(model.includes("majorCoverageChange = zoomChanged || cancelledSpeculation"));
+ assert.ok(!model.includes("invalidateZoom?.(zoom, cancelledSpeculation)"),
+   "never reset raster counters and then await tileload on cached Leaflet canvases");
+ assert.ok(model.includes("for (const step of [...this.frames.keys()]) this.discardFrame(step);"),
+   "a major pan needs fresh model image-layer instances");
+ assert.ok(model.includes("cancelledSpeculation = significantSpatialMove(origin,"),
+   "quick flings must be checked at the final camera position, not sampled move only");
+ assert.ok(model.includes("if (this.visible) this.pump();"),
+   "new requested model hour must actually mount and load");
+ assert.ok(screen.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
+ assert.ok(screen.includes("if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.()"));
+});
+
+test("ECMWF source compositing follows exact valid-time weights; never retain ghost old hours",()=>{
+ const model=read("project/src/weather/modelField.ts");
+ const temporal=read("project/src/weather/modelFrameTimeline.ts");
+ assert.ok(model.includes("const value = goal;"));
+ assert.ok(!model.includes("cur + (goal - cur) * 0.28"),
+   "secondary opacity easing displayed old model hour 13 after the clock reached hour 14");
+ assert.ok(temporal.includes("goals.set(requested, 1 - t)") &&
+           temporal.includes("goals.set(requested + 1, t)"));
 });

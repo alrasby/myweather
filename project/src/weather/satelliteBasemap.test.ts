@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { needsSatelliteUnderlay, needsRasterSeamGuard, shouldKeepSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "./satelliteBasemap.ts";
+import { needsSatelliteUnderlay, needsRasterSeamGuard, shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "./satelliteBasemap.ts";
 
 test("the world map never renders duplicate Esri raster grids", () => {
   for (const zoom of [3, 4]) assert.equal(needsSatelliteUnderlay(zoom), false);
@@ -22,4 +22,17 @@ test("satellite parent remains until detailed imagery finishes after zooming out
   assert.equal(shouldKeepSatelliteParent(4, true), false);
   assert.equal(shouldKeepSatelliteParent(3, false), true);
   assert.equal(shouldKeepSatelliteParent(3, true), false);
+});
+
+test("independent z2 real satellite parent covers black holes during broad world pans",()=>{
+ assert.equal(SATELLITE_WORLD_PARENT_NATIVE_ZOOM,2);
+ assert.equal(shouldKeepWorldSatelliteParent(3,false),true);
+ assert.equal(shouldKeepWorldSatelliteParent(4,false),true);
+ assert.equal(shouldKeepWorldSatelliteParent(5,false),true);
+ assert.equal(shouldKeepWorldSatelliteParent(3,true),true,
+   "keep the world parent warm after detail loads to eliminate black satellite gaps on pan");
+ assert.equal(shouldKeepWorldSatelliteParent(5,true),false);
+ assert.equal(shouldKeepWorldSatelliteParent(6,false),false,
+   "never download a third Esri tile layer above world-scale views");
+ assert.equal(shouldKeepWorldSatelliteParent(NaN,false),false);
 });

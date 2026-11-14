@@ -148,24 +148,59 @@ export function moonAboveHorizon(lat: number, lon: number, now: number): boolean
   return moonAlt(now, lat, lon) > 0;
 }
 
-export function moonRiseSet(lat: number, lon: number, now: number): { rise: number | null; set: number | null } {
-  const t0 = now - 3 * 3_600_000;
+/** Moon rise/set in the *place's current local calendar day*, not merely
+ * the next event after the device clock. The old 23-hour forward-only scan
+ * incorrectly displayed — if today's rise happened >3h before now.
+ *
+ * No crossing on a particular day is physically possible (especially
+ * high-latitude cities); return null rather than fabricating a moon event.
+ * Formula is approximate, not an observatory ephemeris. */
+export function moonRiseSet(
+  lat: number, lon: number, now: number, timeZone = "UTC",
+): { rise: number | null; set: number | null } {
+  if (![lat, lon, now].every(Number.isFinite) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return { rise: null, set: null };
+  }
+  let dateFormatter: Intl.DateTimeFormat;
+  try {
+    dateFormatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    });
+  } catch {
+    return { rise: null, set: null };
+  }
+  const localDay = (ms: number): string => {
+    const parts = dateFormatter.formatToParts(new Date(ms));
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  };
+  const targetDay = localDay(now);
+  const step = 10 * 60_000;
+  // A +/-40h UTC search spans the entire local day even at UTC+14 / UTC-12.
+  const start = now - 40 * 3_600_000;
+  const end = now + 40 * 3_600_000;
+  // Approximate rise of the lunar *upper limb*: parallax ~0.95 degrees,
+  // refraction ~0.57 and semidiameter ~0.25 => geocentric centre ~+0.13.
+  const lunarHorizon = rad(0.13);
   let rise: number | null = null;
   let set: number | null = null;
-  let prevT = t0;
-  let prev = moonAlt(t0, lat, lon);
-  for (let i = 1; i <= 26 * 30; i++) {
-    const t = t0 + i * 120_000;
-    const alt = moonAlt(t, lat, lon);
-    if (rise == null && prev < 0 && alt >= 0 && t >= now - 20 * 60_000) {
-      rise = prevT + ((0 - prev) / (alt - prev || 1)) * 120_000;
+  let prevT = start;
+  let previousAlt = moonAlt(start, lat, lon) - lunarHorizon;
+  for (let ms = start + step; ms <= end; ms += step) {
+    const altitude = moonAlt(ms, lat, lon) - lunarHorizon;
+    const rising = previousAlt < 0 && altitude >= 0;
+    const setting = previousAlt >= 0 && altitude < 0;
+    if (rising || setting) {
+      const fraction = Math.max(0, Math.min(1, -previousAlt / (altitude - previousAlt)));
+      const instant = prevT + fraction * step;
+      if (localDay(instant) === targetDay) {
+        if (rising && rise === null) rise = instant;
+        if (setting && set === null) set = instant;
+      }
     }
-    if (set == null && prev >= 0 && alt < 0 && t >= now - 20 * 60_000) {
-      set = prevT + ((0 - prev) / (alt - prev || 1)) * 120_000;
-    }
-    prev = alt;
-    prevT = t;
-    if (rise != null && set != null) break;
+    if (rise !== null && set !== null) break;
+    previousAlt = altitude;
+    prevT = ms;
   }
   return { rise, set };
 }

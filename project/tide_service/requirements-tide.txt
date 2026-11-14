@@ -1,0 +1,5 @@
+# Production/operator PyFES/EOT20 runtime; pip --only-binary ensures no accidental source compile.
+pyfes==2026.5.2
+numpy==2.2.6
+netCDF4==1.7.3
+PyYAML==6.0.2

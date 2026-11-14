@@ -26,8 +26,12 @@ export function spatialRasterColor(
   return out;
 }
 export function spatialTileLongitude(x: number, zoom: number): number {
-  // Same coordinate convention as upstream tile2lon, including ±180 wraps.
-  return (((x / 2 ** zoom) * 360 + 360) % 360) - 180;
+  // Mathematical modulo across *any* number of westward world copies.
+  // JS % keeps negative remainders: the old upstream formula can return
+  // <-180 for x < -2^zoom, making previously valid copied-world cloud tiles
+  // sample off-grid and paint blank rectangles during long global pans.
+  const raw = (x / 2 ** zoom) * 360;
+  return ((raw % 360 + 540) % 360) - 180;
 }
 export function spatialTileLatitude(y: number, zoom: number): number {
   const n = Math.PI - 2 * Math.PI * y / 2 ** zoom;

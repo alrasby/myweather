@@ -1,11 +1,14 @@
 import { Droplets, Eye, Gauge, Leaf, RefreshCw, SunMedium, Sunrise, Sunset } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { MoonDisc } from "@/components/weather/SkyBackdrop";
-import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress, tideForecast } from "@/weather/astro";
+import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress } from "@/weather/astro";
+import { hasDisplayableCoastalTide, modelTideForecast } from "@/weather/marineTides";
+import { fetchEot20Forecast, isEot20GatewayEnabled, type Eot20Forecast } from "@/weather/eot20TideClient";
+import { fetchOpenWatersTide, type OpenWatersTideForecast } from "@/weather/openWatersTideClient";
+import { coastalDistanceKm, COASTAL_CITY_MAX_KM } from "@/weather/coastline";
 import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
 import {
-  formatHour,
   formatHour24,
   formatMeters,
   formatNumber,
@@ -38,10 +41,33 @@ export function DetailCards({
   const aqi = bundle.air?.aqi ?? null;
   const dust = bundle.air?.dust ?? null;
   const moon = moonState(now);
-  const lunar = moonRiseSet(place.lat, place.lon, now);
+  const lunar = moonRiseSet(place.lat, place.lon, now, bundle.timezone);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
-  const coastal = bundle.marine?.coastal === true;
+  // The global PyFES path is independent of the marine API. A coastal city
+  // must still receive a genuine global astronomical result when Open-Meteo
+  // has no matching sea-level grid. Never request on unverified inland places.
+  const tideHorizon = Math.floor(now / (6 * 3600000));
+  const tideKey = `${place.lat}:${place.lon}:${tideHorizon}`;
+  const [tideState, setTideState] = useState<{key:string;data:Eot20Forecast|OpenWatersTideForecast}|null>(null);
+  useEffect(() => {
+    if (!isEot20GatewayEnabled()) return;
+    const controller = new AbortController();
+    void coastalDistanceKm(place.lat, place.lon).then(async (km) => {
+      if (controller.signal.aborted || km > COASTAL_CITY_MAX_KM) return;
+      const eot = isEot20GatewayEnabled()
+        ? await fetchEot20Forecast(place.lat, place.lon, now, controller.signal) : null;
+      if (controller.signal.aborted) return;
+      // Prefer the atlas-backed physical model if it is truly deployed. In
+      // ordinary free builds use verified nearby station harmonics instead.
+      const actual = eot ?? await fetchOpenWatersTide(place.lat, place.lon, now, controller.signal);
+      if (actual && !controller.signal.aborted) setTideState({key:tideKey,data:actual});
+    }).catch(() => { /* preserve attributed Marine fallback on any failure */ });
+    return () => controller.abort();
+  }, [tideKey, place.lat, place.lon]);
+  const astronomicalTide = tideState?.key === tideKey ? tideState.data : null;
+  const showTides = (bundle.marineVersion === 3 &&
+    hasDisplayableCoastalTide(bundle.marine, now)) || astronomicalTide !== null;
   const pressureUnit = useWeather((s) => s.prefs.pressure);
   const windUnit = useWeather((s) => s.prefs.wind);
 
@@ -85,11 +111,11 @@ export function DetailCards({
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-fg">
             <span className="inline-flex items-center gap-1">
               <Sunrise className="size-3.5 shrink-0" />
-              <span className="fig">{lunar.rise ? formatHour24(lunar.rise, bundle.timezone) : "—:—"}</span>
+              <span className="fig" title={lunar.rise == null ? (lang === "ar" ? "لا يوجد شروق محسوب ضمن اليوم المحلي" : "No computed rise on this local date") : undefined}>{lunar.rise != null ? formatHour24(lunar.rise, bundle.timezone) : "—:—"}</span>
             </span>
             <span className="inline-flex items-center gap-1">
               <Sunset className="size-3.5 shrink-0" />
-              <span className="fig">{lunar.set ? formatHour24(lunar.set, bundle.timezone) : "—:—"}</span>
+              <span className="fig" title={lunar.set == null ? (lang === "ar" ? "لا يوجد غروب محسوب ضمن اليوم المحلي" : "No computed set on this local date") : undefined}>{lunar.set != null ? formatHour24(lunar.set, bundle.timezone) : "—:—"}</span>
             </span>
           </p>
         </div>
@@ -123,7 +149,7 @@ export function DetailCards({
         </article>
       </div>
 
-      {coastal ? <TideCard bundle={bundle} place={place} lang={lang} now={now} /> : null}
+      {showTides ? <TideCard bundle={bundle} place={place} lang={lang} now={now} astronomicalTide={astronomicalTide} /> : null}
     </div>
   );
 }
@@ -332,13 +358,26 @@ function TideCard({
   place,
   lang,
   now,
+  astronomicalTide,
 }: {
   bundle: WeatherBundle;
   place: Place;
   lang: Lang;
   now: number;
+  astronomicalTide: Eot20Forecast | OpenWatersTideForecast | null;
 }) {
-  const tide = tideForecast(place.lat, place.lon, now);
+  const tidePoints = bundle.marine?.tide?.points ?? null;
+  const eot = astronomicalTide?.source === "EOT20" ? astronomicalTide : null;
+  const station = astronomicalTide?.source === "OPEN_WATERS_STATION" ? astronomicalTide : null;
+  const rawTide = modelTideForecast(tidePoints, now);
+  const eotEvents = astronomicalTide?.extrema.map(({kind,t,levelM}) => ({kind,t,level:levelM})) ?? [];
+  const tide = astronomicalTide ? {
+    ...rawTide,
+    points: astronomicalTide.points.filter((p) => p.t >= now - 3 * 3600000 &&
+      p.t <= now + 24 * 3600000).map(({t,levelM}) => ({t,level:levelM})),
+    nextHigh: eotEvents.find((ev) => ev.kind === "high" && ev.t >= now) ?? null,
+    nextLow: eotEvents.find((ev) => ev.kind === "low" && ev.t >= now) ?? null,
+  } : rawTide;
   const wave = bundle.marine?.wave;
   const pts = tide.points;
   const levels = pts.map((p) => p.level);
@@ -346,32 +385,59 @@ function TideCard({
   const max = Math.max(...levels, 0.2);
   const w = 320;
   const h = 72;
-  const coords = pts.map((p, i) => {
-    const x = pts.length < 2 ? 0 : (i / (pts.length - 1)) * w;
+  // Plot real UTC sample spacing, not array indices: rejected/absent hours
+  // must not compress the time axis. The now-marker moves continuously rather
+  // than jumping to the nearest model hour.
+  const start = pts[0]?.t ?? now;
+  const end = pts[pts.length - 1]?.t ?? start;
+  const span = Math.max(1, end - start);
+  const coords = pts.map((p) => {
+    const x = ((p.t - start) / span) * w;
     const y = h - 8 - ((p.level - min) / (max - min || 1)) * (h - 16);
     return { x, y, ...p };
   });
   const d = coords.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const nowX = coords.reduce((best, p) => (Math.abs(p.t - now) < Math.abs(best.t - now) ? p : best), coords[0]!);
+  const nowX = coords.length > 1 ? Math.max(0, Math.min(w, ((now - start) / span) * w)) : null;
 
   return (
     <article className="wx-card px-4 py-4">
       <div className="text-end">
         <h2 className="text-sm font-semibold text-fg">{t(lang, "tide")}</h2>
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
-        <p className="mt-1 text-[0.66rem] text-muted">{lang === "ar"
-          ? "تقدير فلكي غير مُعاير لمحطة ساحلية؛ لا يُستخدم للملاحة"
-          : "Uncalibrated astronomical estimate; not for navigation"}</p>
+        {/* One short, readable source-aware status. Additional attribution
+            remains in the linked label/title; no second source paragraph. */}
+        <p className="mt-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.66rem] leading-5 text-muted">
+          {eot ? (
+            <a href="https://doi.org/10.17882/79489" target="_blank" rel="noopener noreferrer"
+              title="DGFI-TUM EOT20 · Hart-Davis 2021 · CC BY 4.0 · Not for navigation">
+              {lang === "ar" ? "المد الفلكي من PyFES / EOT20" : "Astronomical tide · PyFES / EOT20"}
+            </a>
+          ) : station ? (
+            <a href="https://openwaters.io/api/tides/" target="_blank" rel="noopener noreferrer"
+              title={station.attribution + " · " + station.license + " · " + station.datum + " · Not for navigation"}>
+              {lang === "ar" ? `مد فلكي: ${station.stationName} (${formatNumber(station.distanceKm,lang,0)} كم)` :
+                `Station tide: ${station.stationName} (${station.distanceKm.toFixed(0)} km)`}
+            </a>
+          ) : (
+            <a href="https://open-meteo.com/en/docs/marine-weather-api" target="_blank"
+              rel="noopener noreferrer" title="Open-Meteo Marine · Estimated modelled sea level (MSL) · Not for navigation">
+              {lang === "ar" ? "توقيت المد والجزر تقديري من نموذج سطح البحر" :
+                "Estimated tide timing · Marine sea-level model"}
+            </a>
+          )}
+        </p>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
-        <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? formatSignedMeters(tide.nextLow.level, lang) : "—"} />
-        <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
-      </div>
+          {/* These are estimated sea-level extrema from real provider samples,
+              NOT astronomical gauge-calibrated tide predictions. */}
+          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? astronomicalTide ? "فلكي" : "تقديري" : astronomicalTide ? "Model" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
+          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? astronomicalTide ? "فلكي" : "تقديري" : astronomicalTide ? "Model" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
+          <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={astronomicalTide ? "Open-Meteo Marine" : t(lang, "now")} />
+        </div>
       <div dir="ltr">
-        <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={t(lang, "tide")}>
+        <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={astronomicalTide ? (lang === "ar" ? "منحنى المد والجزر الفلكي" : "Astronomical tide curve") : (lang === "ar" ? "مستوى سطح البحر النموذجي التقديري" : "Estimated modelled sea level")}>
           <path d={d} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
-          {nowX ? <line x1={nowX.x} x2={nowX.x} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
+          {nowX !== null ? <line x1={nowX} x2={nowX} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
           {coords
             .filter((p) => {
               const prev = coords[Math.max(0, coords.indexOf(p) - 1)];
@@ -386,16 +452,7 @@ function TideCard({
             ))}
         </svg>
       </div>
-      <ul className="mt-2 space-y-1">
-        {tide.events.map((ev) => (
-          <li key={`${ev.kind}-${ev.t}`} className="flex items-center justify-between text-sm">
-            <span className="text-muted">{ev.kind === "high" ? t(lang, "tideHigh") : t(lang, "tideLow")}</span>
-            <span className="text-fg">
-              {formatSignedMeters(ev.level, lang)} · {formatHour(ev.t, bundle.timezone, lang)}
-            </span>
-          </li>
-        ))}
-      </ul>
+
     </article>
   );
 }

@@ -11,8 +11,9 @@
  *
  * No dependency patches, alternative weather providers or fabricated pixels.
  */
-import { getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
+import { currentBounds, getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
 import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission.ts";
+import { SpatialDatasetKeys, captureSpatialWorkerData } from "./spatialDatasetKeys.ts";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
 
 type ReadKey = string;
@@ -54,7 +55,7 @@ export function nextSpatialWorkerJob(
   return first;
 }
 type TileJob = { id: number; state: OmUrlState; dataKey: string; variable: SpatialVariable;
-  queuedAt: number; frame: number | null; values: Float32Array; palette: Palette;
+  queuedAt: number; frame: number | null; values: Float32Array; scaleFactor?: number; palette: Palette;
   tile: RasterTask; signal: AbortSignal; resolve: (value: ImageBitmap) => void;
   reject: (error: Error) => void; started: boolean; onAbort: () => void };
 type Palette = { breakpoints: number[]; colors: number[][] };
@@ -135,17 +136,46 @@ export async function resolveCurrentSpatialState<T>(
  * newer viewport. Prefer the state captured for this specific request, not
  * an unrelated newer state. Reuse upstream's ordinary loaded-state lookup
  * when a concurrent request already owned the read. */
+/** A decoded variable/file alone does NOT prove that the values cover the
+ * current region. A fast continental pan can replace the viewport while an
+ * older fetch completes; painting its partial window produces missing strips
+ * and rectangular islands despite successful tileload events.
+ * Respect the same bounded-window inclusion policy as upstream's state cache. */
+export function spatialStateCoversBounds(
+  available: readonly number[] | undefined,
+  wanted: readonly number[] | null | undefined,
+): boolean {
+  if (!wanted) return true;
+  if (!available) return true; // Data decoded for the full model, no crop.
+  if (available.length !== 4 || wanted.length !== 4 ||
+      !available.every(Number.isFinite) || !wanted.every(Number.isFinite)) return false;
+  const eps = 1e-5;
+  return available[0]! <= wanted[0]! + eps &&
+    available[1]! <= wanted[1]! + eps &&
+    available[2]! >= wanted[2]! - eps &&
+    available[3]! >= wanted[3]! - eps;
+}
 export function chooseLoadedSpatialState(
   captured: OmUrlState | null,
   states: Iterable<OmUrlState>,
   file: string,
   variable: string,
+  wantedBounds?: readonly number[] | null,
 ): OmUrlState | null {
   const valid = (s: OmUrlState | null) => !!s &&
-    s.omFileUrl === file && s.dataOptions.variable === variable && !!s.data?.values;
+    s.omFileUrl === file && s.dataOptions.variable === variable &&
+    spatialStateCoversBounds(s.dataOptions.bounds, wantedBounds) &&
+    !!s.data?.values;
   if (valid(captured)) return captured;
   for (const state of Array.from(states).reverse()) if (valid(state)) return state;
   return null;
+}
+/** Pin a read's data reference before an independent async tile renderer
+ * can observe an upstream state-map eviction. This copies only a small state
+ * object, never the decoded Float32Array. */
+export function pinLoadedSpatialState(state:OmUrlState|null):OmUrlState|null {
+ const data=state?.data;
+ return data?.values ? {...state!,data} : null;
 }
 function paletteOf(settings: OmProtocolSettings, variable: string): Palette | null {
   const scale = settings.colorScales[variable] as RenderableColorScale | undefined;
@@ -158,7 +188,7 @@ export class SpatialViewportRenderer {
   private slots: Slot[] = [];
   private jobs: TileJob[] = [];
   private serial = 0;
-  private stateIds = new WeakMap<OmUrlState, string>();
+  private readonly datasetKeys = new SpatialDatasetKeys();
   private samples: number[] = [];
   private readSamples: number[] = [];
   private workerQueueSamples: number[] = [];
@@ -256,6 +286,9 @@ export class SpatialViewportRenderer {
     // raster tile, and upstream ensureData() already deduplicates concurrent
     // .om reads by state + AbortSignal. Do NOT re-implement that cache here.
     let captured: OmUrlState | null = null;
+    // The snapshot belongs to THIS tile request. Concurrent panning can
+    // mutate the module-wide currentBounds before the read completes.
+    const requestedBounds = currentBounds ? [...currentBounds] : null;
     const previousCallback = config.postReadCallback;
     const recordRead: NonNullable<OmProtocolSettings["postReadCallback"]> = (reader, data, state) => {
       previousCallback?.(reader, data, state);
@@ -275,10 +308,10 @@ export class SpatialViewportRenderer {
       () => {
         if (controller.signal.aborted) return null;
         const states = Array.from(getProtocolInstance(config).stateByKey.values());
-        const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable);
-        const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable);
+        const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable, requestedBounds);
+        const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable, requestedBounds);
         if (captured && resolved === captured && !live) this.recovered++;
-        return resolved;
+        return pinLoadedSpatialState(resolved);
       },
     );
   }
@@ -289,18 +322,18 @@ export class SpatialViewportRenderer {
     // Hold the exact decoded array reference BEFORE the admission await.
     // Upstream can evict state.data during a pan or hour change, but already
     // accepted raster jobs must not lose their input or force a legacy tile.
-    const values = state.data.values;
+    const {values,dataKey,scaleFactor} = captureSpatialWorkerData(state,palette,this.datasetKeys);
     // A finite admission wait prevents congestion from silently switching
     // 40+ tiles to a different renderer during the same visible viewport.
     // Leaflet's AbortSignal drops obsolete pans while they are waiting.
     const release = await this.admission.acquire(signal);
     try {
       if (!this.active || signal.aborted) throw new DOMException("Aborted", "AbortError");
-      let key = this.stateIds.get(state);
-      if (!key) { key = "ecmwf-" + (++this.serial); this.stateIds.set(state, key); }
+      // Decoded identity and scaling were captured before admission;
+      // upstream can retire the state while this tile waits its turn.
       return await new Promise<ImageBitmap>((resolve, reject) => {
-        const job: TileJob = { id: ++this.serial, state, dataKey: key!, variable, frame,
-          queuedAt: performance.now(), values, tile, palette, signal,
+        const job: TileJob = { id: ++this.serial, state, dataKey, variable, frame,
+          queuedAt: performance.now(), values, scaleFactor, tile, palette, signal,
           resolve, reject, started: false, onAbort: () => {} };
         job.onAbort = () => {
           const index = this.jobs.indexOf(job);
@@ -348,7 +381,7 @@ export class SpatialViewportRenderer {
           }
           slot.worker.postMessage({ type: "register", key: job.dataKey,
             grid: job.state.dataOptions.domain.grid, ranges: job.state.ranges,
-            values, scaleFactor: job.state.data?.scaleFactor, palette: job.palette });
+            values, scaleFactor: job.scaleFactor, palette: job.palette });
           slot.cache.set(job.dataKey, values.byteLength);
           slot.bytes += values.byteLength;
           this.copied++;

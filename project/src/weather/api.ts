@@ -5,7 +5,10 @@ import { metRainRate, isRecentObservation, validDailyTemperatures } from "@/weat
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
+import { parseMarineSnapshot } from "@/weather/marineTides";
+import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
+import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
 type CacheEntry = { at: number; bundle: WeatherBundle };
@@ -161,6 +164,7 @@ function buildBundle(
     daily: dayRows.filter((row) => Number.isFinite(row.t) && validDailyTemperatures(row.tmax, row.tmin)),
     air,
     marine,
+    marineVersion: 3,
   };
   if (!Number.isFinite(bundle.current.temp)) {
     const now = Date.now();
@@ -224,32 +228,18 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<WeatherB
   const url = new URL("https://marine-api.open-meteo.com/v1/marine");
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
+  // One real marine request supplies both the wave and the sea-level curve.
   url.searchParams.set("current", "wave_height");
-  url.searchParams.set("forecast_days", "1");
-  url.searchParams.set("timezone", "auto");
-  // Do not accidentally select inland cells for coastal towns.
+  url.searchParams.set("hourly", "sea_level_height_msl");
+  url.searchParams.set("forecast_days", "3");
+  url.searchParams.set("past_days", "1");
+  url.searchParams.set("timeformat", "unixtime");
+  url.searchParams.set("timezone", "UTC");
   url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
-  // Network/API failures are not evidence that a formerly coastal town is inland.
   if (!res.ok) return null;
-  const json = (await res.json()) as { latitude?: number; longitude?: number; current?: { wave_height?: number } };
-  const wave = json.current?.wave_height;
-  // A successful sea-grid response can identify the coast even when wave height
-  // is missing. Bound the distance to avoid marking far-inland towns as coastal.
-  const gridLat = json.latitude;
-  const gridLon = json.longitude;
-  if (!(typeof gridLat === "number" && Number.isFinite(gridLat) &&
-        typeof gridLon === "number" && Number.isFinite(gridLon))) return null;
-  let nearSea = false;
-  {
-    const dLat = (gridLat - place.lat) * Math.PI / 180;
-    const dLon = (gridLon - place.lon) * Math.PI / 180;
-    const lat1 = place.lat * Math.PI / 180;
-    const lat2 = gridLat * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-    nearSea = 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(a))) <= 30;
-  }
-  return { coastal: nearSea, wave: nearSea && typeof wave === "number" && Number.isFinite(wave) ? wave : null };
+  const [raw,shoreKm]=await Promise.all([res.json(),coastalDistanceKm(place.lat,place.lon)]);
+  return parseMarineSnapshot(raw,place.lat,place.lon,Date.now(),shoreKm);
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
@@ -515,6 +505,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     daily,
     air: null,
     marine: null,
+    marineVersion: 3,
   };
 }
 
@@ -529,7 +520,14 @@ async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Weathe
     }
   }
   try {
-    return await fetchMet(place, signal);
+    // Marine availability is independent of the weather provider: if the
+    // primary forecast fails, do not silently lose tide eligibility/data.
+    const [bundle, marine] = await Promise.all([
+      fetchMet(place, signal),
+      fetchMarine(place, signal).catch(() => null),
+    ]);
+    bundle.marine = marine;
+    return bundle;
   } catch (err) {
     if (aborted(err, signal)) throw err;
     throw primary instanceof Error ? primary : err;
@@ -567,7 +565,8 @@ export function loadWeather(
   }
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
-    const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS;
+    const fresh = !!cached && cached.bundle.marineVersion === 3 &&
+      Date.now() - cached.at < CACHE_TTL_MS;
     if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
     let last: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -576,8 +575,12 @@ export function loadWeather(
         const bundle = await fetchForecast(place, opts?.signal);
         // Preserve known coastal eligibility if the secondary forecast provider
         // does not include marine data or the separate marine API is offline.
-        if (bundle.marine == null && cached?.bundle.marine?.coastal) {
-          bundle.marine = { coastal: true, wave: null };
+        if (bundle.marine == null && cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal) {
+          // A brief Marine outage must not reclassify a known coastal city as
+          // inland. Reuse only still-relevant ACTUAL sea-level samples.
+          const oldTide = cached.bundle.marine.tide;
+          bundle.marine = { coastal: true, wave: null,
+            tide: oldTide && Date.now() - oldTide.fetchedAt < 6 * 3600000 ? oldTide : null };
         }
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
@@ -664,6 +667,10 @@ function mergePlaces(local: Place[], remote: Place[]): Place[] {
 export async function searchPlaces(query: string, lang: string, signal?: AbortSignal): Promise<Place[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
+  // Worldwide point search: work even if the target is a tiny island, sea
+  // coordinate or absent from all city-name/geocoding providers.
+  const coordinates = parseCoordinatePlace(trimmed);
+  if (coordinates) return [coordinates];
   const local = searchLocal(trimmed);
   const forms = [trimmed];
   const folded = normalizePlaceQuery(trimmed);

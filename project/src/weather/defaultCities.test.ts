@@ -24,8 +24,34 @@ test("does not overwrite manually chosen saved cities or later primary", () => {
   assert.equal(result.activeId, chosen[0]!.id);
   assert.deepEqual(result.places, chosen);
 });
-test("does not duplicate Muscat/London if already saved", () => {
-  const result = upgradeInitialCities([INITIAL_CITIES[0]!, legacyKhoud, legacyPrague, INITIAL_CITIES[1]!], legacyKhoud.id);
-  assert.equal(result.places.length, 2);
-  assert.equal(result.places[0]!.primary, true);
+test("never infer a starter upgrade from a partial personalized city list", () => {
+  const cities = [INITIAL_CITIES[0]!, legacyKhoud, legacyPrague, INITIAL_CITIES[1]!];
+  const result = upgradeInitialCities(cities, legacyKhoud.id);
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.places, cities);
+});
+test("a user who selects Prague keeps it and its selected status after reopening", () => {
+  const ownPrague = { ...legacyPrague, primary: true };
+  const cities = [ownPrague, INITIAL_CITIES[1]!, INITIAL_CITIES[2]!];
+  const result = upgradeInitialCities(cities, ownPrague.id);
+  assert.equal(result.changed, false);
+  assert.equal(result.activeId, ownPrague.id);
+  assert.deepEqual(result.places, cities);
+});
+test("worldwide saved cities and a manually chosen primary remain unchanged", () => {
+  const ownTokyo: Place = { ...MUSCAT, id: "35.68,139.76", name: "東京",
+    nameEn: "Tokyo", country: "Japan", lat: 35.68, lon: 139.76, primary: true };
+  const cities = [ownTokyo, legacyKhoud, legacyPrague, INITIAL_CITIES[2]!, INITIAL_CITIES[3]!];
+  const result = upgradeInitialCities(cities, ownTokyo.id);
+  assert.equal(result.changed, false);
+  assert.equal(result.activeId, ownTokyo.id);
+  assert.deepEqual(result.places, cities);
+});
+test("a real legacy starter upgrade keeps an unrelated user-selected city", () => {
+  const ownVancouver: Place = { ...MUSCAT, id: "49.28,-123.12", name: "Vancouver",
+    nameEn: "Vancouver", country: "Canada", lat: 49.28, lon: -123.12, primary: false };
+  const result = upgradeInitialCities([legacyKhoud, legacyPrague, INITIAL_CITIES[2]!, INITIAL_CITIES[3]!, ownVancouver], ownVancouver.id);
+  assert.equal(result.changed, true);
+  assert.equal(result.activeId, ownVancouver.id);
+  assert.ok(result.places.some(p => p.nameEn === "Vancouver"));
 });
