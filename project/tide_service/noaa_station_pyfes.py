@@ -101,6 +101,29 @@ def parse_station_harmonics(station: dict, harmonic: dict,
     return lat, lon, output
 
 
+def canonical_pyfes_constituents(
+    measured: dict[str, tuple[float, float]], known: list[str],
+) -> dict[str, tuple[float, float]]:
+    """Resolve only documented NOAA/IHO aliases into official PyFES names.
+
+    Never silently drop a measured constituent or reinterpret its phase.
+    An unknown constituent is a scientific acceptance failure.
+    """
+    by_lower = {name.lower(): name for name in known}
+    # NOAA short-form LAM2 and SIG1 correspond to the named astronomical
+    # constituents Lambda2 and Sigma1 in the PyFES Darwin catalogue.
+    aliases = {"LAM2": "Lambda2", "SIG1": "Sigma1", "EPS2": "Eps2"}
+    result: dict[str, tuple[float, float]] = {}
+    for name, value in measured.items():
+        candidate = aliases.get(name.upper()) or by_lower.get(name.lower())
+        if candidate not in known:
+            raise TideUnavailable("noaa-unsupported-pyfes-harmonic")
+        if candidate in result:
+            raise TideUnavailable("noaa-harmonics-duplicate-alias")
+        result[candidate] = value
+    return result
+
+
 def predict_noaa_station(station_id: str, station: dict, harmonic: dict,
                          start: datetime, hours: int,
                          evaluator=None) -> dict:
@@ -122,8 +145,9 @@ def predict_noaa_station(station_id: str, station: dict, harmonic: dict,
             raise TideUnavailable("official-pyfes-not-installed") from exc
         dates = np.array([np.datetime64(t.replace(tzinfo=None), "s") for t in times])
         try:
+            official = canonical_pyfes_constituents(harmonics, list(pyfes.known_constituents()))
             short, long_period = pyfes.evaluate_tide_from_constituents(
-                harmonics, dates, latitude=lat, settings=pyfes.FESSettings())
+                official, dates, latitude=lat, settings=pyfes.FESSettings())
         except Exception as exc:
             raise TideUnavailable("noaa-harmonics-pyfes-incompatible") from exc
     else:
