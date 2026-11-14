@@ -8,6 +8,7 @@ import { proxyFetch } from "@/weather/net";
 import { parseMarineSnapshot } from "@/weather/marineTides";
 import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
+import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
 type CacheEntry = { at: number; bundle: WeatherBundle };
@@ -666,6 +667,10 @@ function mergePlaces(local: Place[], remote: Place[]): Place[] {
 export async function searchPlaces(query: string, lang: string, signal?: AbortSignal): Promise<Place[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
+  // Worldwide point search: work even if the target is a tiny island, sea
+  // coordinate or absent from all city-name/geocoding providers.
+  const coordinates = parseCoordinatePlace(trimmed);
+  if (coordinates) return [coordinates];
   const local = searchLocal(trimmed);
   const forms = [trimmed];
   const folded = normalizePlaceQuery(trimmed);
