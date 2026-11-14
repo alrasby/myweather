@@ -11,7 +11,7 @@ test("soften only visible real ECMWF tiles with bounded compositor opacity",()=>
    return {} as Animation;
  }} as SpatialTileNode;
  assert.equal(softenSpatialTileArrival(tile,true),true);
- assert.equal(duration,190);
+ assert.equal(duration,160);
  assert.equal(softenSpatialTileArrival(tile,true,true),false);
  assert.equal(softenSpatialTileArrival(tile,false),false);
  tile.style.visibility="hidden";
