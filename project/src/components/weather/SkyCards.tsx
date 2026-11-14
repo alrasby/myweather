@@ -1,8 +1,9 @@
 import { Droplets, Eye, Gauge, Leaf, RefreshCw, SunMedium, Sunrise, Sunset } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { MoonDisc } from "@/components/weather/SkyBackdrop";
 import { moonRiseSet, moonState, pressureDelta, pressureTrend, sunProgress } from "@/weather/astro";
 import { hasDisplayableCoastalTide, modelTideForecast } from "@/weather/marineTides";
+import { fetchEot20Forecast, isEot20GatewayEnabled, type Eot20Forecast } from "@/weather/eot20TideClient";
 import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
 import {
@@ -41,7 +42,10 @@ export function DetailCards({
   const lunar = moonRiseSet(place.lat, place.lon, now);
   const past = pressureHoursAgo(bundle, now, 3);
   const trend = pressureTrend(pressureDelta(bundle.current.pressure, past));
-  const showTides = bundle.marineVersion === 3 && hasDisplayableCoastalTide(bundle.marine, now);
+  const showTides = bundle.marineVersion === 3 && (
+    hasDisplayableCoastalTide(bundle.marine, now) ||
+    (isEot20GatewayEnabled() && bundle.marine?.coastal === true)
+  );
   const pressureUnit = useWeather((s) => s.prefs.pressure);
   const windUnit = useWeather((s) => s.prefs.wind);
 
@@ -339,7 +343,30 @@ function TideCard({
   now: number;
 }) {
   const tidePoints = bundle.marine?.tide?.points ?? null;
-  const tide = modelTideForecast(tidePoints, now);
+  // Only an operator-enabled and physically sourced PyFES service can replace
+  // modelled total sea-level estimates. Old-city replies cannot flash into the
+  // next city's tide card. No network request is made in default APK builds.
+  const horizon = Math.floor(now / (6 * 3600000));
+  const requestKey = `${place.lat}:${place.lon}:${horizon}`;
+  const [eotState, setEotState] = useState<{ key: string; data: Eot20Forecast } | null>(null);
+  useEffect(() => {
+    if (!isEot20GatewayEnabled()) return;
+    const controller = new AbortController();
+    void fetchEot20Forecast(place.lat, place.lon, now, controller.signal).then((data) => {
+      if (data && !controller.signal.aborted) setEotState({key:requestKey,data});
+    });
+    return () => controller.abort();
+  }, [requestKey, place.lat, place.lon]);
+  const eot = eotState?.key === requestKey ? eotState.data : null;
+  const rawTide = modelTideForecast(tidePoints, now);
+  const eotEvents = eot?.extrema.map(({kind,t,levelM}) => ({kind,t,level:levelM})) ?? [];
+  const tide = eot ? {
+    ...rawTide,
+    points: eot.points.filter((p) => p.t >= now - 3 * 3600000 &&
+      p.t <= now + 24 * 3600000).map(({t,levelM}) => ({t,level:levelM})),
+    nextHigh: eotEvents.find((ev) => ev.kind === "high" && ev.t >= now) ?? null,
+    nextLow: eotEvents.find((ev) => ev.kind === "low" && ev.t >= now) ?? null,
+  } : rawTide;
   const wave = bundle.marine?.wave;
   const pts = tide.points;
   const levels = pts.map((p) => p.level);
@@ -368,8 +395,8 @@ function TideCard({
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
         <p className="mt-1 text-xs text-muted">
           {lang === "ar"
-            ? "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
-            : "Estimated high/low times from modelled sea level"}
+            ? eot ? "المد الفلكي · PyFES / EOT20" : "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
+            : eot ? "Astronomical tide · PyFES / EOT20" : "Estimated high/low times from modelled sea level"}
         </p>
         {/* Source/limits stay accessible, but the long recurring warning
             does not occupy the weather card on every city selection.
@@ -377,18 +404,23 @@ function TideCard({
             is a calibrated astronomical tide or hide its real provider. */}
         <details className="mt-1 text-[0.66rem] text-muted">
           <summary className="cursor-pointer select-none">
-            {lang === "ar" ? "Open-Meteo Marine · نموذج بحري تقديري" : "Open-Meteo Marine · Estimated sea-level model"}
+            {eot ? (lang === "ar" ? "PyFES · EOT20 عالمي (CC BY 4.0)" : "PyFES · Global EOT20 (CC BY 4.0)") :
+              (lang === "ar" ? "Open-Meteo Marine · نموذج بحري تقديري" : "Open-Meteo Marine · Estimated sea-level model")}
           </summary>
-          <p className="mt-1">{lang === "ar"
-            ? "الأوقات المعروضة هي قمم وقيعان من بيانات مستوى البحر البحرية الفعلية للنموذج (MSL)، وليست مدًّا فلكيًّا محليًّا معتمدًا. دقة السواحل محدودة ولا تصلح للملاحة. سيحل PyFES محل هذا التقدير عند توفر بيانات توافقية مُتحقق منها وخدمة تشغيلية."
-            : "Times shown are estimated turning points of the source-backed modelled sea-level curve (MSL), not locally validated astronomical high/low tides. Coastal accuracy is limited. Not for navigation. PyFES replaces estimates only when verified harmonics and a deployed service are available."}</p>
+          <p className="mt-1">{eot
+            ? (lang === "ar"
+              ? "توقع مد فلكي من أطلس EOT20 العالمي (DGFI-TUM، Hart-Davis 2021) بمحرك PyFES؛ الارتفاع نسبة إلى متوسط سطح الأطلس وليس مرجع الميناء. غير معاير بمحطات محلية ولا يصلح للملاحة."
+              : "Astronomical tide from DGFI-TUM EOT20 (Hart-Davis 2021) via PyFES. Heights use atlas mean sea surface, not harbour chart datum; not locally gauge-calibrated or for navigation.")
+            : (lang === "ar"
+              ? "الأوقات المعروضة هي قمم وقيعان من بيانات مستوى البحر البحرية الفعلية للنموذج (MSL)، وليست مدًّا فلكيًّا محليًّا معتمدًا. دقة السواحل محدودة ولا تصلح للملاحة. سيحل PyFES محل هذا التقدير عند توفر بيانات توافقية مُتحقق منها وخدمة تشغيلية."
+              : "Times shown are estimated turning points of the source-backed modelled sea-level curve (MSL), not locally validated astronomical high/low tides. Coastal accuracy is limited. Not for navigation. PyFES replaces estimates only when verified harmonics and a deployed service are available.")}</p>
         </details>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           {/* These are estimated sea-level extrema from real provider samples,
               NOT astronomical gauge-calibrated tide predictions. */}
-          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? "تقديري" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
-          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? "تقديري" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
+          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? eot ? "فلكي" : "تقديري" : eot ? "Model" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
+          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? eot ? "فلكي" : "تقديري" : eot ? "Model" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
           <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
         </div>
       <div dir="ltr">
