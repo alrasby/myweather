@@ -65,3 +65,18 @@ jobs:
                   except (URLError,TimeoutError,ValueError) as exc:
                       print(city,endpoint,"UNAVAILABLE",type(exc).__name__)
           PY
+      - name: Verify Capacitor origin is allowed to fetch keyless predictions
+        run: |
+          python - <<'PY'
+          from urllib.request import Request,urlopen
+          from urllib.parse import urlencode
+          params=urlencode({"latitude":23.588,"longitude":58.3829,
+                            "units":"meters"})
+          for origin in ("http://localhost","capacitor://localhost"):
+              req=Request("https://api.openwaters.io/tides/extremes?"+params,
+                          headers={"Origin":origin,"Accept":"application/json"})
+              with urlopen(req,timeout=12) as r:
+                  allowed=r.headers.get("Access-Control-Allow-Origin","")
+                  print("OPEN_WATERS_CORS",origin,repr(allowed),r.status)
+                  assert allowed=="*" or allowed==origin, "browser fetch origin not permitted"
+          PY
