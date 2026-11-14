@@ -397,6 +397,9 @@ test("one viewport generation publishes consistent model layers and retains sate
     "unmount redundant z4 Esri layer below zoom5 rather than hiding it with opacity=0");
   assert.ok(map.includes("satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null"),
     "provide opt-in basemap coverage separately from weather source readiness");
+  assert.ok(map.includes("const pixels = map!.getPixelBounds()") &&
+            map.includes("const size = layer.getTileSize()"),
+    "Esri image coverage must audit EVERY visible map tile, not merely loaded buffered tiles");
   assert.ok(map.includes('imagery.on("load", () => {'));
   assert.ok(map.includes("detailedReady = !detailedErrors;"),
     "a drained imagery queue with tile errors must not hide real satellite parent coverage");
