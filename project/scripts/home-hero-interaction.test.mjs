@@ -482,8 +482,10 @@ test("tidal detail card stays below weather detail cards and is hidden without a
 test("old coastal classifications cannot flash a stale tide card during upgrade",()=>{
  const sky=read("project/src/components/weather/SkyCards.tsx");
  const api=read("project/src/weather/api.ts");
- assert.ok(sky.includes("bundle.marineVersion === 3 && (") && sky.includes("hasDisplayableCoastalTide(bundle.marine, now)"));
- assert.ok(sky.includes("bundle.marine?.coastal === true"), "do not drop an established coastline when marine time series is unavailable");
+ assert.ok(sky.includes("bundle.marineVersion === 3 &&") && sky.includes("hasDisplayableCoastalTide(bundle.marine, now)"));
+ assert.ok(sky.includes("coastalDistanceKm(place.lat, place.lon)") && sky.includes("COASTAL_CITY_MAX_KM"),
+   "global PyFES must independently check the actual coastline before contacting the service");
+ assert.ok(sky.includes("astronomicalTide !== null"), "marine grid failure must not hide a sourced EOT20 tide");
  assert.ok(api.includes("cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal"));
 });
 
