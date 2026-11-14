@@ -12,8 +12,8 @@ test("moonrise and moonset describe the complete local calendar day, independent
   ["New York",40.7128,-74.006,"America/New_York","2026-11-14"],
   ["Cape Town",-33.925,18.423,"Africa/Johannesburg","2026-11-14"],
  ] as const){
-  const morning=Date.parse(date+"T08:00:00Z");
-  const afternoon=morning+12*3600000;
+  const morning=Date.parse(date+"T11:00:00Z");
+  const afternoon=morning+6*3600000;
   // For all zones pick two UTC times in the SAME local date.
   const a=moonRiseSet(lat,lon,morning,tz);
   const b=moonRiseSet(lat,lon,afternoon,tz);
@@ -44,6 +44,6 @@ test("high latitude moon can legitimately have no event on a local day",()=>{
  const now=Date.parse("2026-11-14T08:00:00Z");
  const a=moonRiseSet(70.663,23.682,now,"Europe/Oslo");
  for(const x of [a.rise,a.set]){
-  if(x!==null)assert.equal(localDate(x,"Europe/Oslo"),"11/14/2026");
+  if(x!==null)assert.equal(localDate(x,"Europe/Oslo"),localDate(now,"Europe/Oslo"));
  }
 });
