@@ -58,9 +58,32 @@ test("continuous 360-degree panning preserves equivalent small regional windows"
   assert.deepEqual(spatialViewportBounds({ ...view, west: 745, east: 762 }), expected);
 });
 
-test("actual antimeridian crossing still uses safe full-world coverage", () => {
-  assert.deepEqual(
-    spatialViewportBounds({ west: 172, east: 188, south: 15, north: 35 }),
-    [-180, -85.0511287798, 180, 85.0511287798],
-  );
+test("antimeridian crossing reads the full longitude but only the visible latitude band", () => {
+  const b = spatialViewportBounds({ west: 172, east: 188, south: 15, north: 35 });
+  assert.equal(b[0], -180);
+  assert.equal(b[2], 180);
+  assert.ok(b[1] <= 15 && b[1] >= 10);
+  assert.ok(b[3] >= 35 && b[3] <= 40);
+  assert.ok(b[3] - b[1] < 30, "do not fetch both polar caps when the map shows 20 degrees");
+});
+
+test("zoomed-out large views are global in longitude but bounded in latitude", () => {
+  const b = spatialViewportBounds({ west: -162, east: 162, south: -38, north: 41 });
+  assert.equal(b[0], -180);
+  assert.equal(b[2], 180);
+  assert.ok(b[1] <= -38 && b[3] >= 41);
+  assert.ok(b[3] - b[1] < 105);
+});
+
+test("dateline longitude wraps still cover the visible latitude without full globe decodes", () => {
+  const east = spatialViewportBounds({ west: 170, east: 200, south: 12, north: 27 });
+  const west = spatialViewportBounds({ west: -190, east: -160, south: 12, north: 27 });
+  assert.deepEqual(west, east);
+  assert.ok(east[1] <= 12 && east[3] >= 27);
+  assert.ok(east[3] - east[1] < 22);
+});
+
+test("genuinely whole-earth latitudes still request the whole latitudinal range", () => {
+  const b = spatialViewportBounds({ west: -180, east: 180, south: -85, north: 85 });
+  assert.deepEqual(b, [-180, -85.0511287798, 180, 85.0511287798]);
 });
