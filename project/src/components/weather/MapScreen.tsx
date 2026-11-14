@@ -24,6 +24,7 @@ import { loadLiveCyclones, type LiveCyclone } from "@/weather/cyclones";
 import { loadStormsOnce } from "@/weather/storms";
 import { stormGradeKey, type PaintedSystem } from "@/weather/synoptic";
 import { activePlace, useWeather } from "@/weather/store";
+import { comparePointWithSpatial } from "@/weather/forecastSourceComparison";
 import type { FieldSample, GridField, Lang, Place, ShadeKind, WeatherBundle } from "@/weather/types";
 import "leaflet/dist/leaflet.css";
 
@@ -1098,6 +1099,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   };
   openSystemRef.current = openSystem;
 
+  const cityForecastComparison = weatherDiagnosticsOpen && bundle?.placeId === place.id
+    ? comparePointWithSpatial(bundle, weatherDiagnostics?.source === "spatial"
+      ? weatherDiagnostics.displayedValidTime : null)
+    : null;
   const layer = layerByKind(kind);
   const ticks = legendTicks(layer);
   const gradient = `linear-gradient(to right, ${layer.stops
@@ -1215,6 +1220,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
+          {cityForecastComparison ? (
+            <p>
+              {lang === "ar" ? "توقع المدينة" : "City point"}:
+              {" "}{cityForecastComparison.pointProvider}
+              {" · WMO "}{cityForecastComparison.pointWmoCode ?? "—"}
+              {" · "}{lang === "ar" ? "الغيوم" : "cloud cover"}{" "}{cityForecastComparison.pointCloudCoverPct ?? "—"}%
+              {" · UTC "}{cityForecastComparison.pointValidTime ?? "—"}
+              {" · ECMWF "}{cityForecastComparison.mapEcmwfValidTime ?? "—"}
+              {" · "}{cityForecastComparison.comparisonScope}
+            </p>
+          ) : null}
           {weatherDiagnostics?.spatialViewportPolicy ? <p>
             {lang === "ar" ? "خطة فك البيانات" : "Decode plan"}: {
               weatherDiagnostics.spatialViewportPolicy.allow
@@ -1254,6 +1270,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 viewportSpanDegrees,
                 satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
+                // Local point forecast vs global ECMWF can legitimately differ.
+                // Record both genuine source times without copying precise
+                // coordinates or claiming a winner from raster colour alone.
+                cityForecastComparison: bundleRef.current?.placeId === placeRef.current.id
+                  ? comparePointWithSpatial(bundleRef.current,
+                    report.source === "spatial" ? report.displayedValidTime : null)
+                  : null,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
                 () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
