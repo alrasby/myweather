@@ -404,33 +404,25 @@ function TideCard({
       <div className="text-end">
         <h2 className="text-sm font-semibold text-fg">{t(lang, "tide")}</h2>
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
-        <p className="mt-1 text-xs text-muted">
-          {lang === "ar"
-            ? eot ? "المد الفلكي · PyFES / EOT20" : station ? "مد فلكي من محطة قريبة" : "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
-            : eot ? "Astronomical tide · PyFES / EOT20" : station ? "Astronomical tide · Nearby station" : "Estimated high/low times from modelled sea level"}
-        </p>
-        {/* Source is ONE compact, non-expandable line. Keep license credit
-            on this line; no repeated paragraph or expandable sheet. */}
-        <p className="mt-1 truncate text-[0.66rem] text-muted" title={
-          station ? station.attribution : eot
-            ? "Hart-Davis et al. (2021), EOT20, CC BY 4.0; not for navigation"
-            : "Open-Meteo Marine: modelled sea level (MSL), not for navigation"
-        }>
+        {/* One short, readable source-aware status. Additional attribution
+            remains in the linked label/title; no second source paragraph. */}
+        <p className="mt-1 overflow-hidden text-ellipsis whitespace-nowrap text-[0.66rem] leading-5 text-muted">
           {eot ? (
-            <a href="https://doi.org/10.17882/79489" target="_blank" rel="noopener noreferrer" className="underline">
-              PyFES · EOT20 · Hart-Davis 2021 · CC BY 4.0
+            <a href="https://doi.org/10.17882/79489" target="_blank" rel="noopener noreferrer"
+              title="DGFI-TUM EOT20 · Hart-Davis 2021 · CC BY 4.0 · Not for navigation">
+              {lang === "ar" ? "المد الفلكي من PyFES / EOT20" : "Astronomical tide · PyFES / EOT20"}
             </a>
           ) : station ? (
-            <a href="https://openwaters.io/api/tides/" target="_blank" rel="noopener noreferrer" className="underline">
-              Open Waters · {station.stationName} · {formatNumber(station.distanceKm, lang, 1)} {lang === "ar" ? "كم" : "km"} · {station.datum} · {
-                station.stationId.startsWith("kartverket/") ? "© Kartverket" :
-                station.stationId.startsWith("ticon/") ? "TICON-4 · Hart-Davis 2025 · CC BY" :
-                station.stationId.startsWith("noaa/") ? "NOAA" : "CC BY"
-              }
+            <a href="https://openwaters.io/api/tides/" target="_blank" rel="noopener noreferrer"
+              title={station.attribution + " · " + station.license + " · " + station.datum + " · Not for navigation"}>
+              {lang === "ar" ? `مد فلكي: ${station.stationName} (${formatNumber(station.distanceKm,lang,0)} كم)` :
+                `Station tide: ${station.stationName} (${station.distanceKm.toFixed(0)} km)`}
             </a>
           ) : (
-            <a href="https://open-meteo.com/en/docs/marine-weather-api" target="_blank" rel="noopener noreferrer" className="underline">
-              Open-Meteo Marine · {lang === "ar" ? "نموذج تقديري (MSL)" : "Estimated (MSL)"}
+            <a href="https://open-meteo.com/en/docs/marine-weather-api" target="_blank"
+              rel="noopener noreferrer" title="Open-Meteo Marine · Estimated modelled sea level (MSL) · Not for navigation">
+              {lang === "ar" ? "توقيت المد والجزر تقديري من نموذج سطح البحر" :
+                "Estimated tide timing · Marine sea-level model"}
             </a>
           )}
         </p>
