@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install production library and NetCDF reader
-        run: python -m pip install --only-binary=:all: -r tide_service/requirements-tide.txt
+        run: "python -m pip install --only-binary=:all: -r tide_service/requirements-tide.txt"
       - name: Verify official PyFES imported and offline contracts
         run: |
           python -c 'import pyfes; assert hasattr(pyfes, "evaluate_tide")'
