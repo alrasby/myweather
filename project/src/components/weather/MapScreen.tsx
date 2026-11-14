@@ -10,7 +10,7 @@ import { ReadyTileModel } from "@/weather/readyTileModel";
 import { readReadyTilePilotOrigin } from "@/weather/readyTilePilotConfig";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { shouldKeepSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
+import { shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -285,6 +285,18 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const here = placeRef.current;
         map.setView([here.lat, here.lon], 5);
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+        // Source-backed, very low-resolution ESRI imagery gives quick, real
+        // global coverage during fast long-distance pans. At z3 the former
+        // z4 underlay requested IDENTICAL images as the detail layer, so
+        // both went blank together and exposed the #101820 map host.
+        // The z2 parent uses 1/4 as many tiles per dimension and is mounted
+        // ONLY while detailed low-zoom imagery is incomplete.
+        const worldParent = L.tileLayer(imageryUrl, {
+          maxNativeZoom: SATELLITE_WORLD_PARENT_NATIVE_ZOOM,
+          maxZoom: 16, zIndex: -1,
+          updateWhenIdle: true, updateWhenZooming: false,
+          updateInterval: 300, keepBuffer: 2,
+        }).addTo(map);
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
         // The prior z5 underlay was removed at the initial z5 map view,
@@ -303,12 +315,22 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // zooms. Removing/re-adding it on every zoom discarded buffered tiles
         // and exposed black holes during fast global pans.
         let detailedReady = false;
+        let detailedErrors = false;
         const syncUnderlay = () => {
           if (!map) return;
-          const keep = shouldKeepSatelliteParent(map.getZoom(), detailedReady);
-          underlay.setOpacity(keep ? 1 : 0);
+          const zoom = map.getZoom();
+          underlay.setOpacity(shouldKeepSatelliteParent(zoom, detailedReady) ? 1 : 0);
+          const keepWorld = shouldKeepWorldSatelliteParent(zoom, detailedReady);
+          // Unmount the extra raster grid when it provides no value.
+          // Opacity=0 alone still causes Leaflet to download every tile.
+          if (keepWorld && !map.hasLayer(worldParent)) worldParent.addTo(map);
+          else if (!keepWorld && map.hasLayer(worldParent)) worldParent.remove();
         };
-        map.on("zoomstart", () => { detailedReady = false; syncUnderlay(); });
+        map.on("zoomstart", () => {
+          detailedReady = false;
+          detailedErrors = false;
+          syncUnderlay();
+        });
         map.on("zoomend", syncUnderlay);
         syncUnderlay();
         const imagery = L.tileLayer(imageryUrl, {
@@ -319,8 +341,23 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
-        imagery.on("loading", () => { detailedReady = false; syncUnderlay(); });
-        imagery.on("load", () => { detailedReady = true; syncUnderlay(); });
+        imagery.on("loading", () => {
+          detailedReady = false;
+          detailedErrors = false;
+          syncUnderlay();
+        });
+        imagery.on("tileerror", () => {
+          // A Leaflet 'load' event only means the queue drained; it does
+          // NOT prove every Esri image was delivered. Keep a real parent
+          // image behind failed tiles instead of exposing a black rectangle.
+          detailedErrors = true;
+          detailedReady = false;
+          syncUnderlay();
+        });
+        imagery.on("load", () => {
+          detailedReady = !detailedErrors;
+          syncUnderlay();
+        });
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
