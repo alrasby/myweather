@@ -10,6 +10,7 @@ import {
   formatMeters,
   formatNumber,
   formatPercent,
+  formatSignedMeters,
   formatWind,
   placeTitle,
 } from "@/weather/format";
@@ -361,8 +362,8 @@ function TideCard({
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
         <p className="mt-1 text-xs text-muted">
           {lang === "ar"
-            ? "المد الفلكي عبر PyFES: بانتظار بيانات توافقية موثوقة لهذا الموقع"
-            : "PyFES astronomical tides: awaiting trusted local harmonics"}
+            ? "توقيت الذروة والانخفاض تقديري من مستوى سطح البحر النموذجي"
+            : "Estimated high/low times from modelled sea level"}
         </p>
         {/* Source/limits stay accessible, but the long recurring warning
             does not occupy the weather card on every city selection.
@@ -370,19 +371,18 @@ function TideCard({
             is a calibrated astronomical tide or hide its real provider. */}
         <details className="mt-1 text-[0.66rem] text-muted">
           <summary className="cursor-pointer select-none">
-            {lang === "ar" ? "بيانات بحرية تقديرية · Open-Meteo Marine" : "Modelled sea level · Open-Meteo Marine"}
+            {lang === "ar" ? "Open-Meteo Marine · نموذج بحري تقديري" : "Open-Meteo Marine · Estimated sea-level model"}
           </summary>
           <p className="mt-1">{lang === "ar"
-            ? "ارتفاع سطح البحر بالنسبة لمتوسط سطح البحر من نموذج عالمي؛ دقته الساحلية محدودة، وليست مواعيد مد ملاحي معتمدة. لا يُستخدم للملاحة."
-            : "Global modelled sea level relative to mean sea level. Coastal accuracy is limited; these are not locally certified harbour tide predictions. Not for navigation."}</p>
+            ? "الأوقات المعروضة هي قمم وقيعان من بيانات مستوى البحر البحرية الفعلية للنموذج (MSL)، وليست مدًّا فلكيًّا محليًّا معتمدًا. دقة السواحل محدودة ولا تصلح للملاحة. سيحل PyFES محل هذا التقدير عند توفر بيانات توافقية مُتحقق منها وخدمة تشغيلية."
+            : "Times shown are estimated turning points of the source-backed modelled sea-level curve (MSL), not locally validated astronomical high/low tides. Coastal accuracy is limited. Not for navigation. PyFES replaces estimates only when verified harmonics and a deployed service are available."}</p>
         </details>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-          {/* Open-Meteo sea-level turning points are not validated
-              astronomical tidal extrema. Only a trusted harmonic source
-              may populate these fields in a future release. */}
-          <TideStat label={t(lang, "nextHigh")} time="—" sub={lang === "ar" ? "غير متاح" : "Unavailable"} />
-          <TideStat label={t(lang, "nextLow")} time="—" sub={lang === "ar" ? "غير متاح" : "Unavailable"} />
+          {/* These are estimated sea-level extrema from real provider samples,
+              NOT astronomical gauge-calibrated tide predictions. */}
+          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? `${lang === "ar" ? "تقديري" : "Est."} · ${formatSignedMeters(tide.nextHigh.level, lang)}` : lang === "ar" ? "لا توجد ذروة واضحة" : "No clear peak"} />
+          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? `${lang === "ar" ? "تقديري" : "Est."} · ${formatSignedMeters(tide.nextLow.level, lang)}` : lang === "ar" ? "لا يوجد انخفاض واضح" : "No clear trough"} />
           <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
         </div>
       <div dir="ltr">
