@@ -13,6 +13,7 @@ import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/we
 import { spatialTileOptions, useCompactSpatialTiles, COMPACT_SPATIAL_TILE_SIZE } from "@/weather/spatialTilePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
+import { spatialZoomNeedsNewCoverage } from "@/weather/spatialZoomCoverage";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
@@ -471,7 +472,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; invalidateZoom?: (zoom: number) => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -612,7 +613,15 @@ export class ModelField {
         const adopted = frame.renderGeneration.begin(incomplete);
         for (const index of incomplete) frame.layerGeneration[index] = adopted;
       }
-      if (!this.visible || !this.frames.get(this.base)?.ready) return;
+      // The previous zoom's completed tiles are no longer a complete
+      // forecast at the NEW Leaflet zoom. Invalidating them before the
+      // GridLayer moveend load prevents the hard rectangular cloud cuts
+      // visible during world zoom-out. Same-zoom pans keep buffered tiles.
+      for (const frame of this.frames.values()) frame.invalidateZoom?.(map.getZoom());
+      if (!this.visible || !this.frames.get(this.base)?.ready) {
+        if (this.visible) this.pump();
+        return;
+      }
       // GridLayer's 'loading' may be emitted after this moveend callback.
       // Give it time to request the newly visible viewport before prefetch
       // can start again, without adding a periodic timer or another redraw.
@@ -893,6 +902,7 @@ export class ModelField {
     if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer);
     if (frame?.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
     frame?.tileGates.forEach((gate) => gate.release());
+    frame && (frame.invalidateZoom = undefined);
     this.frames.delete(step);
     this.loading.delete(step);
     // Removed Leaflet layers abort outstanding tile tasks. Their asynchronous
@@ -947,7 +957,9 @@ export class ModelField {
       adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
     const frame = {
-      layers: made, token, opacity: -1, ready: false, previewReady: false, previewMask: 0, previewOpacityKey: "",
+      layers: made, token, opacity: -1, ready: false, coverageZoom: null,
+      invalidateZoom: undefined as ((zoom: number) => void) | undefined,
+      previewReady: false, previewMask: 0, previewOpacityKey: "",
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
       errored: new Set<number>(),
       tileCounts: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
@@ -965,7 +977,7 @@ export class ModelField {
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
     let errors = 0;
-    const startedAt = Date.now();
+    let startedAt = Date.now();
     let lastProgressAt = startedAt;
     const alive = () => this.frames.get(step)?.token === token;
     const refresh = () => {
@@ -1014,6 +1026,7 @@ export class ModelField {
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
+        frame.coverageZoom = map.getZoom();
         if (step === this.base && this.firstCompleteReadyMs === null) {
           this.firstCompleteReadyMs = performance.now() - this.attachedAt;
         }
@@ -1081,6 +1094,36 @@ export class ModelField {
       this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+    frame.invalidateZoom = (zoom) => {
+      if (!alive() || !spatialZoomNeedsNewCoverage(frame.coverageZoom, zoom)) return;
+      // A newly zoomed viewport must not inherit a historical layer's
+      // cumulative tile count. That marked a frame ready with zero new
+      // delivered tiles and left broken rectangular ECMWF patches.
+      frame.coverageZoom = null;
+      frame.ready = false;
+      frame.previewReady = false;
+      frame.previewMask = 0;
+      frame.previewOpacityKey = "";
+      frame.opacity = 0;
+      frame.loaded.fill(false);
+      frame.tileCounts.fill(0);
+      frame.layerFirstTileAt.fill(0);
+      frame.layerLastTileAt.fill(0);
+      frame.tileGates.forEach(gate => gate.release());
+      const epoch = frame.renderGeneration.begin([0, 1, 2]);
+      frame.layerGeneration.fill(epoch);
+      for (const layer of made) layer.setOpacity?.(0);
+      this.loading.add(step);
+      this.orderKey = "";
+      startedAt = Date.now();
+      lastProgressAt = startedAt;
+      const old = this.pendingTimers.get(step);
+      if (old !== undefined) window.clearTimeout(old);
+      this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
+      // Existing physical image tile requests continue. No remount, duplicate
+      // network request or extra worker is introduced for the zoom transition.
+      this.applyOpacity();
+    };
     const rasterView = (): SpatialRasterView => {
       const b = map.getBounds();
       return { west: b.getWest(), east: b.getEast(), south: b.getSouth(),
