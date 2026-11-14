@@ -4,6 +4,7 @@ on:
     branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
     paths:
       - 'project/tide_service/**'
+      - 'project/src/weather/fesTideContract*'
       - '.github/workflows/fes2022-adapter-qa.yml'
   workflow_dispatch:
 permissions:
@@ -23,6 +24,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify opt-in Android FES schema (not activated)
+        run: node --experimental-strip-types --test src/weather/fesTideContract.test.ts
       - name: Test physical FES adapter contracts (no atlas available)
         run: python -m unittest discover -s tide_service -p 'test_*.py' -v
       - name: Verify operator atlas required (fail closed)
