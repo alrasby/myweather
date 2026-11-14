@@ -1020,7 +1020,7 @@ export class ModelField {
     const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
     const plan = planSpatialRequests(
       this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive, this.viewportMoving, this.compactSpatialTiles,
-      now < this.speculationResumeAt,
+      now < this.speculationResumeAt && this.blend < 0.65,
     );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
