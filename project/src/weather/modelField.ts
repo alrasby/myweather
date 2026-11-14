@@ -966,7 +966,7 @@ export class ModelField {
       adapter.createTileLayer(renderUrl("snowfall_water_equivalent"), rainOpts),
     ] as AnyLayer[];
     const frame = {
-      layers: made, token, opacity: -1, ready: false, coverageZoom: null, requestedZoom: map.getZoom(),
+      layers: made, token, opacity: -1, ready: false, coverageZoom: null as number | null, requestedZoom: map.getZoom(),
       invalidateZoom: undefined as ((zoom: number) => void) | undefined,
       previewReady: false, previewMask: 0, previewOpacityKey: "",
       loaded: Array<boolean>(SPATIAL_LAYER_COUNT).fill(false),
