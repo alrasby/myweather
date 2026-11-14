@@ -23,19 +23,11 @@ export function certifiedCurrentLeafletTiles(
   mapZoom: number,
   delivered: WeakSet<object>,
 ): number {
-  if (!Number.isFinite(mapZoom) || layer.isLoading?.() !== false ||
-      layer._tileZoom === undefined || Math.abs(layer._tileZoom - mapZoom) > 0.01 ||
-      !layer._tiles) return 0;
-  const tiles = Object.values(layer._tiles).filter((tile) => tile.current === true);
-  if (tiles.length === 0) return 0;
-  for (const tile of tiles) {
-    // A pending/aborted canvas or a tile from the previous map zoom is
-    // NOT current source-backed imagery, even if its DOM node still exists.
-    if (!tile.el || !tile.loaded || tile.coords?.z !== layer._tileZoom ||
-        !delivered.has(tile.el) || tile.el.style?.visibility === "hidden" ||
-        tile.el.style?.opacity === "0") return 0;
-  }
-  return tiles.length;
+  // One canonical definition of current viewport coverage for both
+  // readiness and QA. Divergent checks would allow "ready" while the
+  // diagnostics correctly report a hidden or pending canvas.
+  const coverage = currentLeafletCoverage(layer, mapZoom, delivered);
+  return coverage.complete ? coverage.delivered : 0;
 }
 
 /** Safe diagnostic breakdown of the actual Leaflet viewport, not the
