@@ -111,11 +111,11 @@ export function DetailCards({
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-fg">
             <span className="inline-flex items-center gap-1">
               <Sunrise className="size-3.5 shrink-0" />
-              <span className="fig">{lunar.rise ? formatHour24(lunar.rise, bundle.timezone) : "—:—"}</span>
+              <span className="fig" title={lunar.rise == null ? (lang === "ar" ? "لا يوجد شروق محسوب ضمن اليوم المحلي" : "No computed rise on this local date") : undefined}>{lunar.rise != null ? formatHour24(lunar.rise, bundle.timezone) : "—:—"}</span>
             </span>
             <span className="inline-flex items-center gap-1">
               <Sunset className="size-3.5 shrink-0" />
-              <span className="fig">{lunar.set ? formatHour24(lunar.set, bundle.timezone) : "—:—"}</span>
+              <span className="fig" title={lunar.set == null ? (lang === "ar" ? "لا يوجد غروب محسوب ضمن اليوم المحلي" : "No computed set on this local date") : undefined}>{lunar.set != null ? formatHour24(lunar.set, bundle.timezone) : "—:—"}</span>
             </span>
           </p>
         </div>
@@ -429,7 +429,7 @@ function TideCard({
               }
             </a>
           ) : (
-            <a href="https://marine-api.open-meteo.com/" target="_blank" rel="noopener noreferrer" className="underline">
+            <a href="https://open-meteo.com/en/docs/marine-weather-api" target="_blank" rel="noopener noreferrer" className="underline">
               Open-Meteo Marine · {lang === "ar" ? "نموذج تقديري (MSL)" : "Estimated (MSL)"}
             </a>
           )}
