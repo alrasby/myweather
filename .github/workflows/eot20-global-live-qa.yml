@@ -6,7 +6,13 @@ on:
       - 'project/tide_service/eot20_bootstrap.py'
       - 'project/tide_service/eot20_global.py'
       - 'project/tide_service/eot20_server.py'
+      - 'project/tide_service/railway_entry.py'
+      - 'project/tide_service/test_eot20_bootstrap.py'
       - 'project/tide_service/requirements-tide.txt'
+      - 'project/tide_service/Dockerfile'
+      - 'project/tide_service/entrypoint.sh'
+      - 'railway.json'
+      - '.dockerignore'
       - '.github/workflows/eot20-global-live-qa.yml'
   workflow_dispatch:
 permissions:
@@ -31,7 +37,7 @@ jobs:
       - name: Verify official PyFES imported and offline contracts
         run: |
           python -c 'import pyfes; assert hasattr(pyfes, "evaluate_tide")'
-          python -m unittest tide_service.test_eot20_global -v
+          python -m unittest tide_service.test_eot20_global tide_service.test_eot20_bootstrap -v
       - name: Download and SHA256 verify genuine modified EOT20 grids
         run: |
           python -m tide_service.eot20_bootstrap \
@@ -94,3 +100,50 @@ jobs:
           assert model['license']=='CC-BY-4.0'
           print('EOT20_LIVE_HTTP_PASSED',len(model['samples']),len(model['extrema']))
           PY
+
+      - name: Real HTTP server using loaded worldwide atlas
+        env:
+          EOT20_CONFIG: ${{ runner.temp }}/myweather-eot20/eot20.yaml
+          EOT20_MANIFEST: ${{ runner.temp }}/myweather-eot20/eot20.json
+        run: |
+          python - <<'PY'
+          import json, os, threading
+          from datetime import datetime, timezone
+          from http.server import ThreadingHTTPServer
+          from urllib.parse import urlencode
+          from urllib.request import urlopen
+          from tide_service.eot20_global import PyFESEOT20Atlas
+          from tide_service.gateway import TideGateway, handler_for
+          atlas = PyFESEOT20Atlas(os.environ["EOT20_CONFIG"], os.environ["EOT20_MANIFEST"])
+          server = ThreadingHTTPServer(("127.0.0.1", 0),
+              handler_for(TideGateway(atlas, source="EOT20")))
+          thread = threading.Thread(target=server.serve_forever, daemon=True)
+          thread.start()
+          try:
+              root = f"http://127.0.0.1:{server.server_port}"
+              with urlopen(root+"/healthz",timeout=8) as response:
+                  health = json.load(response)
+              assert health == {"ready":True,"source":"EOT20","public":False}
+              start = datetime.now(timezone.utc)
+              start = start.replace(minute=(start.minute//5)*5, second=0,microsecond=0)
+              query=urlencode({"lat":"23.65","lon":"58.7",
+                               "start":start.isoformat(),"hours":"12"})
+              with urlopen(root+"/v1/tides?"+query,timeout=12) as response:
+                  model=json.load(response)
+              assert model["source"]=="EOT20" and len(model["samples"])==145
+              assert model["extrema"] and model["not_for_navigation"]
+              print("EOT20_REAL_HTTP_200", len(model["samples"]),len(model["extrema"]))
+          finally:
+              server.shutdown()
+              server.server_close()
+              thread.join(timeout=3)
+          PY
+      - name: Build production Railway Docker image without ocean data
+        working-directory: .
+        run: |
+          docker build --file project/tide_service/Dockerfile \
+            --tag myweather-pyfes:eot20-qa .
+          docker run --rm --entrypoint python myweather-pyfes:eot20-qa \
+            -m unittest tide_service.test_eot20_global tide_service.test_eot20_bootstrap -v
+          docker run --rm --entrypoint sh myweather-pyfes:eot20-qa \
+            -n /opt/myweather/project/tide_service/entrypoint.sh
