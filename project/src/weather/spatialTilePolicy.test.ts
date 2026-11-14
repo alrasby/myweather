@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { spatialTileOptions, COMPACT_SPATIAL_TILE_SIZE, useCompactSpatialTiles } from "./spatialTilePolicy.ts";
+import { spatialTileOptions, spatialPhysicalTileSize, COMPACT_SPATIAL_TILE_SIZE, useCompactSpatialTiles } from "./spatialTilePolicy.ts";
 
 test("all ECMWF forecast layers fetch new viewport tiles during map movement", () => {
   for (const pane of ["wx-clouds", "wx-model"] as const) {
@@ -34,4 +34,20 @@ test("Android without shared workers cuts ECMWF worker jobs without raster stret
   const standard = spatialTileOptions("wx-clouds");
   assert.equal(standard.tileSize, 512);
   assert.equal(standard.zoomOffset, -1);
+});
+
+test("global zoom tile footprints match the bounded aligned .om data crop",()=>{
+ assert.equal(spatialPhysicalTileSize(true,3),512);
+ assert.equal(spatialPhysicalTileSize(true,5),512);
+ assert.equal(spatialPhysicalTileSize(true,6),COMPACT_SPATIAL_TILE_SIZE);
+ assert.equal(spatialPhysicalTileSize(false,4),512);
+ const world=spatialTileOptions("wx-clouds",true,true);
+ assert.equal(world.tileSize,512);
+ assert.equal(world.zoomOffset,-1);
+ assert.equal(world.keepBuffer,0);
+ assert.equal(world.maxNativeZoom,12);
+ const region=spatialTileOptions("wx-clouds",true,false);
+ assert.equal(region.tileSize,1024);
+ assert.equal(region.zoomOffset,-2);
+ assert.equal(region.keepBuffer,1);
 });
