@@ -552,3 +552,13 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(screen.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
  assert.ok(screen.includes("if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.()"));
 });
+
+test("ECMWF source compositing follows exact valid-time weights; never retain ghost old hours",()=>{
+ const model=read("project/src/weather/modelField.ts");
+ const temporal=read("project/src/weather/modelFrameTimeline.ts");
+ assert.ok(model.includes("const value = goal;"));
+ assert.ok(!model.includes("cur + (goal - cur) * 0.28"),
+   "secondary opacity easing displayed old model hour 13 after the clock reached hour 14");
+ assert.ok(temporal.includes("goals.set(requested, 1 - t)") &&
+           temporal.includes("goals.set(requested + 1, t)"));
+});
