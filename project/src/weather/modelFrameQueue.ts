@@ -92,7 +92,13 @@ export function canAdvanceSpatialTime(
   // A real source-backed precipitation grid can display the requested time
   // while the heavier ECMWF spatial tiles finish. This never authorizes an
   // artificial grid or stale held ECMWF frame to masquerade as current.
-  if (sourceBackedFallback) return true;
+  // A real fallback is allowed when the requested ECMWF hour is NOT being
+  // decoded. Previously its presence unconditionally advanced the forecast
+  // clock every four seconds, cancelling still-running .om loads over and
+  // over. ECMWF then NEVER reached a ready frame during world playback even
+  // after removing the old zoom gate. Wait for active source work to settle,
+  // but continue through an actual provider cooldown (checked above).
+  if (sourceBackedFallback && !loading.has(requested)) return true;
   // No spatial frame exists: allow global fallback only when no model request
   // is in progress, so playback never silently outruns an active decode.
   return ready.size === 0 && loading.size === 0;
