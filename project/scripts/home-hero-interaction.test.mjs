@@ -578,3 +578,17 @@ test("ready ECMWF source always certifies the CURRENT complete three-layer viewp
   assert.ok(!model.includes("}, 85);"),
     "hidden tiles must be revealed before the source switches to ECMWF");
 });
+
+test("ECMWF source selection rejects CSS-hidden tiles even when Leaflet emits loaded events",()=>{
+ const source=read("project/src/weather/modelField.ts");
+ const proof=read("project/src/weather/spatialLeafletCoverage.ts");
+ const UI=read("project/src/components/weather/MapScreen.tsx");
+ assert.ok(source.includes("frame.tileGates.every(gate => gate.pending === 0)"),
+   "the three-layer barrier must be released before exposing ECMWF");
+ assert.ok(source.includes("coverage.every(item => item.complete)"),
+   "all viewport field layers must have visible, certified tiles");
+ assert.ok(proof.includes('tile.el.style?.visibility === "hidden"'),
+   "a CSS-staged canvas cannot satisfy ready");
+ assert.ok(UI.includes("weatherDiagnostics.currentTileCoverage.map"),
+   "on-device diagnostics must expose the viewport, not only historical tile counts");
+});
