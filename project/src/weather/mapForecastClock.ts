@@ -13,8 +13,6 @@ export type MapForecastClock = {
   gapMinutes: number | null;
 };
 
-const HOUR_MS = 3_600_000;
-
 export function mapForecastClock(
   timelineMs: number,
   visibleEcmwfTimes: readonly number[],
@@ -29,17 +27,21 @@ export function mapForecastClock(
     Math.abs(time - timelineMs) < Math.abs(best - timelineMs) ? time : best);
   const gapMinutes = Math.round(Math.abs(nearest - timelineMs) / 60_000);
 
-  // During a legitimate two-hour crossfade there is no unique on-screen
-  // source hour. The slider's interpolated UTC time is truthful.
-  const spanning = usable.length >= 2 &&
-    Math.min(...usable) <= timelineMs && timelineMs <= Math.max(...usable);
-  if (!holdingPreviousFrame && (spanning || Math.abs(nearest - timelineMs) <= HOUR_MS)) {
+  // Only TWO DISTINCT, truly visible source hours on opposite sides of
+  // the requested time can justify a continuously interpolated label.
+  // A lone 02:00 source image is still 02:00 even if the UI timeline has
+  // advanced to 02:59:56 while 03:00 is decoding. The old <= 1 hour grace
+  // incorrectly labeled the old image as almost 03:00 (device regression).
+  const distinct = [...new Set(usable)];
+  const spanning = distinct.length >= 2 &&
+    Math.min(...distinct) <= timelineMs && timelineMs <= Math.max(...distinct);
+  if (!holdingPreviousFrame && (spanning || nearest === timelineMs)) {
     return {timeMs: timelineMs, status: "timeline", gapMinutes};
   }
 
-  // A frozen authentic ECMWF frame must never be labelled as the later
-  // requested hour. When outside the source interval by >1 hour, likewise
-  // show the genuine visible raster hour instead of the stale slider clock.
+  // For a single genuinely visible source frame, its exact forecast hour
+  // wins over the animated timeline. The normal hourly crossfade above
+  // remains smooth whenever both authentic source hours are present.
   return {
     timeMs: nearest,
     status: holdingPreviousFrame ? "held-real-frame" : "corrected-real-frame",
