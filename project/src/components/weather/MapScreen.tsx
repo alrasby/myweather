@@ -1187,8 +1187,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
           {weatherDiagnostics?.spatialViewportPolicy ? <p>
             {lang === "ar" ? "خطة فك البيانات" : "Decode plan"}: {
-              weatherDiagnostics.spatialViewportPolicy.allow ? "ECMWF regional" :
-              `real world fallback (${weatherDiagnostics.spatialViewportPolicy.reason})`
+              weatherDiagnostics.spatialViewportPolicy.allow
+                ? `ECMWF ${weatherDiagnostics.spatialViewportPolicy.reason} · ${weatherDiagnostics.spatialViewportPolicy.rasterSize}px`
+                : `genuine fallback (invalid viewport)`
             }
           </p> : null}
           <p>{lang === "ar" ? "محرك الرسم" : "Raster engine"}: {weatherDiagnostics?.backend ?? "om-on-device"}
