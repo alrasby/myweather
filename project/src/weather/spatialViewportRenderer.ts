@@ -72,6 +72,8 @@ export type ViewportRendererStats = {
   datasetEvictions: number; workerSlots: number; capturedReadRecoveries: number;
   queued: number; peakWaiting: number; reasons: ViewportFallbackReasons;
   readP50Ms: number | null; readP95Ms: number | null; workerQueueP95Ms: number | null;
+  /** Reuses of source-verified decoded data covering the exact aligned viewport. */
+  certifiedStateReuses?: number;
   renderP50Ms: number | null; renderP95Ms: number | null;
 };
 export function classifyViewportFailure(error: unknown): ViewportFallbackReason {
@@ -177,6 +179,25 @@ export function pinLoadedSpatialState(state:OmUrlState|null):OmUrlState|null {
  const data=state?.data;
  return data?.values ? {...state!,data} : null;
 }
+/** Skip a redundant upstream .om read only if a RESIDENT decoded state proves
+ * complete geographic inclusion of the current tile-aligned viewport.
+ * Earlier shortcuts that matched file/variable only exposed stale continent
+ * rasters. No guessed bounds, partial windows, or unloaded sources are valid.
+ * Caller must snapshot currentBounds synchronously before using this.
+ */
+export function certifiedResidentSpatialState(
+  states: Iterable<OmUrlState>, file: string, variable: string,
+  wanted: readonly number[] | null | undefined,
+): OmUrlState | null {
+  if (!wanted || wanted.length !== 4 || !wanted.every(Number.isFinite) ||
+      wanted[0]! >= wanted[2]! || wanted[1]! >= wanted[3]!) return null;
+  const candidate = chooseLoadedSpatialState(null, states, file, variable, wanted);
+  // Undefined / malformed data bounds have no explicit crop certificate.
+  // Let the official source reader confirm validity instead of guessing.
+  if (!candidate?.dataOptions.bounds || candidate.dataOptions.bounds.length !== 4 ||
+      !candidate.dataOptions.bounds.every(Number.isFinite)) return null;
+  return pinLoadedSpatialState(candidate);
+}
 function paletteOf(settings: OmProtocolSettings, variable: string): Palette | null {
   const scale = settings.colorScales[variable] as RenderableColorScale | undefined;
   if (!scale || scale.type !== "breakpoint" || !scale.breakpoints.length ||
@@ -197,6 +218,7 @@ export class SpatialViewportRenderer {
   private reused = 0;
   private evicted = 0;
   private recovered = 0;
+  private certifiedReuses = 0;
   private completed = 0;
   private fallbackCount = 0;
   private reasons: ViewportFallbackReasons = {
@@ -238,6 +260,7 @@ export class SpatialViewportRenderer {
       peakWaiting: this.admission.peakWaiting, reasons: { ...this.reasons },
       readP50Ms: pctl(this.readSamples, 0.5), readP95Ms: pctl(this.readSamples, 0.95),
       workerQueueP95Ms: pctl(this.workerQueueSamples, 0.95),
+      certifiedStateReuses: this.certifiedReuses,
       renderP50Ms: pctl(this.samples, 0.5), renderP95Ms: pctl(this.samples, 0.95) };
   }
   readonly handler: typeof omProtocol = async (params, abort, settings) => {
@@ -289,6 +312,20 @@ export class SpatialViewportRenderer {
     // The snapshot belongs to THIS tile request. Concurrent panning can
     // mutate the module-wide currentBounds before the read completes.
     const requestedBounds = currentBounds ? [...currentBounds] : null;
+    // Only a fully decoded state with EXPLICIT source bounds covering these
+    // aligned tiles may skip the official arrayBuffer validation. This check
+    // and pin are synchronous: panning cannot swap the shared bounds between
+    // inspection and retaining its immutable Float32Array reference.
+    if (!controller.signal.aborted) {
+      const resident = certifiedResidentSpatialState(
+        getProtocolInstance(config).stateByKey.values(),
+        parsed.file, parsed.variable, requestedBounds,
+      );
+      if (resident) {
+        this.certifiedReuses++;
+        return resident;
+      }
+    }
     const previousCallback = config.postReadCallback;
     const recordRead: NonNullable<OmProtocolSettings["postReadCallback"]> = (reader, data, state) => {
       previousCallback?.(reader, data, state);
