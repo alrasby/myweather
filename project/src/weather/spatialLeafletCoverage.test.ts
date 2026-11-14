@@ -75,10 +75,10 @@ test("a real ECMWF screen cannot be certified from only its loaded half", () => 
   const partial = currentLeafletCoverage(grid,4,delivered,screen);
   assert.deepEqual(partial,{required:4,delivered:2,pending:2,hidden:0,complete:false});
   assert.equal(certifiedCurrentLeafletTiles(grid,4,delivered,screen),0);
-  grid._tiles = {...grid._tiles,
+  Object.assign(grid._tiles, {
     c:{current:true,loaded:1,coords:{x:0,y:1,z:4},el:pane},
     d:{current:true,loaded:1,coords:{x:1,y:1,z:4},el:other},
-  };
+  });
   assert.equal(currentLeafletCoverage(grid,4,delivered,screen).complete,true);
   assert.equal(certifiedCurrentLeafletTiles(grid,4,delivered,screen),4);
   assert.equal(currentLeafletCoverage(grid,3,delivered,screen).complete,false);
