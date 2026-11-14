@@ -79,3 +79,10 @@ test("Muscat accepts real sea-level data 22.66km offshore only if its shoreline 
  assert.equal(parseMarineSnapshot(response(23.791664,58.375015),23.588,58.3829,now,Infinity)?.coastal,false);
  assert.equal(parseMarineSnapshot(response(24.5,59.5),23.588,58.3829,now,1)?.coastal,false);
 });
+
+test("hour gaps cannot manufacture high/low times in an estimated sea-level curve", () => {
+ const gap=[{t:now+hour,level:0.2},{t:now+4*hour,level:1.2},{t:now+5*hour,level:0.2}];
+ const smooth=[{t:now+3*hour,level:0.2},{t:now+4*hour,level:1.2},{t:now+5*hour,level:0.2}];
+ assert.equal(modelTideForecast(gap,now).nextHigh,null);
+ assert.equal(modelTideForecast(smooth,now).nextHigh?.t,now+4*hour);
+});
