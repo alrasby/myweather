@@ -106,10 +106,11 @@ class NOAAStationPyFESContract(unittest.TestCase):
             parse_station_harmonics(STATION, bad, "9414290")
 
     def test_noaa_name_alias_is_mapped_to_real_pyfes_constituent(self):
-        original = {"LAM2": (3.0, 17.0), "SIG1": (2.0, 44.0), "M2": (10.0, 70.0)}
-        result = canonical_pyfes_constituents(original, ["Lambda2", "Sigma1", "M2"])
+        original = {"LAM2": (3.0, 17.0), "SIG1": (2.0, 44.0), "RHO": (1.0, 12.0), "M2": (10.0, 70.0)}
+        result = canonical_pyfes_constituents(original, ["Lambda2", "Sigma1", "Rho1", "M2"])
         self.assertEqual(result["Lambda2"], (3.0, 17.0))
         self.assertEqual(result["Sigma1"], (2.0, 44.0))
+        self.assertEqual(result["Rho1"], (1.0, 12.0))
         with self.assertRaisesRegex(TideUnavailable, "unsupported"):
             canonical_pyfes_constituents({"UNKNOWN": (1, 2)}, ["M2"])
 
