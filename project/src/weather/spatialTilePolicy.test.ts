@@ -49,5 +49,6 @@ test("global zoom tile footprints match the bounded aligned .om data crop",()=>{
  const region=spatialTileOptions("wx-clouds",true,false);
  assert.equal(region.tileSize,1024);
  assert.equal(region.zoomOffset,-2);
- assert.equal(region.keepBuffer,1);
+ assert.equal(region.keepBuffer,0,
+   "do not cache offscreen partial ECMWF rasters on mobile");
 });
