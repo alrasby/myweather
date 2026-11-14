@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from tide_service.fes2022_predict import (
-    PyFESAtlas, TideUnavailable, extrema, predict, utc_time, verify_official_atlas_manifest,
+    PyFESAtlas, TideUnavailable, extrema, predict, utc_time, verify_official_atlas_manifest, regional_bounds,
 )
 
 START = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
@@ -85,6 +85,20 @@ class ScientificTideContract(unittest.TestCase):
             manifest.write_text(json.dumps(metadata))
             with self.assertRaisesRegex(TideUnavailable, "config-hash-mismatch"):
                 verify_official_atlas_manifest(str(config), str(manifest))
+
+    def test_region_restrictions_use_real_pyfes_subgrid_without_false_world_claim(self):
+        self.assertIsNone(regional_bounds(""))
+        self.assertEqual(regional_bounds("52,20,62,28"), (52, 20, 62, 28))
+        for bad in ("NaN,20,62,28", "63,20,62,28", "52,20,62,100",
+                    "170,-5,-170,5", "0,0,0,0", "broken"):
+            with self.subTest(bbox=bad):
+                with self.assertRaisesRegex(TideUnavailable,"invalid-fes-region-bbox"):
+                    regional_bounds(bad)
+        # Verify location gate without loading licensed proprietary model data.
+        dummy = PyFESAtlas.__new__(PyFESAtlas)
+        dummy.bbox = (52, 20, 62, 28)
+        with self.assertRaisesRegex(TideUnavailable,"outside-provisioned-atlas-region"):
+            dummy([], 60, 5)
 
     def test_request_validation_and_utc(self):
         self.assertEqual(utc_time("2026-11-14T00:00:00Z"), START)
