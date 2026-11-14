@@ -36,24 +36,58 @@ test("independent z2 real satellite parent covers black holes during broad world
  assert.equal(shouldKeepWorldSatelliteParent(NaN,false),false);
 });
 
-test("separate satellite diagnostic rejects a stale, pending or failed Esri image", () => {
-  const first = { current: true, loaded: 1, coords: { z: 3 }, el: { complete: true, naturalWidth: 256 } };
-  const second = { current: true, loaded: 0, coords: { z: 3 }, el: { complete: false, naturalWidth: 0 } };
-  let loading = true;
-  const layer = { _tileZoom: 3, _tiles: { a: first, b: second }, isLoading: () => loading };
-  assert.deepEqual(snapshotSatelliteRasterCoverage(layer, 3), {
-    active: true, required: 2, delivered: 1, pending: 1,
-    failed: 0, loading: true, complete: false,
+test("satellite viewport detects missing uncreated images despite loaded cached tiles", () => {
+  const image = (width: number) => ({ complete: width > 0, naturalWidth: width });
+  const first = { current: true, loaded: 1, coords: { x: 0, y: 0, z: 3 }, el: image(256) };
+  const second = { current: true, loaded: 2, coords: { x: 1, y: 0, z: 3 }, el: image(256) };
+  let busy = false;
+  const layer = {
+    _tileZoom: 3,
+    _tiles: { first, second },
+    isLoading: () => busy,
+  };
+  const twoTiles = { minX: 0, maxX: 512, minY: 0, maxY: 256, tileWidth: 256, tileHeight: 256 };
+  assert.deepEqual(snapshotSatelliteRasterCoverage(layer, 3, undefined, twoTiles), {
+    active: true, required: 2, delivered: 2, pending: 0, missing: 0,
+    failed: 0, loading: false, complete: true,
   });
-  second.loaded = 2;
-  second.el.complete = true;
-  second.el.naturalWidth = 256;
-  loading = false;
-  assert.equal(snapshotSatelliteRasterCoverage(layer, 3).complete, true);
-  assert.equal(snapshotSatelliteRasterCoverage(layer, 4).complete, false);
+  // The previous implementation looked only at tile.current, so a second
+  // missing row of the real viewport incorrectly reported complete=true.
+  const fullScreen = { ...twoTiles, maxY: 512 };
+  const torn = snapshotSatelliteRasterCoverage(layer, 3, undefined, fullScreen);
+  assert.equal(torn.required, 4);
+  assert.equal(torn.delivered, 2);
+  assert.equal(torn.missing, 2);
+  assert.equal(torn.complete, false);
+  busy = true;
+  assert.equal(snapshotSatelliteRasterCoverage(layer, 3, undefined, twoTiles).complete, false);
+  busy = false;
+  assert.equal(snapshotSatelliteRasterCoverage(layer, 4, undefined, twoTiles).complete, false);
   const failed = new WeakSet<object>([second.el]);
-  const broken = snapshotSatelliteRasterCoverage(layer, 3, failed);
-  assert.equal(broken.failed, 1);
-  assert.equal(broken.complete, false);
-  assert.equal(snapshotSatelliteRasterCoverage(null, 3).active, false);
+  assert.deepEqual(snapshotSatelliteRasterCoverage(layer, 3, failed, twoTiles), {
+    active: true, required: 2, delivered: 1, pending: 0, missing: 0,
+    failed: 1, loading: false, complete: false,
+  });
+  assert.equal(snapshotSatelliteRasterCoverage(null, 3, undefined, twoTiles).active, false);
+});
+test("satellite viewport follows repeated westward world copies and ignores offscreen cache", () => {
+  const img = { complete: true, naturalWidth: 256 };
+  const layer = {
+    _tileZoom: 3,
+    _tiles: {
+      old: { current: true, loaded: 1, coords: { x: 0, y: 0, z: 3 }, el: img },
+      west: { current: true, loaded: 2, coords: { x: -9, y: 0, z: 3 }, el: img },
+    },
+    isLoading: () => false,
+  };
+  const west = { minX: -9 * 256, maxX: -8 * 256, minY: 0, maxY: 256,
+    tileWidth: 256, tileHeight: 256 };
+  assert.equal(snapshotSatelliteRasterCoverage(layer, 3, undefined, west).complete, true);
+  const further = { ...west, minX: -10 * 256 };
+  const partial = snapshotSatelliteRasterCoverage(layer, 3, undefined, further);
+  assert.equal(partial.missing, 1);
+  assert.equal(partial.complete, false);
+  const polar = { ...west, minY: -256, maxY: 256 };
+  assert.equal(snapshotSatelliteRasterCoverage(layer, 3, undefined, polar).required, 1,
+    "imagery beyond north pole is not a valid Esri Mercator tile");
 });
