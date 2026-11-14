@@ -67,9 +67,17 @@ export function parseFesPilotForecast(
         !num(event.level_m) || event.time_resolution_minutes !== 5) return null;
     const t = time(event.time);
     const actual = known.get(t);
-    if (!Number.isFinite(t) || t <= last || actual === undefined ||
-        Math.abs(actual - event.level_m) > 1e-4 ||
-        t <= startUtcMs || t >= startUtcMs + hours * 3600000) return null;
+    const index = (t - startUtcMs) / 300000;
+    if (!Number.isFinite(t) || !Number.isInteger(index) || t <= last ||
+        index < 1 || index >= points.length - 1 || actual === undefined ||
+        Math.abs(actual - event.level_m) > 1e-4) return null;
+    const left = points[index - 1]!.levelM;
+    const right = points[index + 1]!.levelM;
+    // The gateway's advertised high/low MUST be a genuine turning point
+    // in the accompanying physical model, not just a coincident timestamp.
+    if (event.kind === "high" ? !(actual >= left && actual >= right && (actual > left || actual > right))
+                               : !(actual <= left && actual <= right && (actual < left || actual < right)))
+      return null;
     last = t;
     extrema.push({ kind: event.kind, t, levelM: actual });
   }
