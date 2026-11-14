@@ -4,20 +4,41 @@ import {parseReadyManifest,readyTileUrl,ReadyTileClient,readyTilesBase} from './
 const manifest={schemaVersion:1 as const,model:'ecmwf_ifs' as const,runId:'20261113T0000Z',referenceTime:'2026-11-13T00:00:00.000Z',validTimes:['2026-11-13T00:00:00.000Z','2026-11-13T01:00:00.000Z'],layers:['cloud_cover','precipitation','snowfall_water_equivalent'] as const,tileSize:256 as const,maxNativeZoom:8};
 class FakeLayer{
  events=new globalThis.Map<string,Array<()=>void>>();opacity=0;url:string;opts:Record<string,unknown>;map:FakeMap|null=null;style={transition:''};
+ _tileZoom=5;_tiles:Record<string,{current:boolean;loaded:number;coords:{x:number;y:number;z:number};el:{complete:boolean;naturalWidth:number}}>={};
  constructor(url:string,opts:Record<string,unknown>){this.url=url;this.opts=opts;}
  on(name:string,fn:()=>void){this.events.set(name,[...(this.events.get(name)??[]),fn]);return this;}
  addTo(map:FakeMap){this.map=map;map.layers.add(this);return this;}
  remove(){this.map?.layers.delete(this);this.map=null;}
  setOpacity(n:number){this.opacity=n;return this;}
  getContainer(){return {style:this.style};}
- fire(name:string){for(const fn of this.events.get(name)??[])fn();}
+ getTileSize(){return {x:256,y:256};}
+ isLoading(){return false;}
+ addTile(x:number,y=0){
+  const key=x+','+y;
+  this._tiles[key]={current:true,loaded:Date.now(),coords:{x,y,z:5},el:{complete:true,naturalWidth:256}};
+ }
+ fire(name:string){
+  if(name==='tileload'&&this.map){
+   const pixels=this.map.getPixelBounds();
+   this.addTile(Math.floor(pixels.min.x/256),Math.floor(pixels.min.y/256));
+  }
+  for(const fn of this.events.get(name)??[])fn();
+ }
 }
-class FakeMap{layers=new Set<FakeLayer>();getCenter(){return {lat:23,lng:58};}getZoom(){return 5;}}
+class FakeMap{
+ layers=new Set<FakeLayer>();
+ bounds={min:{x:0,y:0},max:{x:256,y:256}};
+ getCenter(){return {lat:23,lng:58};}
+ getZoom(){return 5;}
+ getPixelBounds(){return this.bounds;}
+ setPixelBounds(minX:number,maxX:number){this.bounds={min:{x:minX,y:0},max:{x:maxX,y:256}};}
+}
 class FakeLeaflet{tiles:FakeLayer[]=[];tileLayer(url:string,options:Record<string,unknown>){const t=new FakeLayer(url,options);this.tiles.push(t);return t;}}
 function make(){
  const L=new FakeLeaflet(),map=new FakeMap(),published:string[]=[],images:string[]=[];
  const client=new ReadyTileClient(L as never,map as never,'https://tiles.example.org',manifest,
-   t=>published.push(t),()=>published.push('missing'),url=>{images.push(url);return {src:url} as HTMLImageElement;});
+   t=>published.push(t),()=>published.push('missing'),url=>{images.push(url);return {src:url} as HTMLImageElement;},
+   ()=>published.push('coverage-lost'));
  return {L,map,published,images,client};
 }
 function loaded(tiles:FakeLayer[]){for(const tile of tiles){tile.fire('tileload');tile.fire('load');}}
@@ -69,5 +90,40 @@ test('a later current-viewport tile error removes stale ECMWF imagery and enters
   assert.equal(map.layers.size,0);
   assert.deepEqual(published,[manifest.validTimes[0],'missing']);
   client.show(0);assert.equal(L.tiles.length,3,'cooldown must not hot-loop failed source');
+ }finally{client.destroy();}
+});
+
+test('incomplete viewport cannot publish a forecast based on one received tile per layer',()=>{
+ const {L,map,published,client}=make();
+ try{
+  map.setPixelBounds(0,512);
+  client.show(0);
+  loaded(L.tiles.slice(0,3));
+  assert.equal(client.displayedHour,null,'three delivered images do not cover two visible columns');
+  assert.deepEqual(published,[]);
+  for(const layer of L.tiles.slice(0,3)){
+   layer.addTile(1);
+   layer.fire('tileload');
+   layer.fire('load');
+  }
+  assert.equal(client.displayedHour,0,'both real visible source tiles are certified');
+  assert.deepEqual(published,[manifest.validTimes[0]]);
+ }finally{client.destroy();}
+});
+test('a far pan hides stale ready-hour imagery but keeps off-device renderer alive',()=>{
+ const {L,map,published,client}=make();
+ try{
+  client.show(0);loaded(L.tiles.slice(0,3));
+  assert.equal(client.isReady(0),true);
+  map.setPixelBounds(512,768);
+  client.viewportMoved();
+  assert.equal(client.displayedHour,null);
+  assert.equal(client.isReady(0),false);
+  assert.ok(L.tiles.slice(0,3).every(layer=>layer.opacity===0));
+  assert.deepEqual(published,[manifest.validTimes[0],'coverage-lost']);
+  for(const layer of L.tiles.slice(0,3)){layer.fire('tileload');layer.fire('load');}
+  assert.equal(client.displayedHour,0);
+  assert.ok(L.tiles.slice(0,3).every(layer=>layer.opacity===1));
+  assert.deepEqual(published,[manifest.validTimes[0],'coverage-lost',manifest.validTimes[0]]);
  }finally{client.destroy();}
 });
