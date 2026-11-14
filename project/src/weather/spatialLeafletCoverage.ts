@@ -60,7 +60,10 @@ export function currentLeafletCoverage(
     const xMin = Math.floor(viewport.minX / viewport.tileWidth);
     const xMax = Math.ceil(viewport.maxX / viewport.tileWidth) - 1;
     const yMin = Math.max(0, Math.floor(viewport.minY / viewport.tileHeight));
-    const yMax = Math.min(2 ** zoom - 1, Math.ceil(viewport.maxY / viewport.tileHeight) - 1);
+    // Leaflet's actual Web-Mercator pixel world is 256*2^zoom; a 512/1024
+    // pixel canvas spans multiple native tiles and has FEWER valid y rows.
+    const maxWorldRow = Math.ceil((256 * 2 ** zoom) / viewport.tileHeight) - 1;
+    const yMax = Math.min(maxWorldRow, Math.ceil(viewport.maxY / viewport.tileHeight) - 1);
     const required = (xMax - xMin + 1) * (yMax - yMin + 1);
     if (!Number.isSafeInteger(required) || required <= 0 || required > 4096) return fail();
     const present = new Map<string, NonNullable<CachedRasterLayer["_tiles"]>[string]>();
