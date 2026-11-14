@@ -24,7 +24,7 @@ jobs:
       - name: Verify bounded PNG storage, immutable HTTP raster gateway, model metadata and geographic metatiles
         working-directory: project
         run: |
-          node --test forecast-tiles/diskTileCache.test.mjs forecast-tiles/gateway.test.mjs forecast-tiles/metatiles.test.mjs forecast-tiles/pngIntegrity.test.mjs
+          node --test forecast-tiles/diskTileCache.test.mjs forecast-tiles/gateway.test.mjs forecast-tiles/metatiles.test.mjs forecast-tiles/pngIntegrity.test.mjs forecast-tiles/rasterParity.test.mjs
       - name: Verify Android ready-tile prototype without enabling it
         working-directory: project
         run: |
