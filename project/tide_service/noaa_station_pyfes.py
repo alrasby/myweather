@@ -50,10 +50,16 @@ def _noaa_json(path: str, opener=None) -> dict:
 def load_noaa_station(station_id: str, opener=None) -> tuple[dict, dict]:
     if not isinstance(station_id, str) or not STATION_ID.fullmatch(station_id):
         raise TideUnavailable("invalid-noaa-tide-station-id")
-    station = _noaa_json(station_id + ".json", opener)
-    harmonic = _noaa_json(station_id + "/harcon.json?units=metric", opener)
+    response = _noaa_json(station_id + ".json", opener)
+    # NOAA returns {"count":1,"stations":[...]} rather than the station
+    # object as the top-level JSON. Refuse ambiguous or empty collections.
+    records = response.get("stations")
+    if not isinstance(records, list) or len(records) != 1 or not isinstance(records[0], dict):
+        raise TideUnavailable("noaa-station-metadata-unavailable")
+    station = records[0]
     if str(station.get("id")) != station_id or station.get("tidal") is not True:
         raise TideUnavailable("noaa-station-not-tidal-or-mismatch")
+    harmonic = _noaa_json(station_id + "/harcon.json?units=metric", opener)
     return station, harmonic
 
 
