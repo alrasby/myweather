@@ -361,6 +361,11 @@ function TideCard({
       <div className="text-end">
         <h2 className="text-sm font-semibold text-fg">{t(lang, "tide")}</h2>
         <p className="text-sm text-muted">{placeTitle(place, lang)}</p>
+        <p className="mt-1 text-xs text-muted">
+          {lang === "ar"
+            ? "المد الفلكي عبر PyFES: بانتظار بيانات توافقية موثوقة لهذا الموقع"
+            : "PyFES astronomical tides: awaiting trusted local harmonics"}
+        </p>
         {/* Source/limits stay accessible, but the long recurring warning
             does not occupy the weather card on every city selection.
             Until FES is licensed, validated and deployed, never imply this
@@ -375,12 +380,15 @@ function TideCard({
         </details>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-          <TideStat label={t(lang, "nextHigh")} time={tide.nextHigh ? formatHour24(tide.nextHigh.t, bundle.timezone) : "—"} sub={tide.nextHigh ? formatSignedMeters(tide.nextHigh.level, lang) : "—"} />
-          <TideStat label={t(lang, "nextLow")} time={tide.nextLow ? formatHour24(tide.nextLow.t, bundle.timezone) : "—"} sub={tide.nextLow ? formatSignedMeters(tide.nextLow.level, lang) : "—"} />
+          {/* Open-Meteo sea-level turning points are not validated
+              astronomical tidal extrema. Only a trusted harmonic source
+              may populate these fields in a future release. */}
+          <TideStat label={t(lang, "nextHigh")} time="—" sub={lang === "ar" ? "غير متاح" : "Unavailable"} />
+          <TideStat label={t(lang, "nextLow")} time="—" sub={lang === "ar" ? "غير متاح" : "Unavailable"} />
           <TideStat label={t(lang, "wave")} time={wave == null ? "—" : formatMeters(wave, lang, 1)} sub={t(lang, "now")} />
         </div>
       <div dir="ltr">
-        <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={t(lang, "tide")}>
+        <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={lang === "ar" ? "مستوى سطح البحر النموذجي التقديري" : "Estimated modelled sea level"}>
           <path d={d} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
           {nowX ? <line x1={nowX.x} x2={nowX.x} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
           {coords
@@ -397,16 +405,7 @@ function TideCard({
             ))}
         </svg>
       </div>
-      <ul className="mt-2 space-y-1">
-        {tide.events.map((ev) => (
-          <li key={`${ev.kind}-${ev.t}`} className="flex items-center justify-between text-sm">
-            <span className="text-muted">{ev.kind === "high" ? t(lang, "tideHigh") : t(lang, "tideLow")}</span>
-            <span className="text-fg">
-              {formatSignedMeters(ev.level, lang)} · {formatHour(ev.t, bundle.timezone, lang)}
-            </span>
-          </li>
-        ))}
-      </ul>
+
     </article>
   );
 }
