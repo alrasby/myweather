@@ -1,0 +1,36 @@
+name: Official PyFES + NOAA Station Live Smoke (QA only)
+on:
+  push:
+    branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
+    paths:
+      - 'project/tide_service/noaa_station_pyfes.py'
+      - 'project/tide_service/test_noaa_station_pyfes.py'
+      - '.github/workflows/pyfes-station-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pyfes-station-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  station-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install official PyFES binary only (no compiling demo atlas)
+        run: python -m pip install --only-binary=:all: 'pyfes==2026.10.0'
+      - name: Verify official PyFES imported and station contracts
+        run: |
+          python -c 'import pyfes; assert hasattr(pyfes, "evaluate_tide_from_constituents")'
+          python -m unittest tide_service.test_noaa_station_pyfes -v
+      - name: Real NOAA San Francisco harmonic forecast, 12 hours (not app release)
+        run: |
+          python -m tide_service.noaa_station_pyfes --station 9414290 --start 2026-11-14T00:00:00Z --hours 12 > /tmp/pyfes-station.json
+          python -c 'import json; p=json.load(open("/tmp/pyfes-station.json")); assert p["source"]=="NOAA_COOPS_STATION_HARMONICS" and p["method"].startswith("PyFES") and p["station_id"]=="9414290" and len(p["samples"])==145 and p["not_for_navigation"]'
