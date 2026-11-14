@@ -10,7 +10,7 @@ import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
 import { spatialTransferBytes } from "@/weather/spatialTransferMetrics";
 import { pinSpatialRun, pinnedSpatialTileUrl, type PinnedSpatialRun } from "@/weather/spatialRun";
-import { spatialTileOptions, useCompactSpatialTiles, COMPACT_SPATIAL_TILE_SIZE } from "@/weather/spatialTilePolicy";
+import { spatialTileOptions, useCompactSpatialTiles } from "@/weather/spatialTilePolicy";
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialZoomNeedsNewCoverage } from "@/weather/spatialZoomCoverage";
