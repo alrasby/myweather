@@ -485,3 +485,27 @@ test("old coastal classifications cannot flash a stale tide card during upgrade"
  assert.ok(sky.includes("bundle.marineVersion === 3 && hasDisplayableCoastalTide("));
  assert.ok(api.includes("cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal"));
 });
+
+test("estimated coastal tide readings are visible and clearly distinguished from astronomical PyFES", () => {
+  const ui = read("project/src/components/weather/SkyCards.tsx");
+  assert.ok(ui.includes("modelTideForecast(tidePoints, now)"), "do not fabricate tide values");
+  assert.ok(ui.includes('time={tide.nextHigh ? formatHour24('), "display available source-derived high");
+  assert.ok(ui.includes('time={tide.nextLow ? formatHour24('), "display available source-derived low");
+  assert.ok(ui.includes('formatSignedMeters(tide.nextHigh.level, lang)'));
+  assert.ok(ui.includes('formatSignedMeters(tide.nextLow.level, lang)'));
+  assert.ok(ui.includes('تقديري') && ui.includes('Open-Meteo Marine'), "identify estimated model source");
+  assert.ok(ui.includes('PyFES') && ui.includes('عند توفر'), "do not imply an undelivered PyFES service");
+  assert.ok(!ui.includes('time="—" sub={lang === "ar" ? "غير متاح"'),
+    "do not deliberately hide real modelled sea-level extrema");
+});
+
+test("large map gestures retire stale ECMWF next-hour reads even while requested hour loads", () => {
+  const engine = read("project/src/weather/modelField.ts");
+  const move = engine.split("const onMove = () => {")[1]?.split("const onMoveEnd = () => {")[0] ?? "";
+  assert.ok(move.includes("significantSpatialMove(origin,"));
+  assert.ok(move.includes("if (step !== this.base) this.discardFrame(step);"));
+  assert.ok(!move.includes("!this.frames.get(this.base)?.ready"),
+    "old guard kept wrong-area future-hour decodes active across global jumps");
+  assert.ok(move.includes("cancelledSpeculation = true"),
+    "cancel once, not on every pointer move");
+});
