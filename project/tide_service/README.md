@@ -67,3 +67,87 @@ and independently verify all the source data via AVISO. Do not commit
 the manifest or source grids to the public repository. Missing or invalid
 metadata means the program produces an explicit unavailable response with
 no fake sea-level points.
+
+
+## Bounded FES forecast gateway (operator pilot; NOT active in Android)
+
+The new tide_service.gateway starts only when the licensed, original
+FES2022b constituent files, hash-verified manifest and explicit enable switch
+are present. It is NOT a forecast endpoint that has been deployed. Never use
+the PyFES example grids as genuine FES2022b or rely on the offline unit tests
+as scientific verification.
+
+Operator commands, with actual licensed data and a verified configuration:
+
+    cd project
+    export FES2022_CONFIG=/secure/fes2022b.yaml
+    export FES2022_MANIFEST=/secure/fes2022b.manifest.json
+    export FES2022_BBOX=52,20,62,28
+    export TIDE_SERVICE_ENABLED=1
+    export TIDE_SERVICE_BIND=127.0.0.1
+    export TIDE_SERVICE_PORT=8765
+    python -m tide_service.gateway
+
+FES2022_BBOX is optional; the example bounding box is a regional shard
+and intentionally does not cover Muscat. For Muscat, configure a shard that
+includes Muscat or provision a full-atlas service. A real global product
+must operate enough independent regional shards or have adequate memory
+for the complete model. The code uses the official PyFES regional bbox
+loader to reduce memory; no fake worldwide coverage from one small shard.
+
+After obtaining the genuine atlas, smoke test a covered area (choose
+start time within 24 hours of current UTC):
+
+    curl 'http://127.0.0.1:8765/v1/tides?lat=23.588&lon=58.3829&start=2026-11-14T00%3A00%3A00Z&hours=48'
+
+The sample time above is historical after 2026-11-15; replace it with
+the appropriate CURRENT UTC time aligned to five minutes during actual QA.
+
+This server:
+- Binds to loopback only, never directly to a public network interface.
+- Accepts only bounded lat/lon/UTC/hour values, 12 to 72-hour windows.
+- Computes just one PyFES request at a time (others return 503).
+- Has a 96-entry bounded LRU, a bounded global request rate, no API-key
+  exposure and no query-string/location access logs.
+- Never rounds together two distinct coastal coordinates in its cache.
+- Returns no samples for missing or invalid source files/quality flags.
+- Includes a health probe and explicit unavailable status for errors.
+
+Deploy a separate properly authenticated HTTPS reverse proxy and per-IP
+rate controls before considering internet access. CORS Origin allowlisting
+is not an authentication mechanism. Do NOT embed licensing credentials,
+administrative tokens or raw model data in the APK.
+
+The response identifies itself as physical_model_unvalidated_at_local_gauge.
+A strict future Android schema parser in src/weather/fesTideContract.ts
+checks the model source, units, datum, exact UTC samples, location,
+interpolation quality and physically genuine high/low turning points.
+It intentionally returns isApprovedForPublicDisplay=false. Android does
+NOT call this service or replace the current Open-Meteo Marine tide card.
+
+## Scientific verification before enabling the learned correction
+
+tide_service/gauge_validation.py calculates chronologically held-out
+MAE, RMSE, p95 absolute sea-level error (metres), gauge station-bias
+baseline and matched high/low event timing error (minutes). Actual gauge
+observations MUST already have a documented datum conversion to the FES
+atlas mean sea surface, human-reviewed source provenance, valid quality
+flags and UTC observations covering 30+ days. The evaluation cannot
+prove source provenance independently; a named human validator must
+check the conversion and station source.
+
+The four-weight pressure/wind residual model remains disabled until
+it beats the historical bias-only baseline by >=10% AND >=1.5 cm on
+an unseen future holdout. For prospective forecasting, meteorological
+features must be actual forecasts AVAILABLE at forecast issuance
+time, not later observed weather. A zero-gauge station cannot be
+calibrated via invented readings or another station's datum.
+
+Run local offline checks (synthetic fixtures ONLY):
+
+    cd project
+    python -m unittest discover -s tide_service -p 'test_*.py' -v
+    node --experimental-strip-types --test src/weather/fesTideContract.test.ts
+
+No official FES2022b atlas or validated Omani station gauges have been
+provided or activated; no marine accuracy or navigation claim is implied.
