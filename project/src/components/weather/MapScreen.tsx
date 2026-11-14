@@ -294,8 +294,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const worldParent = L.tileLayer(imageryUrl, {
           maxNativeZoom: SATELLITE_WORLD_PARENT_NATIVE_ZOOM,
           maxZoom: 16, zIndex: -1,
-          updateWhenIdle: true, updateWhenZooming: false,
-          updateInterval: 300, keepBuffer: 2,
+          updateWhenIdle: false, updateWhenZooming: false,
+          updateInterval: 300, keepBuffer: 3,
         }).addTo(map);
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
