@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install official PyFES binary only (no compiling demo atlas)
-        run: "python -m pip install --only-binary=:all: 'pyfes==2026.10.0'"
+        run: "python -m pip install --only-binary=:all: 'pyfes==2026.5.2'"
       - name: Verify official PyFES imported and station contracts
         run: |
           python -c 'import pyfes; assert hasattr(pyfes, "evaluate_tide_from_constituents")'
