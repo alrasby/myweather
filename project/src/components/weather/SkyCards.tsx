@@ -347,13 +347,19 @@ function TideCard({
   const max = Math.max(...levels, 0.2);
   const w = 320;
   const h = 72;
-  const coords = pts.map((p, i) => {
-    const x = pts.length < 2 ? 0 : (i / (pts.length - 1)) * w;
+  // Plot real UTC sample spacing, not array indices: rejected/absent hours
+  // must not compress the time axis. The now-marker moves continuously rather
+  // than jumping to the nearest model hour.
+  const start = pts[0]?.t ?? now;
+  const end = pts[pts.length - 1]?.t ?? start;
+  const span = Math.max(1, end - start);
+  const coords = pts.map((p) => {
+    const x = ((p.t - start) / span) * w;
     const y = h - 8 - ((p.level - min) / (max - min || 1)) * (h - 16);
     return { x, y, ...p };
   });
   const d = coords.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const nowX = coords.reduce((best, p) => (Math.abs(p.t - now) < Math.abs(best.t - now) ? p : best), coords[0]!);
+  const nowX = coords.length > 1 ? Math.max(0, Math.min(w, ((now - start) / span) * w)) : null;
 
   return (
     <article className="wx-card px-4 py-4">
@@ -388,7 +394,7 @@ function TideCard({
       <div dir="ltr">
         <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-16 w-full" role="img" aria-label={lang === "ar" ? "مستوى سطح البحر النموذجي التقديري" : "Estimated modelled sea level"}>
           <path d={d} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
-          {nowX ? <line x1={nowX.x} x2={nowX.x} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
+          {nowX !== null ? <line x1={nowX} x2={nowX} y1="4" y2={h} stroke="var(--color-accent)" strokeWidth="2" /> : null}
           {coords
             .filter((p) => {
               const prev = coords[Math.max(0, coords.indexOf(p) - 1)];
