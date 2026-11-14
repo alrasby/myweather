@@ -187,15 +187,21 @@ export function pinLoadedSpatialState(state:OmUrlState|null):OmUrlState|null {
  */
 export function certifiedResidentSpatialState(
   states: Iterable<OmUrlState>, file: string, variable: string,
-  wanted: readonly number[] | null | undefined,
+  wanted: readonly number[] | null | undefined, expectedDeltaHours: number,
 ): OmUrlState | null {
-  if (!wanted || wanted.length !== 4 || !wanted.every(Number.isFinite) ||
+  // Only immutable pinned HOUR files qualify. Legacy latest.json capture
+  // may resolve several valid_times_N frames through ONE URL and is never
+  // safe to reuse by filename alone.
+  if (!/\/\d{4}-\d{2}-\d{2}T\d{4}\.om$/.test(file) ||
+      !Number.isFinite(expectedDeltaHours) || expectedDeltaHours <= 0 ||
+      !wanted || wanted.length !== 4 || !wanted.every(Number.isFinite) ||
       wanted[0]! >= wanted[2]! || wanted[1]! >= wanted[3]!) return null;
   const candidate = chooseLoadedSpatialState(null, states, file, variable, wanted);
   // Undefined / malformed data bounds have no explicit crop certificate.
   // Let the official source reader confirm validity instead of guessing.
   if (!candidate?.dataOptions.bounds || candidate.dataOptions.bounds.length !== 4 ||
-      !candidate.dataOptions.bounds.every(Number.isFinite)) return null;
+      !candidate.dataOptions.bounds.every(Number.isFinite) ||
+      candidate.dataOptions.deltaTimeHours !== expectedDeltaHours) return null;
   return pinLoadedSpatialState(candidate);
 }
 function paletteOf(settings: OmProtocolSettings, variable: string): Palette | null {
@@ -316,10 +322,14 @@ export class SpatialViewportRenderer {
     // aligned tiles may skip the official arrayBuffer validation. This check
     // and pin are synchronous: panning cannot swap the shared bounds between
     // inspection and retaining its immutable Float32Array reference.
-    if (!controller.signal.aborted) {
+    if (!controller.signal.aborted && parsed.frame === null) {
+      const queryAt = parsed.key.indexOf("?");
+      const deltaParam = queryAt < 0 ? null :
+        new URLSearchParams(parsed.key.slice(queryAt + 1)).get("delta_time_hours");
+      const deltaHours = deltaParam === null ? NaN : Number(deltaParam);
       const resident = certifiedResidentSpatialState(
         getProtocolInstance(config).stateByKey.values(),
-        parsed.file, parsed.variable, requestedBounds,
+        parsed.file, parsed.variable, requestedBounds, deltaHours,
       );
       if (resident) {
         this.certifiedReuses++;
