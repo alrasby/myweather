@@ -11,7 +11,7 @@
  *
  * No dependency patches, alternative weather providers or fabricated pixels.
  */
-import { getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
+import { currentBounds, getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
 import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission.ts";
 import { SpatialDatasetKeys, captureSpatialWorkerData } from "./spatialDatasetKeys.ts";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
@@ -136,14 +136,36 @@ export async function resolveCurrentSpatialState<T>(
  * newer viewport. Prefer the state captured for this specific request, not
  * an unrelated newer state. Reuse upstream's ordinary loaded-state lookup
  * when a concurrent request already owned the read. */
+/** A decoded variable/file alone does NOT prove that the values cover the
+ * current region. A fast continental pan can replace the viewport while an
+ * older fetch completes; painting its partial window produces missing strips
+ * and rectangular islands despite successful tileload events.
+ * Respect the same bounded-window inclusion policy as upstream's state cache. */
+export function spatialStateCoversBounds(
+  available: readonly number[] | undefined,
+  wanted: readonly number[] | null | undefined,
+): boolean {
+  if (!wanted) return true;
+  if (!available) return true; // Data decoded for the full model, no crop.
+  if (available.length !== 4 || wanted.length !== 4 ||
+      !available.every(Number.isFinite) || !wanted.every(Number.isFinite)) return false;
+  const eps = 1e-5;
+  return available[0]! <= wanted[0]! + eps &&
+    available[1]! <= wanted[1]! + eps &&
+    available[2]! >= wanted[2]! - eps &&
+    available[3]! >= wanted[3]! - eps;
+}
 export function chooseLoadedSpatialState(
   captured: OmUrlState | null,
   states: Iterable<OmUrlState>,
   file: string,
   variable: string,
+  wantedBounds?: readonly number[] | null,
 ): OmUrlState | null {
   const valid = (s: OmUrlState | null) => !!s &&
-    s.omFileUrl === file && s.dataOptions.variable === variable && !!s.data?.values;
+    s.omFileUrl === file && s.dataOptions.variable === variable &&
+    spatialStateCoversBounds(s.dataOptions.bounds, wantedBounds) &&
+    !!s.data?.values;
   if (valid(captured)) return captured;
   for (const state of Array.from(states).reverse()) if (valid(state)) return state;
   return null;
@@ -264,6 +286,9 @@ export class SpatialViewportRenderer {
     // raster tile, and upstream ensureData() already deduplicates concurrent
     // .om reads by state + AbortSignal. Do NOT re-implement that cache here.
     let captured: OmUrlState | null = null;
+    // The snapshot belongs to THIS tile request. Concurrent panning can
+    // mutate the module-wide currentBounds before the read completes.
+    const requestedBounds = currentBounds ? [...currentBounds] : null;
     const previousCallback = config.postReadCallback;
     const recordRead: NonNullable<OmProtocolSettings["postReadCallback"]> = (reader, data, state) => {
       previousCallback?.(reader, data, state);
@@ -283,8 +308,8 @@ export class SpatialViewportRenderer {
       () => {
         if (controller.signal.aborted) return null;
         const states = Array.from(getProtocolInstance(config).stateByKey.values());
-        const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable);
-        const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable);
+        const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable, requestedBounds);
+        const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable, requestedBounds);
         if (captured && resolved === captured && !live) this.recovered++;
         return pinLoadedSpatialState(resolved);
       },
