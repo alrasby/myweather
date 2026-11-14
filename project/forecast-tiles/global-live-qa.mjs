@@ -9,7 +9,7 @@ import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {validPng} from './pngIntegrity.mjs';
-import {eastWestSeam} from './rasterParity.mjs';
+import {eastWestSeam,decodeRasterPng} from './rasterParity.mjs';
 import {validTile} from './contracts.mjs';
 
 const PORT=19349;
@@ -29,7 +29,7 @@ const get=(path,ms=70000)=>fetch(base+path,{signal:AbortSignal.timeout(ms),cache
 const digest=b=>createHash('sha256').update(b).digest('hex');
 const cleanName=x=>x.replace(/[^a-z0-9_-]/gi,'_').slice(0,70);
 const report={mode:'live-source-only',source:'ECMWF IFS via Open-Meteo .om',sampledAt:new Date().toISOString(),
-  manifest:null,regions:[],seams:[],frames:[],diskCache:null,cacheHits:0,coldP95Ms:null};
+  manifest:null,regions:[],seams:[],frames:[],cityCloudSamples:[],diskCache:null,cacheHits:0,coldP95Ms:null};
 async function ready(){
   for(let i=0;i<70;i++){
     if(server.exitCode!==null)throw new Error('loopback-producer-exited-'+server.exitCode);
@@ -75,6 +75,21 @@ async function tile(name,coord,layer,hour){
   requested++;
   return {bytes,path};
 }
+function sourceCloudPixel(image,z,lat,lon){
+  const n=2**z,latitude=lat*Math.PI/180;
+  const mercX=(lon+180)/360*n;
+  const mercY=(1-Math.asinh(Math.tan(latitude))/Math.PI)/2*n;
+  const x=Math.max(0,Math.min(255,Math.floor((mercX-Math.floor(mercX))*256)));
+  const y=Math.max(0,Math.min(255,Math.floor((mercY-Math.floor(mercY))*256)));
+  const rgba=decodeRasterPng(image);
+  let alpha=0,cells=0;
+  for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+    const xx=Math.max(0,Math.min(255,x+dx)),yy=Math.max(0,Math.min(255,y+dy));
+    alpha+=rgba[(yy*256+xx)*4+3];cells++;
+  }
+  return {pixel:{x,y},centerAlpha:rgba[(y*256+x)*4+3],
+    mean5x5Alpha:Number((alpha/cells).toFixed(2))};
+}
 function assess(name,left,right){
   const seam=eastWestSeam(left.bytes,right.bytes);
   report.seams.push({name,...seam});
@@ -118,6 +133,21 @@ try{
   assess('pacific-dateline-z6',pacificWest,pacificEast);
   // Polar edge is tested independently: no fictitious data outside Mercator.
   await tile('high-latitude-70N',tileAt(6,70,20),'cloud_cover',hour);
+  // For the reported London clear/cloud discrepancy, measure genuine ECMWF
+  // cloud PNG ALPHA directly at the city's coordinates for matching UTC hours.
+  // Alpha is a VISUAL palette channel, never meteorological cloud percent,
+  // and cannot establish which independent model is observationally correct.
+  const london={lat:51.5074,lon:-0.1278},londonTile=tileAt(7,london.lat,london.lon);
+  const disputedUtcTimes=['2026-11-14T16:00:00.000Z','2026-11-15T01:00:00.000Z'];
+  const sampleTimes=disputedUtcTimes.filter(t=>manifest.validTimes.includes(t));
+  if(!sampleTimes.length)sampleTimes.push(manifest.validTimes[hour]);
+  for(const validTime of sampleTimes){
+    const sourceHour=manifest.validTimes.indexOf(validTime);
+    const real=await tile('london-cloud-'+validTime,londonTile,'cloud_cover',sourceHour);
+    report.cityCloudSamples.push({city:'London, UK',validTime,runId:manifest.runId,
+      ...sourceCloudPixel(real.bytes,londonTile.z,london.lat,london.lon),
+      interpretation:'alpha-0..255-is-visual-cloud-opacity-not-cloud-percentage'});
+  }
   // A subsequent immutable GET must yield exactly the same PNG bytes; no
   // second render, no substitution of a later run or altered image colors.
   const warmTarget=report.regions.find(x=>x.name==='arabia-cloud_cover');
