@@ -413,7 +413,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             // grid immediately at broad scales, rather than exposing the
             // obsolete half-painted tiles for 4.5 seconds. The quick-world
             // loader is deduplicated by its existing pending/ready flags.
-            if (map && map.getZoom() <= 4) rainPlaybackQuickRef.current?.();
+            if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.();
             rainFallbackRefreshRef.current?.();
           };
         }
@@ -840,7 +840,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       fallbackTimer = window.setTimeout(() => {
         fallbackTimer = 0;
         enableDetailedFallback();
-      }, 4500);
+      }, map.getZoom() <= 5 ? 1600 : 4500);
     };
     const suspendDetailedFallback = () => {
       if (!detailAllowed && !fallbackTimer && !viewAc && !fineWorldAc) return;
@@ -1185,6 +1185,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
+          {weatherDiagnostics?.spatialViewportPolicy ? <p>
+            {lang === "ar" ? "خطة فك البيانات" : "Decode plan"}: {
+              weatherDiagnostics.spatialViewportPolicy.allow ? "ECMWF regional" :
+              `real world fallback (${weatherDiagnostics.spatialViewportPolicy.reason})`
+            }
+          </p> : null}
           <p>{lang === "ar" ? "محرك الرسم" : "Raster engine"}: {weatherDiagnostics?.backend ?? "om-on-device"}
             {weatherDiagnostics?.tinyModelObservations ? ` · AI samples ${weatherDiagnostics.tinyModelObservations}` : ""}
           </p>
