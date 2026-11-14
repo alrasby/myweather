@@ -498,7 +498,8 @@ export class ModelField {
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
   private viewportHoldUntil = 0;
-  private spatialBudget: SpatialViewportDecision = { allow: true, reason: "regional" };
+  private spatialBudget: SpatialViewportDecision = { allow: true, reason: "regional", rasterSize: 1024 };
+  private protocolSettings: ReturnType<typeof modelSettings> | null = null;
   // Android WebView lacks SharedArrayBuffer: avoid showing cloud/rain/snow
   // one by one before a complete same-run ECMWF frame is ready.
   private compactSpatialTiles = false;
@@ -668,7 +669,10 @@ export class ModelField {
     this.moveListener = onMove;
     this.moveEndListener = onMoveEnd;
     this.adapter = addLeafletProtocolSupport(L as never) as unknown as Adapter;
-    this.adapter.addProtocol("om", this.viewportRenderer?.handler ?? omProtocol, modelSettings());
+    this.protocolSettings = modelSettings();
+    this.protocolSettings.maxStatesWithData =
+      this.compactSpatialTiles && this.spatialBudget.rasterSize <= 512 ? 4 : 6;
+    this.adapter.addProtocol("om", this.viewportRenderer?.handler ?? omProtocol, this.protocolSettings);
     this.lastError = null;
     this.pinnedRun = null;
     this.ready = fetch(META, { signal: metadataAbort.signal })
@@ -723,12 +727,18 @@ export class ModelField {
 
   private refreshSpatialBudget(): void {
     const next = this.currentSpatialBudget();
-    const previous = this.spatialBudget.allow;
+    const previous = this.spatialBudget;
     this.spatialBudget = next;
-    if (next.allow === previous) return;
-    // Crossing the spatial budget is a source transition, not an opacity
-    // tween. Retire EVERY stale model hour and cache entry once, so it cannot
-    // monopolize the network/heap while the satellite map refreshes.
+    // A broad world view uses four cached data states (three live variables
+    // and one lookahead) instead of holding six 26MiB buffers on mobile.
+    if (this.protocolSettings) {
+      this.protocolSettings.maxStatesWithData =
+        this.compactSpatialTiles && next.rasterSize <= 512 ? 4 : 6;
+    }
+    const sampleChanged = this.compactSpatialTiles && previous.rasterSize !== next.rasterSize;
+    if (next.allow === previous.allow && !sampleChanged) return;
+    // Retire in-flight model hours only when the sampling level changes
+    // or the viewport is invalid. Never disable ECMWF just for zoom <=5.
     this.clear();
     this.viewportRenderer?.clear();
     this.failedUntil.clear();
@@ -740,7 +750,7 @@ export class ModelField {
     this.refreshBase = null;
     this.refreshSince = 0;
     this.lastScheduledAt = 0;
-    if (!next.allow && this.visible) this.onMiss?.();
+    if (this.visible) this.onMiss?.();
   }
 
   /** Playback safety gate for the rain/snow map only. Frame decoding is
@@ -1012,8 +1022,11 @@ export class ModelField {
     const rainOpts = spatialTileOptions("wx-model", this.compactSpatialTiles);
     const renderUrl = (variable: string) => {
       const url = tileUrl(variable, step, this.pinnedRun);
-      // OM render tile_size must match Leaflet's canvas tileSize.
-      return this.compactSpatialTiles ? `${url}&tile_size=${COMPACT_SPATIAL_TILE_SIZE}` : url;
+      // The upstream Leaflet adapter draws an ImageBitmap of ANY size into
+      // its original 1024px canvas via drawImage(bitmap,0,0,tileSize,tileSize).
+      // Fewer samples per world-scale tile preserve genuine ECMWF data and
+      // original map geography while reducing CPU render work by 4x–16x.
+      return this.compactSpatialTiles ? `${url}&tile_size=${this.spatialBudget.rasterSize}` : url;
     };
     const made = [
       adapter.createTileLayer(renderUrl("cloud_cover"), cloudOpts),
@@ -1459,7 +1472,8 @@ export class ModelField {
     this.lastDisplayedStep = null;
     this.holdingPreviousFrame = false;
     this.fallbackForMissingHour = false;
-    this.spatialBudget = { allow: true, reason: "regional" };
+    this.spatialBudget = { allow: true, reason: "regional", rasterSize: 1024 };
+    this.protocolSettings = null;
     this.times = [];
     this.pinnedRun = null;
     this.adapter = null;
