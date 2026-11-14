@@ -112,7 +112,7 @@ def canonical_pyfes_constituents(
     by_lower = {name.lower(): name for name in known}
     # NOAA short-form LAM2 and SIG1 correspond to the named astronomical
     # constituents Lambda2 and Sigma1 in the PyFES Darwin catalogue.
-    aliases = {"LAM2": "Lambda2", "SIG1": "Sigma1", "EPS2": "Eps2"}
+    aliases = {"LAM2": "Lambda2", "SIG1": "Sigma1", "EPS2": "Eps2", "RHO": "Rho1"}
     result: dict[str, tuple[float, float]] = {}
     for name, value in measured.items():
         candidate = aliases.get(name.upper()) or by_lower.get(name.lower())
