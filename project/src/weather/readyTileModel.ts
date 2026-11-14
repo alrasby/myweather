@@ -102,11 +102,15 @@ export class ReadyTileModel extends ModelField {
     this.origin,manifest,
     ()=>{if(this.mode!=="ready"||!this.visiblePilot)return;
       this.livePilot=true;this.onLive?.();},
-    ()=>{if(this.mode==="ready")this.fallback();}
+    ()=>{if(this.mode==="ready")this.fallback()},
+    undefined,()=>{if(this.mode==="ready"&&this.visiblePilot&&this.livePilot){
+      this.livePilot=false;this.onMiss?.();
+    }}
    );
    this.mode="ready";
    this.moveHandler=()=>{
     if(this.mode!=="ready"||!this.visiblePilot)return;
+    this.client?.viewportMoved();
     this.warmTiles();
    };
    map.on("moveend",this.moveHandler);
@@ -134,7 +138,10 @@ export class ReadyTileModel extends ModelField {
     this.client=new ReadyTileClient(this.L as ConstructorParameters<typeof ReadyTileClient>[0],
       this.mapPilot as unknown as ConstructorParameters<typeof ReadyTileClient>[1],this.origin,manifest,
       ()=>{if(this.mode==="ready"&&this.visiblePilot){this.livePilot=true;this.onLive?.();}},
-      ()=>{if(this.mode==="ready")this.fallback();});
+      ()=>{if(this.mode==="ready")this.fallback()},
+      undefined,()=>{if(this.mode==="ready"&&this.visiblePilot&&this.livePilot){
+        this.livePilot=false;this.onMiss?.();
+      }});
    }
    this.sync(this.requestedMs||Date.now());
   }
