@@ -392,8 +392,11 @@ test("one viewport generation publishes consistent model layers and retains sate
   assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
   assert.ok(map.includes("shouldKeepSatelliteParent(zoom, detailedReady)"));
   assert.ok(map.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
-  assert.ok(map.includes("underlay.setOpacity(shouldKeepSatelliteParent(zoom, detailedReady) ? 1 : 0)"));
-  assert.ok(!map.includes("underlay.remove()"), "retain satellite parent tiles across zooms");
+  assert.ok(map.includes("const keepUnderlay = shouldKeepSatelliteParent(zoom, detailedReady)"));
+  assert.ok(map.includes("else if (!keepUnderlay && map.hasLayer(underlay)) underlay.remove()"),
+    "unmount redundant z4 Esri layer below zoom5 rather than hiding it with opacity=0");
+  assert.ok(map.includes("satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null"),
+    "provide opt-in basemap coverage separately from weather source readiness");
   assert.ok(map.includes('imagery.on("load", () => {'));
   assert.ok(map.includes("detailedReady = !detailedErrors;"),
     "a drained imagery queue with tile errors must not hide real satellite parent coverage");
