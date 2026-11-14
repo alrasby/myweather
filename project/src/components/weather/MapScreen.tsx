@@ -10,7 +10,7 @@ import { ReadyTileModel } from "@/weather/readyTileModel";
 import { readReadyTilePilotOrigin } from "@/weather/readyTilePilotConfig";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
+import { shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, snapshotSatelliteRasterCoverage, type SatelliteRasterCoverage, type SatelliteRasterLayerLike, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -97,6 +97,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const place = activePlace({ places, activeId, peek });
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
+  const satelliteDiagnosticsRef = useRef<(() => {
+    detail: SatelliteRasterCoverage; underlay: SatelliteRasterCoverage; worldParent: SatelliteRasterCoverage;
+  }) | null>(null);
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
@@ -297,6 +300,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           updateWhenIdle: false, updateWhenZooming: false,
           updateInterval: 300, keepBuffer: 3,
         }).addTo(map);
+        const worldParentTileErrors = new WeakSet<object>();
+        worldParent.on("tileerror", (event) => worldParentTileErrors.add(event.tile));
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
         // The prior z5 underlay was removed at the initial z5 map view,
@@ -311,15 +316,18 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           updateInterval: 200,
           keepBuffer: 3,
         }).addTo(map);
-        // A permanent z4 parent keeps decoded satellite coverage ready across
-        // zooms. Removing/re-adding it on every zoom discarded buffered tiles
-        // and exposed black holes during fast global pans.
+        const underlayTileErrors = new WeakSet<object>();
+        underlay.on("tileerror", (event) => underlayTileErrors.add(event.tile));
+        // At z5+ the z4 parent survives every pan. At z3/z4 it is a
+        // duplicate Esri request and must be unmounted, not opacity-hidden.
         let detailedReady = false;
         let detailedErrors = false;
         const syncUnderlay = () => {
           if (!map) return;
           const zoom = map.getZoom();
-          underlay.setOpacity(shouldKeepSatelliteParent(zoom, detailedReady) ? 1 : 0);
+          const keepUnderlay = shouldKeepSatelliteParent(zoom, detailedReady);
+          if (keepUnderlay && !map.hasLayer(underlay)) underlay.addTo(map);
+          else if (!keepUnderlay && map.hasLayer(underlay)) underlay.remove();
           const keepWorld = shouldKeepWorldSatelliteParent(zoom, detailedReady);
           // Unmount the extra raster grid when it provides no value.
           // Opacity=0 alone still causes Leaflet to download every tile.
@@ -341,12 +349,24 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
+        const detailTileErrors = new WeakSet<object>();
+        const tileCoverage = (layer: TileLayer, failed: WeakSet<object>) =>
+          snapshotSatelliteRasterCoverage(
+            map!.hasLayer(layer) ? layer as unknown as SatelliteRasterLayerLike : null,
+            map!.getZoom(), failed,
+          );
+        satelliteDiagnosticsRef.current = () => ({
+          detail: tileCoverage(imagery, detailTileErrors),
+          underlay: tileCoverage(underlay, underlayTileErrors),
+          worldParent: tileCoverage(worldParent, worldParentTileErrors),
+        });
         imagery.on("loading", () => {
           detailedReady = false;
           detailedErrors = false;
           syncUnderlay();
         });
-        imagery.on("tileerror", () => {
+        imagery.on("tileerror", (event) => {
+          detailTileErrors.add(event.tile);
           // A Leaflet 'load' event only means the queue drained; it does
           // NOT prove every Esri image was delivered. Keep a real parent
           // image behind failed tiles instead of exposing a black rectangle.
@@ -444,6 +464,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       // Weather model also owns Leaflet tile layers, metadata requests and
       // per-frame retry timers; release it before map and GL contexts.
       modelRef.current?.dispose();
+      satelliteDiagnosticsRef.current = null;
       engine.destroy();
       map?.remove();
       engineRef.current = null;
@@ -1222,6 +1243,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 dataSaver: prefs.dataSaver,
                 mapZoom: currentZoom ?? null,
                 viewportSpanDegrees,
+                satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
