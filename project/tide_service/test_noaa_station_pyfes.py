@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 from tide_service.fes2022_predict import TideUnavailable
 from tide_service.noaa_station_pyfes import (
-    load_noaa_station, parse_station_harmonics, predict_noaa_station
+    load_noaa_station, parse_station_harmonics, predict_noaa_station,
+    canonical_pyfes_constituents
 )
 
 STATION = {"id": "9414290", "name": "San Francisco, CA",
@@ -103,6 +104,14 @@ class NOAAStationPyFESContract(unittest.TestCase):
         bad["HarmonicConstituents"][2]["name"] = "M2"
         with self.assertRaisesRegex(TideUnavailable, "duplicate"):
             parse_station_harmonics(STATION, bad, "9414290")
+
+    def test_noaa_name_alias_is_mapped_to_real_pyfes_constituent(self):
+        original = {"LAM2": (3.0, 17.0), "SIG1": (2.0, 44.0), "M2": (10.0, 70.0)}
+        result = canonical_pyfes_constituents(original, ["Lambda2", "Sigma1", "M2"])
+        self.assertEqual(result["Lambda2"], (3.0, 17.0))
+        self.assertEqual(result["Sigma1"], (2.0, 44.0))
+        with self.assertRaisesRegex(TideUnavailable, "unsupported"):
+            canonical_pyfes_constituents({"UNKNOWN": (1, 2)}, ["M2"])
 
     def test_no_incomplete_forecast(self):
         with self.assertRaisesRegex(TideUnavailable, "incomplete"):
