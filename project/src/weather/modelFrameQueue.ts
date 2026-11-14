@@ -39,6 +39,7 @@ export function planSpatialRequests(
   playbackActive = false,
   viewportMoving = false,
   memoryConstrained = false,
+  recentlyPanned = false,
 ): { cancel: number[]; start: number | null } {
   // Keep two upcoming hours prepared without decoding more than one
   // incomplete frame at a time. The second lookahead becomes eligible only
@@ -61,11 +62,19 @@ export function planSpatialRequests(
   const grace = playbackActive ? SPATIAL_PLAYBACK_VIEWPORT_GRACE_MS : SPATIAL_PREFETCH_GRACE_MS;
   const deferred = ready.has(requested) &&
     (viewportMoving || (currentViewportRefreshing && visibleRefreshAgeMs < grace));
-  const desired = deferred ? null : candidates[0] ?? null;
+  // A completed present-hour image is not a reason to speculatively load
+  // another 3-variable ECMWF hour between two rapid map flings. On Android
+  // these expensive reads get aborted on the next pan and can never help the
+  // current viewport. Keep any already-running lookahead, but launch no new
+  // speculative model until movement has been idle for a bounded interval.
+  // Missing requested-hour data always takes priority without this throttle.
+  const deferNewSpeculation = recentlyPanned && ready.has(requested);
+  const desired = deferred || deferNewSpeculation ? null : candidates[0] ?? null;
   // Don't abort an in-flight speculative hour for a *small* gesture. Only
   // large pans/zoom discard it in ModelField; otherwise retain its cached
   // ranges, while blocking additional work until visible tiles settle.
-  const cancel = deferred ? [] : [...loading].filter((step) => step !== desired);
+  const cancel = deferred || deferNewSpeculation ? [] :
+    [...loading].filter((step) => step !== desired);
   return {
     cancel,
     start: desired !== null && !loading.has(desired) ? desired : null,
