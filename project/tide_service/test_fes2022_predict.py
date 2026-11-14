@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from tide_service.fes2022_predict import (
-    PyFESAtlas, TideUnavailable, extrema, predict, utc_time,
+    PyFESAtlas, TideUnavailable, extrema, predict, utc_time, verify_official_atlas_manifest,
 )
 
 START = datetime(2026, 11, 14, 0, 0, tzinfo=timezone.utc)
@@ -56,6 +56,35 @@ class ScientificTideContract(unittest.TestCase):
             PyFESAtlas("")
         with self.assertRaisesRegex(TideUnavailable, "atlas-config-required"):
             PyFESAtlas("/not-a-real-fes2022b-config.yaml")
+
+    def test_atlas_must_be_real_verified_full_edition_before_pyfes_load(self):
+        import hashlib
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            config = folder / "config.yaml"
+            config.write_text("not valid model yaml\n")
+            with self.assertRaisesRegex(TideUnavailable, "provenance-manifest-required"):
+                PyFESAtlas(str(config))
+            manifest = folder / "manifest.json"
+            metadata = {"edition": "OLD-DEMO", "producer": "CNES/LEGOS/Noveltis/CLS",
+                        "quantity": "ocean_tide_height", "units": "cm",
+                        "datum": "atlas_msl", "format": "cartesian-34",
+                        "config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+                        "files": []}
+            manifest.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(TideUnavailable, "edition-or-units"):
+                verify_official_atlas_manifest(str(config), str(manifest))
+            metadata["edition"] = "FES2022b"
+            manifest.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(TideUnavailable, "constituent-atlas-incomplete"):
+                verify_official_atlas_manifest(str(config), str(manifest))
+            metadata["config_sha256"]="0"*64
+            manifest.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(TideUnavailable, "config-hash-mismatch"):
+                verify_official_atlas_manifest(str(config), str(manifest))
 
     def test_request_validation_and_utc(self):
         self.assertEqual(utc_time("2026-11-14T00:00:00Z"), START)
