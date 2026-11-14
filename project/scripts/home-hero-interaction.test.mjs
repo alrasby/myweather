@@ -208,7 +208,7 @@ test("regression: fallback and ECMWF are switched atomically, not alpha-composit
   assert.ok(model.includes("chooseWeatherSource(readySteps.has(this.base)"));
   assert.ok(model.includes("const preview = !fallbackForHour && !cooldown"), "only show cloud preview when no incompatible fallback product is visible");
   assert.ok(model.includes("(!fallbackForHour || idx === 0)"), "never duplicate fallback rain/snow with partial ECMWF precipitation");
-  assert.ok(model.includes("fallbackForHour || returningToReadyModel ? goal"));
+  assert.ok(model.includes("const value = goal;"), "model validity and temporal blend weights must be applied exactly, without ghosting previous ECMWF hours");
   assert.ok(model.includes("!fallbackForHour && this.diagnosticMode"));
 });
 
