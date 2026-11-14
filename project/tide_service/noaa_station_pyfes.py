@@ -20,7 +20,7 @@ from .fes2022_predict import TideUnavailable, extrema, utc_time, validate_positi
 
 NOAA_API = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/"
 STATION_ID = re.compile(r"^[0-9]{7}$")
-WAVE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,7}$")
+WAVE_NAME = re.compile(r"^[A-Za-z0-9]{1,8}$")
 MAX_JSON_BYTES = 300_000
 
 
