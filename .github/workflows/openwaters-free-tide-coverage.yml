@@ -34,6 +34,8 @@ jobs:
               for endpoint,args in (
                 ("stations",dict(latitude=latitude,longitude=longitude,maxResults=3)),
                 ("extremes",dict(latitude=latitude,longitude=longitude,
+                                 start=now.isoformat(),end=until.isoformat(),units="meters")),
+                ("timeline",dict(latitude=latitude,longitude=longitude,
                                  start=now.isoformat(),end=until.isoformat(),units="meters"))):
                   url=f"{base}/{endpoint}?{urlencode(args)}"
                   try:
@@ -44,16 +46,20 @@ jobs:
                           print(city,"stations",json.dumps([{
                              "id":s.get("id"),"name":s.get("name"),
                              "distance_km":s.get("distance"),
-                             "license":(s.get("license") or {}).get("name") if isinstance(s.get("license"),dict) else s.get("license"),
+                             "license":s.get("license"),
+                             "attribution":s.get("attribution"),
                              "predictions":s.get("predictions")
                            } for s in (data if isinstance(data,list) else [])][:3]))
                       else:
                           station=data.get("station") or {}
-                          print(city,"extremes",json.dumps({
+                          print(city,endpoint,json.dumps({
                              "station":station.get("name"),"id":station.get("id"),
                              "distance_km":data.get("distance"),
+                             "license":station.get("license"),
+                             "attribution":station.get("attribution"),
                              "datum":data.get("datum"),"units":data.get("units"),
-                             "events":len(data.get("extremes") or [])}))
+                             "count":len(data.get(endpoint) or []),
+                             "first":(data.get(endpoint) or [None])[0]}))
                   except HTTPError as exc:
                       print(city,endpoint,"HTTP",exc.code)
                   except (URLError,TimeoutError,ValueError) as exc:
