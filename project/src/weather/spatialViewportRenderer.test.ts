@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, pinLoadedSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, spatialStateCoversBounds, pinLoadedSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -148,4 +148,23 @@ test("concurrent upstream state eviction cannot erase a resolved decoded raster"
  assert.equal(fixed!.data?.values,values);
  assert.equal(fixed!.data?.scaleFactor,10);
  assert.equal(pinLoadedSpatialState(state as never),null);
+});
+
+test("stale prior viewport decoded arrays must NEVER paint the next geography",()=>{
+ const file=base.slice(5);
+ const old={omFileUrl:file,dataOptions:{variable:"cloud_cover",
+   bounds:[-20,45,-5,62]},data:{values:new Float32Array([25,30])}};
+ const newState={omFileUrl:file,dataOptions:{variable:"cloud_cover",
+   bounds:[-15,40,25,67]},data:{values:new Float32Array([35,40])}};
+ const wanted=[-13,44,21,60];
+ assert.equal(spatialStateCoversBounds(old.dataOptions.bounds,wanted),false);
+ assert.equal(spatialStateCoversBounds(newState.dataOptions.bounds,wanted),true);
+ assert.equal(chooseLoadedSpatialState(old as never,[old as never],file,"cloud_cover",wanted),null);
+ assert.equal(chooseLoadedSpatialState(old as never,[old as never,newState as never],
+   file,"cloud_cover",wanted),newState);
+ // A full global decoded state is valid for any local viewport.
+ assert.equal(spatialStateCoversBounds(undefined,wanted),true);
+ // Cross-dateline latitude bands are handled conservatively, never treating
+ // a narrower old crop as valid for newly exposed visible regions.
+ assert.equal(spatialStateCoversBounds([-180,60,180,85],[-180,45,180,65]),false);
 });
