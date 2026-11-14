@@ -503,6 +503,7 @@ export class ModelField {
   private viewportMoving = false;
   private viewportHoldUntil = 0;
   private viewportSettleUntil = 0;
+  private speculationResumeAt = 0;
   private viewportSettleTimer: number | null = null;
   private spatialBudget: SpatialViewportDecision = { allow: true, reason: "regional", rasterSize: 1024 };
   private protocolSettings: ReturnType<typeof modelSettings> | null = null;
@@ -593,6 +594,7 @@ export class ModelField {
         this.viewportSettleTimer = null;
       }
       this.viewportSettleUntil = 0;
+      this.speculationResumeAt = Date.now() + 1600;
       const b = map.getBounds();
       const center = map.getCenter();
       origin = { lat: center.lat, lng: center.lng, zoom: map.getZoom() };
@@ -644,6 +646,7 @@ export class ModelField {
       // moveend events during a continental fling must not immediately
       // restart and abort a new expensive current-hour .om read.
       this.viewportSettleUntil = Date.now() + 260;
+      this.speculationResumeAt = Date.now() + 1200;
       if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
       this.viewportSettleTimer = window.setTimeout(() => {
         this.viewportSettleTimer = null;
@@ -1017,6 +1020,7 @@ export class ModelField {
     const refreshAge = viewportRefreshing ? now - this.refreshSince : 0;
     const plan = planSpatialRequests(
       this.base, this.times.length, ready, this.loading, blocked, viewportRefreshing, refreshAge, this.playbackActive, this.viewportMoving, this.compactSpatialTiles,
+      now < this.speculationResumeAt,
     );
 
     // Cancel obsolete decoding before scheduling the most relevant forecast.
