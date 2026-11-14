@@ -14,6 +14,7 @@ import { spatialTileOptions, useCompactSpatialTiles, COMPACT_SPATIAL_TILE_SIZE }
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialViewportBounds } from "@/weather/spatialViewportBounds";
 import { spatialZoomNeedsNewCoverage } from "@/weather/spatialZoomCoverage";
+import { decideSpatialViewport, type SpatialViewportDecision } from "@/weather/spatialViewportBudget";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
 import { SpatialPerformance, type SpatialPerformanceSnapshot } from "@/weather/spatialPerformance";
@@ -472,7 +473,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number) => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -496,6 +497,7 @@ export class ModelField {
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
   private viewportHoldUntil = 0;
+  private spatialBudget: SpatialViewportDecision = { allow: true, reason: "regional" };
   // Android WebView lacks SharedArrayBuffer: avoid showing cloud/rain/snow
   // one by one before a complete same-run ECMWF frame is ready.
   private compactSpatialTiles = false;
@@ -536,6 +538,7 @@ export class ModelField {
     this.viewportRenderer = new SpatialViewportRenderer(this.compactSpatialTiles && !legacyOverride,
       () => this.base);
     this.map = map;
+    this.spatialBudget = this.currentSpatialBudget();
     const metadataAbort = new AbortController();
     this.metadataAbort = metadataAbort;
     if (!map.getPane("wx-clouds")) {
@@ -603,6 +606,16 @@ export class ModelField {
       onMove();
       this.viewportMoving = false;
       origin = null;
+      // The spatial model is a regional product on constrained WebViews.
+      // Never start another continent-sized .om read during a zoomed-out
+      // world tour: fully retire its layers and use the real global fallback.
+      const wasAllowed = this.spatialBudget.allow;
+      this.refreshSpatialBudget();
+      if (!this.spatialBudget.allow) return;
+      if (!wasAllowed) {
+        this.pump();
+        return;
+      }
       // Every pan/zoom begins a new viewport generation. Old completed
       // cloud/rain/snow events must not authorize a new raster reveal.
       for (const frame of this.frames.values()) {
@@ -624,11 +637,16 @@ export class ModelField {
       const zoom = map.getZoom();
       const zoomChanged = [...this.frames.values()].some(frame =>
         spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom));
-      if (zoomChanged) {
+      // A large same-zoom pan is ALSO a new coverage generation. The old
+      // code only invalidated on zoom, so frame.ready remained true while
+      // independently loaded cloud/rain/snow tiles painted old areas or
+      // left black/rectangular holes over a supposedly complete frame.
+      const majorCoverageChange = zoomChanged || cancelledSpeculation;
+      if (majorCoverageChange) {
         for (const step of [...this.frames.keys()]) {
           if (step !== this.base) this.discardFrame(step);
         }
-        this.frames.get(this.base)?.invalidateZoom?.(zoom);
+        this.frames.get(this.base)?.invalidateZoom?.(zoom, cancelledSpeculation);
       }
       if (!this.visible || !this.frames.get(this.base)?.ready) {
         if (this.visible) this.pump();
@@ -690,14 +708,45 @@ export class ModelField {
    * The separate Open-Meteo regional fallback does not need to fetch while
    * this is true; the already loaded fallback grid remains intact. */
   isSpatialVisible(): boolean {
-    return this.visible && this.spatialVisible;
+    return this.visible && this.spatialBudget.allow && this.spatialVisible;
+  }
+
+  private currentSpatialBudget(): SpatialViewportDecision {
+    if (!this.map) return { allow: false, reason: "invalid" };
+    const b = this.map.getBounds();
+    return decideSpatialViewport({
+      zoom: this.map.getZoom(), west: b.getWest(), east: b.getEast(),
+      south: b.getSouth(), north: b.getNorth(),
+    });
+  }
+
+  private refreshSpatialBudget(): void {
+    const next = this.currentSpatialBudget();
+    const previous = this.spatialBudget.allow;
+    this.spatialBudget = next;
+    if (next.allow === previous) return;
+    // Crossing the spatial budget is a source transition, not an opacity
+    // tween. Retire EVERY stale model hour and cache entry once, so it cannot
+    // monopolize the network/heap while the satellite map refreshes.
+    this.clear();
+    this.viewportRenderer?.clear();
+    this.failedUntil.clear();
+    this.orderKey = "";
+    this.lastDisplayedStep = null;
+    this.holdingPreviousFrame = false;
+    this.spatialVisible = false;
+    this.fallbackForMissingHour = false;
+    this.refreshBase = null;
+    this.refreshSince = 0;
+    this.lastScheduledAt = 0;
+    if (!next.allow && this.visible) this.onMiss?.();
   }
 
   /** Playback safety gate for the rain/snow map only. Frame decoding is
    * bounded; hold playback at a temporal boundary until ECMWF can show it.
    * Never freeze playback permanently when the upstream request is in cooldown. */
   canAdvanceTo(ms: number): boolean {
-    if (!this.visible || !this.times.length) return true;
+    if (!this.visible || !this.times.length || !this.spatialBudget.allow) return true;
     const { i } = this.bracket(ms);
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
@@ -709,7 +758,7 @@ export class ModelField {
   setSourceBackedFallback(available: boolean) {
     if (this.sourceBackedFallback === available) return;
     this.sourceBackedFallback = available;
-    if (this.visible) this.applyOpacity();
+    if (this.visible && this.spatialBudget.allow) this.applyOpacity();
   }
 
   /** A deliberately hidden, read-only map diagnostic for comparing independent
@@ -809,6 +858,7 @@ export class ModelField {
   setVisible(on: boolean) {
     if (this.visible === on) return;
     this.visible = on;
+    if (on && !this.spatialBudget.allow) this.onMiss?.();
     if (!on) {
       this.seq += 1;
       this.failedUntil.clear();
@@ -830,7 +880,7 @@ export class ModelField {
   }
 
   sync(ms: number) {
-    if (!this.visible) return;
+    if (!this.visible || !this.spatialBudget.allow) return;
     // Forecast tile management does not need to run at the 60fps WebGL cadence.
     const now = performance.now();
     if (now - this.lastSyncAt < 50) return;
@@ -870,7 +920,7 @@ export class ModelField {
   }
 
   private pump() {
-    if (!this.visible || !this.adapter || !this.map) return;
+    if (!this.visible || !this.spatialBudget.allow || !this.adapter || !this.map) return;
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
@@ -1107,8 +1157,8 @@ export class ModelField {
       this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
     };
     this.pendingTimers.set(step, window.setTimeout(checkProgress, 5_000));
-    frame.invalidateZoom = (zoom) => {
-      if (!alive() || !spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom)) return;
+    frame.invalidateZoom = (zoom, force = false) => {
+      if (!alive() || (!force && !spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom))) return;
       frame.requestedZoom = zoom;
       // A newly zoomed viewport must not inherit a historical layer's
       // cumulative tile count. That marked a frame ready with zero new
@@ -1267,6 +1317,7 @@ export class ModelField {
 
   /** الساعة الأقدم تخفت بينما الساعة الأحدث تظهر، فتنساب الكتل بدل القفزة. */
   private applyOpacity() {
+    if (!this.spatialBudget.allow) return;
     const readySteps = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) readySteps.add(step);
     const cooldown = (this.failedUntil.get(this.base) ?? 0) > Date.now();
