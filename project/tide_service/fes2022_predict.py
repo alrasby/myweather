@@ -10,6 +10,7 @@ and not local harbour chart datum. Gauge-based calibration is separate.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -121,12 +122,70 @@ def predict(
     }
 
 
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024*1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_official_atlas_manifest(config_path: str, manifest_path: str) -> None:
+    """Require operator-audited full FES2022b atlas provenance before serving.
+
+    The manifest is an operator attestation tied to actual SHA-256 model files,
+    not an automatically issued certification from CNES. Without original
+    AVISO data, this is intentionally impossible to satisfy in normal CI.
+    """
+    if not manifest_path or not Path(manifest_path).is_file():
+        raise TideUnavailable("fes2022-provenance-manifest-required")
+    try:
+        meta = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise TideUnavailable("fes2022-provenance-manifest-invalid") from exc
+    if (not isinstance(meta, dict) or meta.get("edition") != "FES2022b" or
+        meta.get("producer") != "CNES/LEGOS/Noveltis/CLS" or
+        meta.get("quantity") != "ocean_tide_height" or
+        meta.get("units") != "cm" or meta.get("datum") != "atlas_msl"):
+        raise TideUnavailable("fes2022-atlas-edition-or-units-unverified")
+    config_sha = meta.get("config_sha256")
+    if not isinstance(config_sha, str) or _sha256(Path(config_path)) != config_sha:
+        raise TideUnavailable("fes2022-config-hash-mismatch")
+    files = meta.get("files")
+    format_name = meta.get("format")
+    count_ok = ((format_name == "cartesian-34" and isinstance(files, list) and len(files)==34) or
+                (format_name == "native-34" and isinstance(files, list) and len(files)==1))
+    if not count_ok:
+        raise TideUnavailable("fes2022-constituent-atlas-incomplete")
+    total = 0
+    seen: set[str] = set()
+    for item in files:
+        if not isinstance(item, dict):
+            raise TideUnavailable("fes2022-provenance-file-invalid")
+        filename, expected = item.get("path"), item.get("sha256")
+        if (not isinstance(filename, str) or not isinstance(expected, str) or
+            len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected)):
+            raise TideUnavailable("fes2022-provenance-file-invalid")
+        real = Path(filename).resolve()
+        if not real.is_file() or str(real) in seen:
+            raise TideUnavailable("fes2022-atlas-file-missing-or-duplicate")
+        seen.add(str(real))
+        total += real.stat().st_size
+        if _sha256(real) != expected:
+            raise TideUnavailable("fes2022-atlas-file-hash-mismatch")
+    # Reject tiny low-resolution PyFES demo grids masquerading as FES2022b.
+    if total < 500_000_000:
+        raise TideUnavailable("fes2022-atlas-too-small-to-be-full-edition")
+
+
 class PyFESAtlas:
     """Fail-closed production adapter. Never downloads or guesses model data."""
 
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, manifest_path: str = ""):
         if not config_path or not Path(config_path).is_file():
             raise TideUnavailable("fes2022-atlas-config-required")
+        verify_official_atlas_manifest(config_path, manifest_path)
         try:
             import numpy as np
             import pyfes
@@ -158,11 +217,12 @@ def main() -> int:
     ap.add_argument("--hours", type=int, default=48)
     ap.add_argument("--start", required=True, help="UTC ISO timestamp on 5-min boundary")
     ap.add_argument("--config", default=os.environ.get("FES2022_CONFIG", ""))
+    ap.add_argument("--manifest", default=os.environ.get("FES2022_MANIFEST", ""))
     opts = ap.parse_args()
     try:
         start = utc_time(opts.start)
         validate_position(opts.lat, opts.lon, opts.hours)
-        result = predict(opts.lat, opts.lon, start, opts.hours, PyFESAtlas(opts.config))
+        result = predict(opts.lat, opts.lon, start, opts.hours, PyFESAtlas(opts.config, opts.manifest))
         print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
         return 0
     except TideUnavailable as exc:
