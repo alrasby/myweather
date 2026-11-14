@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { spatialViewportBounds } from "./spatialViewportBounds.ts";
+import { spatialViewportBounds, spatialTileAlignedBounds } from "./spatialViewportBounds.ts";
 
 test("Norway viewport requests a small padded area instead of the world", () => {
   const bounds = spatialViewportBounds({ west: 8, east: 24, south: 57, north: 72 });
@@ -96,4 +96,33 @@ test("dateline longitude wraps still cover the visible latitude without full glo
 test("genuinely whole-earth latitudes still request the whole latitudinal range", () => {
   const b = spatialViewportBounds({ west: -180, east: 180, south: -85, north: 85 });
   assert.deepEqual(b, [-180, -85.0511287798, 180, 85.0511287798]);
+});
+
+test("model crop covers each COMPLETE Leaflet image tile even if viewport is only a small part",()=>{
+ const view={west:12,east:28,south:43,north:58};
+ const b=spatialTileAlignedBounds(view,5,512); // physical z4 = 22.5° x Mercator tiles
+ assert.ok(b[0] <= 0 && b[2] >= 45, JSON.stringify(b));
+ assert.ok(b[1] < 40.98 && b[3] > 66.5,JSON.stringify(b));
+ // A pan within the SAME tile grid must never change source crop window.
+ assert.deepEqual(spatialTileAlignedBounds({west:13,east:25,south:46,north:55},5,512),b);
+});
+test("world copies resolve to the same aligned ECMWF source window",()=>{
+ const a=spatialTileAlignedBounds({west:12,east:28,south:43,north:58},5,512);
+ const b=spatialTileAlignedBounds({west:372,east:388,south:43,north:58},5,512);
+ assert.deepEqual(a,b);
+});
+test("the compact 1024px model tile has a larger geographic footprint",()=>{
+ const view={west:12,east:28,south:43,north:58};
+ const large=spatialTileAlignedBounds(view,5,1024);
+ const compact=spatialTileAlignedBounds(view,5,512);
+ assert.ok(large[2]-large[0] >= compact[2]-compact[0]);
+ assert.ok(large[3]-large[1] >= compact[3]-compact[1]);
+});
+test("dateline wraps remain geographic, and malformed viewports never manufacture coverage",()=>{
+ const wrap=spatialTileAlignedBounds({west:172,east:-172,south:10,north:30},5,512);
+ assert.equal(wrap[0],-180);
+ assert.equal(wrap[2],180);
+ assert.ok(wrap[1]>-85.06 && wrap[3]<85.06);
+ assert.deepEqual(spatialTileAlignedBounds({west:NaN,east:10,south:1,north:20},5,512),
+  spatialViewportBounds({west:NaN,east:10,south:1,north:20}));
 });
