@@ -1244,6 +1244,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             {" · "}{lang === "ar" ? "حُفظت" : "stored"}: {weatherDiagnostics?.cacheStored ?? 0}
             {" · "}{lang === "ar" ? "غير قابلة للتخزين" : "rejected"}: {weatherDiagnostics?.cacheRejected ?? 0}
           </p>
+          {weatherDiagnostics?.currentTileCoverage ? <p>
+            {lang === "ar" ? "تغطية البلاطات الحالية (غيوم/مطر/ثلج)" : "Current viewport coverage (cloud/rain/snow)"}: {
+              weatherDiagnostics.currentTileCoverage.map(c => `${c.delivered}/${c.required}`).join(" · ")
+            } · {lang === "ar" ? "المخفية" : "hidden"}: {
+              weatherDiagnostics.currentTileCoverage.reduce((sum,c) => sum + c.hidden, 0)
+            } · {lang === "ar" ? "المعلقة" : "staged"}: {weatherDiagnostics.stagedTileCount ?? 0}
+          </p> : null}
           <p>{lang === "ar" ? "الإطار المطلوب" : "Requested frame"}: {weatherDiagnostics?.requestedFrame ?? "—"}</p>
           <p>{lang === "ar" ? "الإطار المعروض فعليًا" : "Displayed frame"}: {weatherDiagnostics?.displayedFrame ?? "—"}
             {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
