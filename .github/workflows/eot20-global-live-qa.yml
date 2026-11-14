@@ -147,3 +147,40 @@ jobs:
             -m unittest tide_service.test_eot20_global tide_service.test_eot20_bootstrap -v
           docker run --rm --entrypoint sh myweather-pyfes:eot20-qa \
             -n /opt/myweather/project/tide_service/entrypoint.sh
+
+      - name: Production container boots full atlas and serves real HTTPS-edge API
+        working-directory: .
+        env:
+          ATLAS_DIR: ${{ runner.temp }}/myweather-eot20
+        run: |
+          # Temporary CI fixture: preserve model bytes and make their existing
+          # private 0600 config readable by the production UID 10001.
+          sudo chown -R 10001:10001 "$ATLAS_DIR"
+          docker run --detach --rm --name myweather-eot20-live             --publish 127.0.0.1:8875:8080             --volume "$ATLAS_DIR:/data/eot20"             --env RAILWAY_ENVIRONMENT_ID=github-actions-isolated-qa             --env PORT=8080             --env TIDE_EOT20_ENABLED=1             --env TIDE_EDGE_TLS_TERMINATED=1             --env EOT20_DOWNLOAD_PINNED=0             myweather-pyfes:eot20-qa
+          trap 'docker logs myweather-eot20-live | tail -n 30; docker stop -t 2 myweather-eot20-live || true' EXIT
+          ready=0
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent --show-error                 http://127.0.0.1:8875/healthz > /tmp/eot20-docker-health.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          python - <<'PY'
+          import json
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          from urllib.request import urlopen
+          with open('/tmp/eot20-docker-health.json') as fp:
+              health=json.load(fp)
+          assert health['ready'] and health['source']=='EOT20'
+          now=datetime.now(timezone.utc)
+          now=now.replace(minute=now.minute//5*5,second=0,microsecond=0)
+          q=urlencode({'lat':23.65,'lon':58.7,'start':now.isoformat(),'hours':12})
+          with urlopen('http://127.0.0.1:8875/v1/tides?'+q,timeout=15) as r:
+              response=json.load(r)
+          assert response['source']=='EOT20'
+          assert len(response['samples'])==145 and response['extrema']
+          print('REAL_DOCKER_PYFES_HTTP_200',len(response['samples']))
+          PY
