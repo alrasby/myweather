@@ -13,8 +13,10 @@ import { activePlace, useWeather } from "@/weather/store";
 import { widgetPayload } from "@/weather/widget";
 import type { TabId, WeatherBundle } from "@/weather/types";
 import { loadWeather } from "@/weather/api";
+import { warmSpatialMetadata } from "@/weather/spatialMetadataWarmup";
 
-const MapScreen = lazy(() => import("@/components/weather/MapScreen").then((m) => ({ default: m.MapScreen })));
+const loadMapScreen = () => import("@/components/weather/MapScreen");
+const MapScreen = lazy(() => loadMapScreen().then((m) => ({ default: m.MapScreen })));
 
 export function WeatherApp() {
   const hydrate = useWeather((s) => s.hydrate);
@@ -161,6 +163,21 @@ export function WeatherApp() {
     if (tab !== "home") setPlacesOpen(false);
   }, [tab]);
 
+  // Weather forecasts on Home retain first network priority. Only after a
+  // genuine Home forecast is loaded, and only off data-saver, preload the
+  // existing map JS chunk + one short-lived ECMWF metadata request.
+  // No raster tiles or stale screenshots are prefetched or mislabelled.
+  useEffect(() => {
+    if (!hydrated || !bundle || tab !== "home" || prefs.dataSaver || document.hidden ||
+      (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
+    const id = window.setTimeout(() => {
+      if (document.hidden) return;
+      void loadMapScreen().catch(() => undefined);
+      warmSpatialMetadata();
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [hydrated, bundle?.placeId, tab, prefs.dataSaver]);
+
   const showMap = tab === "map";
   const code = bundle?.placeId === place.id ? bundle.current.code : 1;
 
@@ -203,7 +220,15 @@ export function WeatherApp() {
             <button
               key={id}
               type="button"
-              onClick={() => setTab(id)}
+              onClick={() => {
+                if (id === "map") {
+                  // Start the small metadata request before lazy React mount.
+                  // Later attach joins the same request; no duplicate reads.
+                  warmSpatialMetadata();
+                  void loadMapScreen().catch(() => undefined);
+                }
+                setTab(id);
+              }}
               aria-current={tab === id ? "page" : undefined}
               className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[0.71rem] leading-none ${tab === id ? "nav-on" : "text-on-sky/90"}`}
             >
