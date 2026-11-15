@@ -15,7 +15,7 @@ class CityIndexTests(unittest.TestCase):
         arc=Path(self.temp.name)/"test.zip"
         entries=[
           row(1,"Muscat","مسقط,Masqat",23.58,58.40,"OM",700000),
-          row(2,"Damascus","دمشق,Dimasq",33.5,36.3,"SY",1750000),
+          row(2,"Damascus","د مشق,دمشق,Dimasq",33.5,36.3,"SY",1750000),
           row(3,"Dublin","دبلن,Baile Átha Cliath",53.3,-6.2,"IE",590000),
           row(4,"Moscow","Москва,موسكو",55.75,37.62,"RU",12000000),
           row(5,"Tokyo","東京,طوكيو",35.68,139.69,"JP",13000000),
@@ -36,6 +36,9 @@ class CityIndexTests(unittest.TestCase):
                 self.assertTrue(result,typed)
                 self.assertEqual(result[0]["properties"]["name_en"],expected)
                 self.assertIn("geonames_id",result[0]["properties"])
+    def test_display_spelling_prefers_exact_alias_over_compact_variant(self):
+        with patch.object(server,"DB",self.db):
+            self.assertEqual(server.search("دمشق")[0]["properties"]["name"],"دمشق")
     def test_absent_and_two_letter_are_not_fabricated(self):
         with patch.object(server,"DB",self.db):
             self.assertEqual(server.search("zzunknown"),[])

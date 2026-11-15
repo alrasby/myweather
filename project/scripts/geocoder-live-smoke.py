@@ -28,6 +28,8 @@ def main():
         reply,t=request("/api",{"q":q,"lang":lang,"limit":6,"layer":"city"})
         items=reply.get("features",[])
         assert items,(q,reply)
+        if q=="دمشق":
+            assert items[0]["properties"]["name"]=="دمشق",items[0]["properties"]
         if q in ("الكامل","الكامل والوافي","الكامل و الوافي","Al Kamil Wal Wafi"):
             assert items[0]["properties"]["geonames_id"]==11054689,(q,items[:2])
         assert all(item["properties"].get("geonames_id") and

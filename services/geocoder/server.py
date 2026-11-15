@@ -150,7 +150,11 @@ def search(q,limit=6):
             """,(needle,needle+"\uffff")).fetchall())
     best={}
     for display,k,cid,name,lat,lon,country,pop in rows:
-        score=(int(k in needles),int(k.startswith(key)),pop)
+        # Prefer the exact human-readable spelling over an equivalent
+        # compact key. Without this, 'دمشق' could display 'د مشق' when
+        # a space-stripped alias happens to be visited first.
+        score=(int(k==key),int(canonical(display)==key),
+               int(k in needles),int(k.startswith(key)),pop)
         if cid not in best or score>best[cid][0]:
             best[cid]=(score,{"type":"Feature",
               "geometry":{"type":"Point","coordinates":[lon,lat]},
