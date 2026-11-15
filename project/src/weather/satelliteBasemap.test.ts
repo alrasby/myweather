@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { needsSatelliteUnderlay, needsRasterSeamGuard, shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM, snapshotSatelliteRasterCoverage } from "./satelliteBasemap.ts";
+import { needsSatelliteUnderlay, needsRasterSeamGuard, shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM, satelliteHandoffDecision, snapshotSatelliteRasterCoverage } from "./satelliteBasemap.ts";
 
 test("the world map never renders duplicate Esri raster grids", () => {
   for (const zoom of [3, 4]) assert.equal(needsSatelliteUnderlay(zoom), false);
@@ -106,4 +106,54 @@ test("real native-z2 parent imagery covers zoom4 map when pixel scale is respect
  const shifted=snapshotSatelliteRasterCoverage(layer,4,undefined,{...region,maxX:3072});
  assert.equal(shifted.missing,1);
  assert.equal(shifted.complete,false);
+});
+
+test("pinch keeps already mounted real Esri parents until the CSS zoom settles",()=>{
+ const base={zoom:4,zooming:true,mountedWorld:true,mountedUnderlay:true,
+   detailComplete:false,underlayComplete:false,worldComplete:false};
+ assert.deepEqual(satelliteHandoffDecision(base),{
+   underlay:true,worldParent:true,
+ });
+ assert.deepEqual(satelliteHandoffDecision({...base,zoom:6,mountedWorld:false}),{
+   underlay:true,worldParent:true,
+ },"warm the existing tiny z2 Esri source during an Android pinch starting at z6");
+ assert.deepEqual(satelliteHandoffDecision({...base,zoom:3,mountedUnderlay:false}),{
+   underlay:false,worldParent:true,
+ },"do not download duplicate z3 detail URLs during world pinch");
+});
+test("low-zoom handoff never removes the z4 source until a REAL z2/detail viewport covers the screen",()=>{
+ const state={zoom:4,zooming:false,mountedWorld:true,mountedUnderlay:true,
+   detailComplete:false,underlayComplete:false,worldComplete:false};
+ assert.deepEqual(satelliteHandoffDecision(state),{underlay:true,worldParent:true});
+ assert.deepEqual(satelliteHandoffDecision({...state,worldComplete:true}),
+   {underlay:false,worldParent:true});
+ assert.deepEqual(satelliteHandoffDecision({...state,detailComplete:true}),
+   {underlay:false,worldParent:true});
+ assert.deepEqual(satelliteHandoffDecision({...state,mountedUnderlay:false}),
+   {underlay:false,worldParent:true},
+   "do not mount a redundant z3/4 underlay when both protectors are missing");
+});
+test("z5 and closer map levels retain a z2 parent only until actual z4 or detailed pixels arrive",()=>{
+ const state={zoom:5,zooming:false,mountedWorld:true,mountedUnderlay:true,
+   detailComplete:false,underlayComplete:false,worldComplete:false};
+ assert.deepEqual(satelliteHandoffDecision(state),{underlay:true,worldParent:true});
+ assert.deepEqual(satelliteHandoffDecision({...state,underlayComplete:true}),
+   {underlay:true,worldParent:false});
+ assert.deepEqual(satelliteHandoffDecision({...state,detailComplete:true}),
+   {underlay:true,worldParent:false});
+ assert.deepEqual(satelliteHandoffDecision({...state,zoom:7}),
+   {underlay:true,worldParent:true},
+   "briefly retain the already-mounted real parent if the new zoom has no z4 coverage");
+ assert.deepEqual(satelliteHandoffDecision({...state,zoom:7,mountedWorld:false}),
+   {underlay:true,worldParent:false},
+   "never create an unnecessary third Esri layer at high zoom");
+ assert.deepEqual(satelliteHandoffDecision({...state,zoom:7,underlayComplete:true}),
+   {underlay:true,worldParent:false});
+});
+test("Esri handoff never invents new source imagery for invalid map geometry",()=>{
+ const state={zoom:NaN,zooming:false,mountedWorld:false,mountedUnderlay:true,
+   detailComplete:false,underlayComplete:false,worldComplete:false};
+ assert.deepEqual(satelliteHandoffDecision(state),{underlay:true,worldParent:false});
+ assert.deepEqual(satelliteHandoffDecision({...state,zoom:-1}),
+   {underlay:true,worldParent:false});
 });
