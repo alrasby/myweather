@@ -6,6 +6,7 @@ import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
 import { SpatialTileReveal, canStageSpatialRefresh, softenSpatialTileArrival, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
+import {canRetainStartedEcmwfRange,certifiedAbortedEcmwfRange} from "@/weather/spatialCanceledRange";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
 import { SpatialRangeFlights } from "@/weather/spatialRangeFlights";
 import { SpatialRateLimit, SpatialRateLimitError } from "@/weather/spatialRateLimit";
@@ -77,6 +78,8 @@ export type WeatherModelDiagnostics = {
   cacheEligible: number;
   cacheStored: number;
   cacheRejected: number;
+  /** Fully received, exactly validated native ranges saved after viewport cancellation. */
+  canceledRangesRecovered: number;
   performance: SpatialPerformanceSnapshot;
   viewportRenderer: ViewportRendererStats;
   rateLimitedResponses: number;
@@ -243,6 +246,7 @@ let spatialNativeReads = 0;
 let spatialCacheEligible = 0;
 let spatialCacheStored = 0;
 let spatialCacheRejected = 0;
+let spatialCanceledRangesRecovered = 0;
 const spatialFileLengths = new Map<string, { value: string; expires: number }>();
 
 /** Measure queue wait and native transport independently. These values do NOT
@@ -254,13 +258,19 @@ async function measuredNativeRequest(
 ): Promise<Awaited<ReturnType<typeof CapacitorHttp.request>>> {
   const queued = performance.now();
   let started = queued;
+  // Native reads already running cannot be stopped by a Leaflet abort.
+  // Only complete small pinned ECMWF ranges are eligible for safe cache
+  // warming; queued canceled requests must still be skipped.
+  const requestHeaders = new Headers(options.headers);
+  const retainCompleted = canRetainStartedEcmwfRange(
+    options.url,options.method??"GET",requestHeaders.get("range"));
   try {
     const result = await spatialNativeQueue.run(signal, () => {
       started = performance.now();
       spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
-    }, spatialNativePriority(options.url));
+    }, spatialNativePriority(options.url),retainCompleted);
     const retryAfter = Object.entries(result.headers ?? {})
       .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
     spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));
@@ -340,12 +350,21 @@ async function pluginSpatialUnshared(url: string, init: RequestInit | undefined,
     throw new Error(`range ${bytes.byteLength}!=${expect}`);
   }
   if ((result.status || 0) >= 400 || result.status === 0) throw new Error(`spatial ${result.status}`);
+  // All original callers may have left during the unabortable native read.
+  // In that case never deliver a response, and only save source-backed bytes
+  // if 206 Content-Range exactly matches the requested pinned .om interval.
+  const canceled = !!init?.signal?.aborted;
+  if (canceled && !certifiedAbortedEcmwfRange(
+    url,method,range,result.status,out.get("content-range"),bytes.byteLength)) {
+    throw new Error("spatial-request-aborted");
+  }
   if (cacheKey && result.status === 206 && bytes.byteLength > 0) {
     const savedHeaders: Record<string, string> = {};
     out.forEach((value, key) => { savedHeaders[key] = value; });
     if (bytes.byteLength <= 512 * 1024) {
       spatialRangeCache.put(cacheKey, { bytes, status: 206, headers: savedHeaders });
       spatialCacheStored++;
+      if (canceled) spatialCanceledRangesRecovered++;
     } else {
       spatialCacheRejected++;
     }
@@ -914,6 +933,7 @@ export class ModelField {
       cacheEligible: spatialCacheEligible,
       cacheStored: spatialCacheStored,
       cacheRejected: spatialCacheRejected,
+      canceledRangesRecovered: spatialCanceledRangesRecovered,
       viewportRenderer: this.viewportRenderer?.snapshot() ?? {
         mode: "legacy", workerTiles: 0, fallbackTiles: 0, datasetCopies: 0,
         datasetReuses: 0, datasetEvictions: 0, workerSlots: 0, capturedReadRecoveries: 0,
