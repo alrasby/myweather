@@ -216,6 +216,19 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         modelRef.current?.setSourceBackedFallback(needFallback);
         modelRef.current?.setPlaybackActive(engine.playing);
         modelRef.current?.sync(info.timeMs);
+        // While the next spatial hour decodes, fetch ONE lightweight genuine
+        // world fallback only if the user is actively waiting for playback.
+        if (engine.playing && info.playbackWaitingMs >= 1800) rainPlaybackQuickRef.current?.();
+      }
+      const now = performance.now();
+      // Avoid formatting the clock, searching nearby forecast points and
+      // rewriting slider labels 60 times/second while large ECMWF raster
+      // tiles are decoding on mobile. The model itself still updates above.
+      if (kindRef.current === 2 && now - lastRainLabelAt < 180) return;
+      lastRainLabelAt = now;
+      // Clock correction is DOM/UI work, not model work: keep it behind
+      // the 180ms presentation throttle, never on every animation frame.
+      if(kindRef.current===2){
         // ModelField.sync commits its latest interpolation in a resolved-promise
         // microtask. The first clock read above happened before that commit and
         // could label 12:00Z while fully visible ECMWF tiles were 13:00Z.
@@ -233,16 +246,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             setWeatherDiagnostics(modelRef.current?.diagnostics()??null);
           }
         });
-        // While the next spatial hour decodes, fetch ONE lightweight genuine
-        // world fallback only if the user is actively waiting for playback.
-        if (engine.playing && info.playbackWaitingMs >= 1800) rainPlaybackQuickRef.current?.();
       }
-      const now = performance.now();
-      // Avoid formatting the clock, searching nearby forecast points and
-      // rewriting slider labels 60 times/second while large ECMWF raster
-      // tiles are decoding on mobile. The model itself still updates above.
-      if (kindRef.current === 2 && now - lastRainLabelAt < 180) return;
-      lastRainLabelAt = now;
       const current = prefsRef.current;
       const language = langRef.current;
       if (timeRef.current) {
