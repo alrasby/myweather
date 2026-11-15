@@ -127,10 +127,18 @@ for record in records:
     if record.get("verifiedComplete") and (
         record.get("source")!="spatial" or
         record.get("displayedFrame") is None or
-        record.get("displayedValidTime")!=record.get("requestedValidTime")
+        record.get("displayedValidTime") is None or
+        record.get("sourceClockTextMatches") is not True
     ):
-        raise SystemExit("Viewport QA invalid: claims verified ECMWF while source or time is wrong")
-print("Viewport pan: source-backed frame confirmed for a new map viewport (emulator only)")
+        raise SystemExit("Viewport QA invalid: source frame or *rendered* DOM clock mismatches model")
+# A future next-hour image is legal only at the genuine end of a fully
+# interpolated hour, certified by viewportQaSnapshot with EACH contributor's
+# real tile coverage. Do not reject a real 18Z image at 17:59:55 just because
+# the requested base hour remains 17Z.
+if not any(r.get("afterMs")==16000 and r.get("verifiedComplete") and
+           r.get("sourceClockTextMatches") is True for r in records):
+    raise SystemExit("Viewport QA incomplete: true source + visible DOM clock never coincide")
+print("Viewport pan and zoom: source-backed frames and visible clocks verified (emulator only)")
 PY
 for N in $(seq 1 10); do
   adb shell input keyevent KEYCODE_HOME
