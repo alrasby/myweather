@@ -168,7 +168,7 @@ export function WeatherApp() {
   // existing map JS chunk + one short-lived ECMWF metadata request.
   // No raster tiles or stale screenshots are prefetched or mislabelled.
   useEffect(() => {
-    if (!hydrated || !bundle || tab !== "home" || prefs.dataSaver || document.hidden ||
+    if (!hydrated || !bundle || bundle.placeId !== place.id || tab !== "home" || prefs.dataSaver || document.hidden ||
       (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
     const id = window.setTimeout(() => {
       if (document.hidden) return;
@@ -176,7 +176,7 @@ export function WeatherApp() {
       warmSpatialMetadata();
     }, 700);
     return () => window.clearTimeout(id);
-  }, [hydrated, bundle?.placeId, tab, prefs.dataSaver]);
+  }, [hydrated, bundle?.placeId, place.id, tab, prefs.dataSaver]);
 
   const showMap = tab === "map";
   const code = bundle?.placeId === place.id ? bundle.current.code : 1;
