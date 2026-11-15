@@ -72,3 +72,24 @@ test("visible cloud/rain queued reads lead, but snow reads cannot starve", async
   assert.deepEqual(observed.slice(0, 4), ["cloud-a", "rain-a", "cloud-b", "snow-a"]);
   assert.deepEqual(observed.slice(4), ["rain-b", "snow-b"]);
 });
+
+test("an already-running canceled native request may complete for verified cache only",async()=>{
+ const queue=new SpatialNativeQueue(1),abort=new AbortController();
+ let finish!: (value:string)=>void;
+ const work=queue.run(abort.signal,()=>new Promise<string>(resolve=>{finish=resolve;}),1,true);
+ abort.abort();
+ finish("verified-206-range");
+ assert.equal(await work,"verified-206-range");
+});
+test("cache warming never starts a canceled native task still waiting in the queue",async()=>{
+ const queue=new SpatialNativeQueue(1);
+ let release!:()=>void;
+ const first=queue.run(undefined,()=>new Promise<void>(resolve=>{release=resolve;}));
+ let entered=false;
+ const abort=new AbortController();
+ const second=queue.run(abort.signal,async()=>{entered=true;return "no";},1,true);
+ abort.abort();
+ await assert.rejects(second,/spatial-request-aborted/);
+ release();await first;
+ assert.equal(entered,false);
+});
