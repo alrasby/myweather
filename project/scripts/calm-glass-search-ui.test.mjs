@@ -92,3 +92,11 @@ test("two-character local search starts no timer or remote provider work",()=>{
  assert.ok(city.includes('setRemote({query:q,hits:local,settled:true})'));
  assert.ok(city.includes('},165);'));
 });
+
+test("native plugin gate preserves room for direct recovery even when plugin hangs",()=>{
+ const net=read("src/weather/net.ts");
+ assert.ok(net.includes("const MAX_NATIVE_IN_FLIGHT = 3"));
+ assert.ok(net.includes("const MAX_IN_FLIGHT = 5"));
+ assert.ok(net.includes('if (nativeInFlight >= MAX_NATIVE_IN_FLIGHT)'));
+ assert.ok(net.includes("trackUnstoppableRequest(CapacitorHttp.request"));
+});

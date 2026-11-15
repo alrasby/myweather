@@ -13,7 +13,7 @@ Branch: `feature/production-geocoder-ecmwf-startup-resource-safety-20261115`, la
 ## Resource bounds and acceptance
 
 - `SpatialViewportRenderer`: 3 worker variable slots, at most 2 active renderers, 32 MiB data per worker, 40 queued tiles maximum in front of the admission gate. Per-source byte range cache remains 12 MiB/5 min. No concurrency inflation was introduced.
-- `net.ts`: 5 network slots, 64 queued bounded waiters; native slots do not exceed in-flight plugin requests merely because JS aborted. Source-level tests cannot measure Android radio power.
+- `net.ts`: 5 total network slots, **max 3 non-abortable native** plugin requests, 2 reserved for direct web recovery even if the native plugin hangs, and 64 bounded waiters. Native slots do not exceed in-flight OS requests merely because JS aborted. Source-level tests cannot measure Android radio power.
 - No public Photon demo traffic in shipping client code. The private provider **has not been deployed**; using Open-Meteo for unseeded cities remains subject to its own availability/terms.
 - Exact-head CI must pass TypeScript, full tests, official weather/map validity contracts, Android Lint and signed-identity APK. Low/mid physical Android still needs 20-cycle pan/zoom/long search test with heap, PSS, native request counts, battery mAh/h, startup p50/p95 and visible cloud time. Cold/warm runs must not be conflated.
 

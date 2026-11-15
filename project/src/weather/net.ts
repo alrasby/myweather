@@ -37,8 +37,10 @@ function htmlPage(body: string): boolean {
 
 /** ويب فيو أندرويد يعلّق الطلب إلى الأبد إن لم يُقطع، فيقف الجلب كله. */
 const MAX_IN_FLIGHT = 5;
+const MAX_NATIVE_IN_FLIGHT = 3; // leave two permits for browser fallback/recovery
 const MAX_WAITERS = 64;
 let inFlight = 0;
+let nativeInFlight = 0;
 // A stuck Capacitor plugin request cannot be physically interrupted by the
 // caller AbortSignal. Prevent repeated native retries until OS timeouts settle.
 let nativeTimeoutCooldownUntil = 0;
@@ -98,8 +100,21 @@ async function nativePluginFetch(
 ): Promise<Response> {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
   if (Date.now() < nativeTimeoutCooldownUntil) throw new Error("native-transport-cooldown");
+  // A hung OS plugin must never exhaust the shared queue and prevent the
+  // fetch-based recovery lane. The independent cap is deliberately smaller
+  // than MAX_IN_FLIGHT and does not increase total connection concurrency.
+  if (nativeInFlight >= MAX_NATIVE_IN_FLIGHT) throw new Error("native-lane-busy");
   await takeSlot(signal);
+  if (nativeInFlight >= MAX_NATIVE_IN_FLIGHT) {
+    releaseSlot();
+    throw new Error("native-lane-busy");
+  }
+  nativeInFlight++;
   let nativeStarted = false;
+  const releaseNative = () => {
+    nativeInFlight = Math.max(0, nativeInFlight - 1);
+    releaseSlot();
+  };
   try {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
     // CapacitorHttp has NO native AbortSignal. Previously the slot was
@@ -112,7 +127,7 @@ async function nativePluginFetch(
       connectTimeout: ms,
       readTimeout: ms,
       headers: hdrs,
-    }), releaseSlot);
+    }), releaseNative);
     nativeStarted = true;
     let result:Awaited<typeof nativeWork>;
     try {
@@ -128,7 +143,7 @@ async function nativePluginFetch(
   } finally {
     // After the plugin starts, only its ACTUAL completion releases the slot,
     // not the caller's timeout/abort. Before start we still release safely.
-    if (!nativeStarted) releaseSlot();
+    if (!nativeStarted) releaseNative();
   }
 }
 
