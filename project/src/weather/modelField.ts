@@ -4,7 +4,7 @@ import {mapForecastClock,type MapForecastClock} from "@/weather/mapForecastClock
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
-import { SpatialTileReveal, canStageSpatialRefresh, canHoldCertifiedSpatialViewport, softenSpatialTileArrival, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
+import { SpatialTileReveal, canStageSpatialRefresh, canHoldCertifiedSpatialViewport, softenSpatialTileArrival, shouldPolishSpatialArrival, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import {canRetainStartedEcmwfRange,certifiedAbortedEcmwfRange} from "@/weather/spatialCanceledRange";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
@@ -1505,8 +1505,8 @@ export class ModelField {
         // high-alpha compositor effect is safe on compact Android too.
         const newTile = event?.tile && !certifiedTiles[index]!.has(event.tile);
         softenSpatialTileArrival(event?.tile as SpatialTileNode | undefined,
-          !!newTile && !this.viewportMoving && frame.ready &&
-          frame.opacity > 0.15 && !refreshBatch,
+          shouldPolishSpatialArrival(!!newTile, this.viewportMoving,
+            frame.ready, frame.opacity, refreshBatch),
           window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
         const since = event?.tile ? tileStart.get(event.tile) : undefined;
         if (since !== undefined) {
