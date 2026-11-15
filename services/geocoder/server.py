@@ -175,5 +175,8 @@ class Handler(BaseHTTPRequestHandler):
         finally:SLOTS.release()
 
 if __name__=="__main__":
+    port = int(os.environ.get("PORT","8000"))
+    server = ThreadingHTTPServer(("0.0.0.0",port),Handler)
+    print(f"MyWeatherGeoNames listening on 0.0.0.0:{port}",flush=True)
     threading.Thread(target=updater,daemon=True,name="geonames-updater").start()
-    ThreadingHTTPServer(("0.0.0.0",int(os.environ.get("PORT","8000"))),Handler).serve_forever()
+    server.serve_forever()
