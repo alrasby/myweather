@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {softenSpatialTileArrival,canHoldCertifiedSpatialViewport,spatialViewportOverlap,canStageSpatialRefresh,SPATIAL_VIEWPORT_HOLD_MAX_MS, type SpatialTileNode} from "./spatialTileReveal.ts";
+import {softenSpatialTileArrival,shouldPolishSpatialArrival,canHoldCertifiedSpatialViewport,spatialViewportOverlap,canStageSpatialRefresh,SPATIAL_VIEWPORT_HOLD_MAX_MS, type SpatialTileNode} from "./spatialTileReveal.ts";
 test("soften only visible real ECMWF tiles with bounded compositor opacity",()=>{
  let calls=0;
  let duration=0;
  const tile={style:{visibility:"visible"},animate:(frames:unknown,opts:unknown)=>{
    calls++;
    duration=(opts as {duration:number}).duration;
-   assert.deepEqual(frames,[{opacity:0.68},{opacity:1}]);
+   assert.deepEqual(frames,[{opacity:0.92},{opacity:1}]);
    return {} as Animation;
  }} as SpatialTileNode;
  assert.equal(softenSpatialTileArrival(tile,true),true);
- assert.equal(duration,160);
+ assert.equal(duration,110);
  assert.equal(softenSpatialTileArrival(tile,true,true),false);
  assert.equal(softenSpatialTileArrival(tile,false),false);
  tile.style.visibility="hidden";
@@ -76,4 +76,20 @@ test("refresh holding expires and never turns an unseen source into forecast cov
  assert.equal(canHoldCertifiedSpatialViewport(prior,next,1,20000-SPATIAL_VIEWPORT_HOLD_MAX_MS,20000),false);
  assert.equal(spatialViewportOverlap(null,next),null);
  assert.equal(spatialViewportOverlap(prior,{...next,west:NaN}),null);
+});
+
+test("visual polish never animates a cached tile, an active pan, a staged batch or startup preview",()=>{
+ assert.equal(shouldPolishSpatialArrival(true,false,true,1,false),true);
+ assert.equal(shouldPolishSpatialArrival(false,false,true,1,false),false,
+   "a Leaflet canvas previously decoded on another pan must not shimmer again");
+ assert.equal(shouldPolishSpatialArrival(true,true,true,1,false),false);
+ assert.equal(shouldPolishSpatialArrival(true,false,false,1,false),false);
+ assert.equal(shouldPolishSpatialArrival(true,false,true,1,true),false);
+ assert.equal(shouldPolishSpatialArrival(true,false,true,0.1,false),false);
+ assert.equal(shouldPolishSpatialArrival(true,false,true,NaN,false),false);
+});
+test("short compositor polish can fail harmlessly without delaying genuine ECMWF tile delivery",()=>{
+ const failed={style:{visibility:"visible"},animate:()=>{throw new Error("WebView cannot animate")}} as SpatialTileNode;
+ assert.equal(softenSpatialTileArrival(failed,true),false);
+ assert.equal(softenSpatialTileArrival(failed,false),false);
 });
