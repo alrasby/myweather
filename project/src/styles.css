@@ -962,3 +962,49 @@ html:not(.light) .wx-search-field::placeholder {
     outline-offset: -2px;
   }
 }
+
+/* Compact visible licensing credit: above the time slider, below map tools;
+ * no blur on the large scrolling/panning map canvas itself. */
+.wx-map-source-credit {
+  position: absolute;
+  left: 0.5rem;
+  bottom: calc(11rem + env(safe-area-inset-bottom, 0px));
+  z-index: 65;
+  display: inline-flex;
+  max-width: calc(100% - 5rem);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  border-radius: 1rem;
+  background: rgb(9 30 47 / 0.88);
+  color: #f7fbff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+  font-size: 0.69rem;
+  line-height: 1.35;
+}
+.wx-map-source-credit a {
+  color: #f7fbff;
+  text-decoration: underline;
+  text-decoration-color: rgb(247 251 255 / 0.5);
+  text-underline-offset: 0.15em;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+.wx-map-source-credit a:focus-visible,
+.wx-source-links a:focus-visible {
+  outline: 3px solid var(--wx-focus);
+  outline-offset: 2px;
+}
+.wx-source-links a {
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.wx-source-links a:active { background: color-mix(in srgb, var(--color-accent) 9%, transparent); }
+@media (max-height: 640px) {
+  .wx-map-source-credit { bottom: calc(9rem + env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wx-source-links a { transition: none; }
+}
