@@ -88,3 +88,25 @@ export function canStageSpatialRefresh(
   }
   return lat / targetHeight >= 0.78 && lon / targetWidth >= 0.78;
 }
+
+
+/** During a small SAME-ZOOM pan, previously certified imagery still covers
+ * most of the current geography. Keep its already-rendered DOM tiles visible
+ * while the exact same ECMWF hour refills the missing edge. Never hold across
+ * zoom changes, large cross-continent pans, provider errors or indefinitely.
+ * This retains no new bitmaps or Float32Arrays on memory-constrained WebViews.
+ */
+export const SPATIAL_VIEWPORT_HOLD_MAX_MS = 7_500;
+
+export function canHoldCertifiedSpatialViewport(
+  previous: SpatialRasterView | null,
+  current: SpatialRasterView,
+  sourceOpacity: number,
+  beganAtMs: number,
+  nowMs: number,
+): boolean {
+  return sourceOpacity > 0.1 && Number.isFinite(nowMs) &&
+    beganAtMs > 0 && nowMs >= beganAtMs &&
+    nowMs - beganAtMs < SPATIAL_VIEWPORT_HOLD_MAX_MS &&
+    canStageSpatialRefresh(previous, current);
+}
