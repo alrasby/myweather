@@ -1059,6 +1059,11 @@ export class ModelField {
   private pump() {
     if (!this.visible || !this.spatialBudget.allow || !this.adapter || !this.map ||
         this.viewportMoving || Date.now() < this.viewportSettleUntil) return;
+    // A verified nearby viewport is already refilling from source. While its
+    // old genuine pixels remain visible, do not compete for the WebView's
+    // three expensive decode slots with speculative next-hour imagery.
+    // The bounded hold expires; completion or the watchdog resumes planning.
+    if (this.frames.get(this.base)?.viewportHeld) return;
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
     const blocked = new Set<number>();
