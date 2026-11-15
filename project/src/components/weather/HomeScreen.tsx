@@ -265,12 +265,12 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           <button
             type="button"
             onClick={locate}
-            className="grid size-11 shrink-0 place-items-center rounded-full"
+            className="grid size-12 shrink-0 place-items-center rounded-full"
             aria-label={t(lang, "locate")}
           >
             <MapPin className={`size-5 ${locating ? "animate-pulse" : ""}`} />
           </button>
-          <button type="button" onClick={onOpenPlaces} className="min-w-0 text-start">
+          <button type="button" onClick={onOpenPlaces} className="min-h-12 min-w-0 flex-1 text-start" aria-label={lang === "ar" ? "اختيار المدينة" : "Choose city"}>
             <span className="block truncate text-base font-semibold leading-tight">{placeTitle(place, lang)}</span>
             <span className="block truncate text-xs leading-tight opacity-80">{placeCountry(place, lang)}</span>
           </button>
