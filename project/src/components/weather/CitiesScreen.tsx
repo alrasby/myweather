@@ -42,7 +42,10 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
     // Local results are synchronous; a short throttle protects the provider
     // while retaining responsive 2-character search on every keypress.
     const delay=window.setTimeout(()=>{
-      const timeout=window.setTimeout(()=>ac.abort(),3600);
+      const timeout=window.setTimeout(()=>{
+        ac.abort();
+        if(current)setRemote(v=>v.query===q?{...v,settled:true}:v);
+      },3600);
       void searchPlaces(q,base,ac.signal,rows=>{
         if(current&&!ac.signal.aborted)setRemote({query:q,hits:rows,settled:false});
       }).then(rows=>{
