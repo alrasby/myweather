@@ -64,6 +64,40 @@ for LEG in 1 2; do
   adb shell screencap -p /sdcard/myweather-viewport.png
   adb pull /sdcard/myweather-viewport.png "$OUT/viewport-pan-$LEG.png" >/dev/null || true
 done
+# Explicit QA-only Leaflet zoom controls permit real low-memory emulator
+# traversal across the wide-scale map. Discover the accessibility bounds
+# rather than guessing display pixels or issuing synthetic model callbacks.
+adb shell uiautomator dump /sdcard/myweather-accessibility.xml >"$OUT/zoom-uiautomator.txt" 2>&1 || true
+adb shell cat /sdcard/myweather-accessibility.xml >"$OUT/zoom-accessibility.xml" 2>/dev/null || true
+for MODE in out out in in; do
+  POSITION=$(python3 - "$OUT/zoom-accessibility.xml" "$MODE" <<'PY'
+import re,sys,xml.etree.ElementTree as ET
+try:
+  root=ET.parse(sys.argv[1]).getroot()
+  target="zoom "+sys.argv[2]
+  for node in root.iter("node"):
+    a=node.attrib
+    label=(a.get("content-desc","")+" "+a.get("text","")).lower()
+    if target not in label:
+      continue
+    m=re.search(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",a.get("bounds",""))
+    if m:
+      x1,y1,x2,y2=map(int,m.groups())
+      print(f"{(x1+x2)//2} {(y1+y2)//2}")
+      break
+except (ET.ParseError,OSError):pass
+PY
+)
+  if [ -z "$POSITION" ]; then
+    echo "Viewport QA incomplete: Leaflet debug Zoom $MODE unavailable in WebView accessibility tree" | tee "$OUT/zoom-verdict.txt"
+    break
+  fi
+  read -r ZX ZY <<<"$POSITION"
+  adb shell input tap "$ZX" "$ZY"
+  sleep 19
+  adb shell screencap -p /sdcard/myweather-zoom.png
+  adb pull /sdcard/myweather-zoom.png "$OUT/viewport-zoom-$MODE-$(date +%s).png" >/dev/null || true
+done
 adb logcat -d >"$OUT/viewport-pan.log"
 python3 - "$OUT/viewport-pan.log" "$OUT/viewport-pan-summary.json" <<'PY'
 import json,sys
@@ -80,6 +114,13 @@ with open(sys.argv[2],"w",encoding="utf-8") as out:
         for rec in records)},out,indent=2)
 if len({r.get("generation") for r in records}) < 2:
     raise SystemExit("Viewport QA incomplete: no two distinct pan generations recorded")
+# A zoom-out must obtain real coverage on a broad viewport AND recover
+# after zooming back in. Old startup frames cannot pass this gate.
+completeZooms=[r.get("mapZoom") for r in records if
+    r.get("afterMs")==16000 and r.get("verifiedComplete") is True
+    and isinstance(r.get("mapZoom"),(int,float))]
+if not any(z<=4 for z in completeZooms) or not any(z>=5 for z in completeZooms):
+    raise SystemExit("Viewport QA incomplete: zoom-out/in source-backed coverage not proven; inspect artifacts")
 if not any(r.get("afterMs")==16000 and r.get("verifiedComplete") is True for r in records):
     raise SystemExit("Viewport QA incomplete: no genuinely complete new viewport after pan; inspect artifact")
 for record in records:
