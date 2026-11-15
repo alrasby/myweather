@@ -130,9 +130,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               );
             }) : (
               <li role="status" className="px-4 py-4 text-center text-sm text-muted">
-                {Array.from(q).length===2 && !local.length
-                  ? lang === "ar" ? "أضف حرفًا ثالثًا للبحث العالمي" : "Type a third letter for worldwide search"
-                  : settled ? t(lang, "noResults")
+                {settled ? t(lang, "noResults")
                   : lang === "ar" ? "جار البحث عن المدينة…" : "Searching for the city…"}
               </li>
             )}

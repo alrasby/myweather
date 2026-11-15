@@ -105,3 +105,12 @@ test("ECMWF viewport raster keeps visible-frame priority and separate read/queue
   assert.ok(src.includes("readP95Ms: pctl(this.readSamples, 0.95)"));
   assert.ok(src.includes("workerQueueP95Ms: pctl(this.workerQueueSamples, 0.95)"));
 });
+
+test("ECMWF cloud/rain reads precede bounded snow fetch without skipping snow",()=>{
+ const model=read("project/src/weather/modelField.ts");
+ assert.ok(model.includes('made[0]!.on("tileload", mountSnow)'));
+ assert.ok(model.includes('made[1]!.on("tileload", mountSnow)'));
+ assert.ok(model.includes("frame.snowStartTimer = window.setTimeout(mountSnow, 1300)"));
+ assert.ok(model.includes('createTileLayer(renderUrl("snowfall_water_equivalent")'));
+ assert.ok(model.includes("coverage.every(item => item.complete)"));
+});

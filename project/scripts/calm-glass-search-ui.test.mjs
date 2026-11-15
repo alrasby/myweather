@@ -100,3 +100,13 @@ test("native plugin gate preserves room for direct recovery even when plugin han
  assert.ok(net.includes('if (nativeInFlight >= MAX_NATIVE_IN_FLIGHT)'));
  assert.ok(net.includes("trackUnstoppableRequest(CapacitorHttp.request"));
 });
+
+test("wilayat aliases and worldwide Latin city fallback are included",()=>{
+ const idx=read("src/weather/places-index.ts");
+ const rank=read("src/weather/placeSearchQuality.ts");
+ const api=read("src/weather/api.ts");
+ assert.ok(idx.includes('["Al Kamil Wal Wafi", "الكامل والوافي"'));
+ assert.ok(idx.includes("...(row[7] ?? [])"));
+ assert.ok(rank.includes("if(score<=0)continue"));
+ assert.ok(api.includes("if(configuredPrivateGeocoder&&local.length===0&&"));
+});

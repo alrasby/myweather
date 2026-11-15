@@ -9,7 +9,7 @@ import { parseMarineSnapshot } from "@/weather/marineTides";
 import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { cityKey, mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
-import { queryLanguage, nonLatinCityQuery } from "@/weather/searchScript";
+import { queryLanguage } from "@/weather/searchScript";
 import { photonCities } from "@/weather/photonCity";
 import { configuredPrivateGeocoder, privateGeocoderUrl } from "@/weather/privateGeocoder";
 import { parseCoordinatePlace } from "@/weather/coordinateSearch";
@@ -751,7 +751,7 @@ export async function searchPlaces(
  ];
  // GeoNames indexing misses some native-script names. Search the bounded
  // OSM city-only fallback only for non-Latin names outside the local index.
- if(configuredPrivateGeocoder&&local.length===0&&nonLatinCityQuery(trimmed)&&
+ if(configuredPrivateGeocoder&&local.length===0&&
     Array.from(trimmed).length>=3)
    requests.push(requestPhoton(trimmed,first,signal,publish));
  await Promise.all(requests);

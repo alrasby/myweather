@@ -1564,8 +1564,13 @@ export class ModelField {
     };
     // If cloud tiles arrive sooner, start snowfall immediately. Otherwise
     // the bounded deadline guarantees snow is requested even on a slow link.
+    // Zoom-6 real-device trace: snowfall completed (2/2) while cloud and
+    // precipitation were 0/2, despite intact network/source metadata.
+    // Prioritize visible rain/cloud source reads. Snow is still requested
+    // after either first real tile or a bounded 1.3-second deadline.
     made[0]!.on("tileload", mountSnow);
-    frame.snowStartTimer = window.setTimeout(mountSnow, 650);
+    made[1]!.on("tileload", mountSnow);
+    frame.snowStartTimer = window.setTimeout(mountSnow, 1300);
   }
 
   /** الساعة الأقدم تخفت بينما الساعة الأحدث تظهر، فتنساب الكتل بدل القفزة. */
