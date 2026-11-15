@@ -1166,6 +1166,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   return (
     <div className="map-stage relative h-full min-h-0 w-full">
       <div ref={hostRef} dir="ltr" className="map-host absolute inset-0" style={{ background: "#101820" }} />
+      {/* Always-visible map-source credit, independent of the hidden diagnostic
+          panel and disabled Leaflet attribution control. No map events/tiles. */}
+      <div className="wx-map-source-credit" dir="ltr"
+        aria-label={lang === "ar" ? "مصادر بيانات الخريطة" : "Map data attribution"}>
+        <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">© Esri</a>
+        <span aria-hidden="true"> · </span>
+        <a href="https://open-meteo.com/en/license" target="_blank" rel="noopener noreferrer">ECMWF / Open-Meteo</a>
+      </div>
       <div className="cyclone-layer" dir="ltr">
         {cycloneMsg ? (
           <button
