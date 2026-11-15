@@ -60,6 +60,8 @@ export type WeatherModelDiagnostics = {
   viewportHeld?: boolean;
   /** Number of truly overlapping source holds in this renderer session. */
   viewportHoldActivations?: number;
+  /** True only while source-certified overlapping DOM tiles are retained during a same-zoom refresh. */
+  viewportHeld?: boolean;
   /** Same-zoom pans that avoided unconditional opacity-zero reset. */
   sameZoomPanPreserved?: number;
   loaded: boolean[];
@@ -933,6 +935,7 @@ export class ModelField {
       holdingPreviousFrame: this.holdingPreviousFrame,
       viewportHeld: frame?.viewportHeld ?? false,
       viewportHoldActivations: this.viewportHoldActivations,
+      viewportHeld: !!frame?.viewportHeld,
       sameZoomPanPreserved: this.sameZoomPanPreserved,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
@@ -1238,6 +1241,10 @@ export class ModelField {
       // strictly bounded time. New tiles remain staged until all variables
       // finish. Never treat this hold as proof of new-viewport completion.
       if (!ready && frame.ready && step === this.base && frame.errored.size === 0 &&
+          // Do not keep an opacity-1 overlay when Leaflet has already
+          // disposed every genuine on-screen tile. Each of the three
+          // independent source layers must still contribute a real tile.
+          coverage.every(item => item.delivered > 0) &&
           canHoldCertifiedSpatialViewport(frame.lastCertifiedView, rasterView(),
             frame.opacity, frame.viewportHoldStartedAt, Date.now())) {
         if (!frame.viewportHeld) this.viewportHoldActivations++;
