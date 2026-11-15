@@ -30,9 +30,13 @@ test("independent z2 real satellite parent covers black holes during broad world
  assert.equal(shouldKeepWorldSatelliteParent(5,false),true);
  assert.equal(shouldKeepWorldSatelliteParent(3,true),true,
    "keep the world parent warm after detail loads to eliminate black satellite gaps on pan");
- assert.equal(shouldKeepWorldSatelliteParent(5,true),false);
- assert.equal(shouldKeepWorldSatelliteParent(6,false),false,
-   "never download a third Esri tile layer above world-scale views");
+ assert.equal(shouldKeepWorldSatelliteParent(5,true),true,
+   "keep tiny real z2 tiles resident after detail first becomes complete");
+ assert.equal(shouldKeepWorldSatelliteParent(6,false),true,
+   "an already-warm z2 parent protects the NEXT regional pan without a remount");
+ assert.equal(shouldKeepWorldSatelliteParent(6,true),true);
+ assert.equal(shouldKeepWorldSatelliteParent(7,false),false,
+   "never start a third satellite grid on new close-up views");
  assert.equal(shouldKeepWorldSatelliteParent(NaN,false),false);
 });
 
@@ -133,20 +137,21 @@ test("low-zoom handoff never removes the z4 source until a REAL z2/detail viewpo
    {underlay:false,worldParent:true},
    "do not mount a redundant z3/4 underlay when both protectors are missing");
 });
-test("z5 and closer map levels retain a z2 parent only until actual z4 or detailed pixels arrive",()=>{
+test("z5/z6 keep a bounded z2 parent warm between pans; z7+ retire only after real replacement",()=>{
  const state={zoom:5,zooming:false,mountedWorld:true,mountedUnderlay:true,
    detailComplete:false,underlayComplete:false,worldComplete:false};
  assert.deepEqual(satelliteHandoffDecision(state),{underlay:true,worldParent:true});
  assert.deepEqual(satelliteHandoffDecision({...state,underlayComplete:true}),
-   {underlay:true,worldParent:false});
+   {underlay:true,worldParent:true},
+   "a completed z5 frame MUST NOT unmount the warm Esri z2 grid ahead of the next distant pan");
  assert.deepEqual(satelliteHandoffDecision({...state,detailComplete:true}),
-   {underlay:true,worldParent:false});
+   {underlay:true,worldParent:true});
  assert.deepEqual(satelliteHandoffDecision({...state,zoom:6,mountedWorld:false}),
    {underlay:true,worldParent:true},
    "cover a long z6 pan with one real tiny z2 source grid while z4/detailed imagery is missing");
  assert.deepEqual(satelliteHandoffDecision({...state,zoom:6,mountedWorld:false,underlayComplete:true}),
-   {underlay:true,worldParent:false},
-   "release extra z2 once genuinely visible z4 source covers zoom6");
+   {underlay:true,worldParent:true},
+   "still warm the tiny z2 source at zoom6 even when the current map is complete");
  assert.deepEqual(satelliteHandoffDecision({...state,zoom:7}),
    {underlay:true,worldParent:true},
    "briefly retain the already-mounted real parent if the new zoom has no z4 coverage");
@@ -191,6 +196,25 @@ test("queue-drain cannot detach authentic z2 background until viewport has actua
    "never discard a source-backed parent solely due to a drained fine request queue");
  underlay._tiles={ready:{current:true,loaded:2,coords:{x:0,y:0,z:4},el:img}};
  assert.equal(snapshotSatelliteRasterCoverage(underlay,5,undefined,view).complete,true);
- assert.deepEqual(coverage(),{underlay:true,worldParent:false},
-   "remove the extra z2 source only after new native-z4 imagery covers all screen cells");
+ assert.deepEqual(coverage(),{underlay:true,worldParent:true},
+   "keep native-z2 parent warm after z5 imagery completes; next pan must never wait for remount");
+});
+
+test("a completed z5 viewport never tears down warm source tiles before the next half-screen pan",()=>{
+ const complete={zoom:5,zooming:false,mountedWorld:true,mountedUnderlay:true,
+   detailComplete:true,underlayComplete:true,worldComplete:true};
+ const nextPan={...complete,detailComplete:false,underlayComplete:false,
+   worldComplete:false};
+ assert.equal(satelliteHandoffDecision(complete).worldParent,true,
+   "the parent must already be mounted before the first missed tile");
+ assert.equal(satelliteHandoffDecision(nextPan).worldParent,true,
+   "coverage loss after movement never forces re-mount of old world imagery");
+ assert.deepEqual(satelliteHandoffDecision({...complete,zoom:6}),
+   {underlay:true,worldParent:true});
+ assert.deepEqual(satelliteHandoffDecision({...complete,zoom:7}),
+   {underlay:true,worldParent:false},
+   "detach only at higher zoom with a real complete source replacement");
+ assert.deepEqual(satelliteHandoffDecision({...nextPan,zoom:7}),
+   {underlay:true,worldParent:true},
+   "higher zoom retains an inherited source-backed parent until replacement completes");
 });
