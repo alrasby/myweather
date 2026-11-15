@@ -18,6 +18,8 @@ export type Place = {
   id: string;
   name: string;
   nameEn?: string;
+  /** Known alternative names for offline multilingual city matching. */
+  aliases?: string[];
   country: string;
   countryEn?: string;
   admin: string;

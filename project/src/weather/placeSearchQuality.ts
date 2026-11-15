@@ -32,9 +32,11 @@ export function mergeCityResults(query:string,local:readonly Place[],remote:read
   if(!Number.isFinite(place.lat)||!Number.isFinite(place.lon)||
      Math.abs(place.lat)>90||Math.abs(place.lon)>180||!place.name.trim())continue;
   if(rows.some(r=>Math.abs(r.place.lat-place.lat)<0.018&&Math.abs(r.place.lon-place.lon)<0.018))continue;
-  const score=Math.max(matchScore(place.name,q),matchScore(place.nameEn??"",q),
-    matchScore(place.admin,q)*0.5,matchScore(place.country,q)*0.35,
-    matchScore(place.countryEn??"",q)*0.35);
+  const names=[place.name,place.nameEn??"",...(place.aliases??[])];
+  const score=Math.max(...names.map(name=>matchScore(name,q)));
+  // Reject unrelated provider suggestions; only a name or verified alias
+  // may qualify a city as a search result, not its country alone.
+  if(score<=0)continue;
   rows.push({place,score,order:rows.length});
  }
  rows.sort((a,b)=>b.score-a.score||a.order-b.order);

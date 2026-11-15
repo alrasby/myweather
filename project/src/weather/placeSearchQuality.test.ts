@@ -60,3 +60,19 @@ test("two-letter city search gives local prefix but never fabricates a worldwide
  assert.ok(searchLocal("دب").some(p=>p.nameEn==="Dubai"||p.nameEn==="Dublin"));
  assert.equal(mergeCityResults("zz",[],[]).length,0);
 });
+
+test("Al Kamil Wal Wafi official wilayat matches Arabic fragments and Latin forms",()=>{
+ for(const term of ["الكامل","الكامل والوافي","الكامل و الوافي",
+    "الوافي","ولاية الكامل والوافي","Al Kamil","Al Kamil Wal Wafi",
+    "Al Kamil Wa Al Wafi"]){
+   const rows=mergeCityResults(term,searchLocal(term),[]);
+   assert.ok(rows.some(p=>p.name==="الكامل والوافي"&&p.country==="سلطنة عمان"),term);
+   assert.ok(rows.some(p=>Math.abs(p.lat-22.2201)<.02&&Math.abs(p.lon-59.2001)<.02),term);
+ }
+});
+test("unrelated remote city names cannot appear among Arabic city suggestions",()=>{
+ const rows=mergeCityResults("طوك",searchLocal("طوك"),[mk("Khartoum",15.5,32.56),mk("Tokyo",35.68,139.7)]);
+ assert.ok(rows.some(p=>p.nameEn==="Tokyo"));
+ assert.ok(!rows.some(p=>p.name==="Khartoum"));
+ assert.deepEqual(mergeCityResults("الكامل",[],[mk("Unrelated",1,1)]),[]);
+});

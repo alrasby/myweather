@@ -1,7 +1,7 @@
 import type { Place } from "@/weather/types";
 
 /** مدن جاهزة حتى يعمل البحث فورًا حتى لو تعذّر الوصول إلى خدمة التكويد. */
-type Seed = [string, string, string, string, number, number, number];
+type Seed = [string, string, string, string, number, number, number, string[]?];
 
 const SEEDS: Seed[] = [
   ["Muscat", "مسقط", "Oman", "سلطنة عمان", 23.588, 58.383, 1560000],
@@ -14,6 +14,12 @@ const SEEDS: Seed[] = [
   ["Buraimi", "البريمي", "Oman", "سلطنة عمان", 24.251, 55.793, 110000],
   ["Duqm", "الدقم", "Oman", "سلطنة عمان", 19.661, 57.704, 20000],
   ["Khasab", "خصب", "Oman", "سلطنة عمان", 26.18, 56.247, 18000],
+  // South Ash Sharqiyah wilayat; coordinates near its main settlement,
+  // not a guessed street address. Distinct aliases share one result.
+  ["Al Kamil Wal Wafi", "الكامل والوافي", "Oman", "سلطنة عمان",
+   22.2201, 59.2001, 38543, ["الكامل", "الوافي", "الكامل و الوافي",
+     "ولاية الكامل والوافي", "Al Kamil", "Al Wafi",
+     "Al Kamil Wa Al Wafi", "Al Kamil W'al Wafi", "Al Kamil Wal-Wafi"]],
   ["Dubai", "دبي", "United Arab Emirates", "الإمارات", 25.205, 55.271, 3600000],
   ["Abu Dhabi", "أبوظبي", "United Arab Emirates", "الإمارات", 24.454, 54.377, 1500000],
   ["Sharjah", "الشارقة", "United Arab Emirates", "الإمارات", 25.346, 55.421, 1800000],
@@ -187,7 +193,9 @@ export function searchLocal(query: string): Place[] {
   if (q.length < 2) return [];
   const ranked = SEEDS.map((row) => {
     const [en, ar, country, countryAr, lat, lon, pop] = row;
-    const fields = [en, ar, country, countryAr].map(fold);
+    // Only actual city/settlement name aliases. Matching each city's
+    // country caused unrelated rows for short Arabic queries.
+    const fields = [en, ar, ...(row[7] ?? [])].map(fold);
     const stem = q.length > 2 ? q.slice(0, -1) : "";
     let score = 0;
     for (const field of fields) {
@@ -206,6 +214,7 @@ export function searchLocal(query: string): Place[] {
       id: `${lat.toFixed(2)},${lon.toFixed(2)}`,
       name: ar,
       nameEn: en,
+      aliases: row[7] ?? [],
       country: countryAr,
       countryEn: country,
       admin: "",
