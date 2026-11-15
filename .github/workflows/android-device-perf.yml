@@ -4,6 +4,7 @@ on:
     branches: [feature/production-geocoder-ecmwf-startup-resource-safety-20261115]
     paths:
       - .github/workflows/android-device-perf.yml
+      - project/scripts/device-perf-smoke.sh
   workflow_dispatch:
 permissions:
   contents: read
