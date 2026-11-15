@@ -24,6 +24,8 @@ export type Place = {
   lat: number;
   lon: number;
   primary: boolean;
+  /** Optional attribution for results from the bounded OSM fallback. */
+  source?: "osm-photon";
 };
 
 export type Prefs = {

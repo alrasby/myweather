@@ -70,7 +70,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{t(lang, "cities")}</h1>
       </header>
       <div className="wx-city-search-wrap mt-2">
-        <Search aria-hidden="true" className="pointer-events-none absolute start-4 top-3.5 size-5 text-muted" />
+        <Search aria-hidden="true" className="wx-city-search-icon pointer-events-none absolute start-4 top-3.5 size-5" />
         <label className="block">
           <span className="sr-only">{t(lang, "searchPh")}</span>
           <input
@@ -130,6 +130,15 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               </li>
             )}
           </ul>
+          {hits.some(hit=>hit.source==="osm-photon") ? (
+            <p className="mt-1.5 px-2 text-[0.67rem] text-on-sky/80">
+              {lang==="ar"?"بيانات أسماء المواقع: ":"Place-name data: "}
+              <a href="https://www.openstreetmap.org/copyright"
+                target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                © OpenStreetMap contributors
+              </a>
+            </p>
+          ) : null}
         </section>
       ) : q ? (
         <p className="px-2 py-2 text-xs text-on-sky/85" role="status">

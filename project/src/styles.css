@@ -1213,3 +1213,13 @@ html:not(.light) .wx-search-field::placeholder {
     background: var(--wx-card-base);
   }
 }
+
+/* Gold search glyph, readable on light/dark Siri-style frosted surfaces. */
+.wx-city-search-wrap .wx-city-search-icon {
+  color: #ad7004;
+  filter: drop-shadow(0 1px 1px rgb(76 45 7 / 0.12));
+}
+html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
+@media (forced-colors: active) {
+  .wx-city-search-wrap .wx-city-search-icon { color: CanvasText; filter: none; }
+}

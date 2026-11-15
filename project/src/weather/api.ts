@@ -9,6 +9,8 @@ import { parseMarineSnapshot } from "@/weather/marineTides";
 import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { cityKey, mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
+import { queryLanguage, nonLatinCityQuery } from "@/weather/searchScript";
+import { photonCities } from "@/weather/photonCity";
 import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -662,6 +664,45 @@ function cacheCities(key:string,rows:Place[]):void {
 /** Local matches are shown immediately by CitiesScreen. Each genuine remote
  * reply progressively updates that view without waiting for slower providers;
  * all updates are guarded by the active AbortSignal. */
+// Public Photon is a DEMO, not a replacement for a contracted/self-hosted
+// production geocoder. Max six native-script fallbacks per minute per device.
+const photonIssued:number[]=[];
+let photonNextAt=0;
+async function requestPhoton(query:string,language:string,signal:AbortSignal|undefined,
+ publish:(places:Place[])=>void):Promise<void>{
+ const now=Date.now();
+ while(photonIssued.length&&now-photonIssued[0]!>60_000)photonIssued.shift();
+ if(photonIssued.length>=6||signal?.aborted)return;
+ const delay=Math.max(0,photonNextAt-now);
+ if(delay>0){
+  await new Promise<void>((resolve)=>{
+   const onAbort=()=>{clearTimeout(timer);resolve();};
+   const timer=setTimeout(()=>{signal?.removeEventListener("abort",onAbort);resolve();},delay);
+   signal?.addEventListener("abort",onAbort,{once:true});
+   if(signal?.aborted)onAbort();
+  });
+ }
+ if(signal?.aborted)return;
+ const at=Date.now();
+ while(photonIssued.length&&at-photonIssued[0]!>60_000)photonIssued.shift();
+ if(photonIssued.length>=6||at<photonNextAt)return;
+ photonIssued.push(at);
+ photonNextAt=at+1400;
+ try{
+  const url=new URL("https://photon.komoot.io/api/");
+  url.searchParams.set("q",query);
+  url.searchParams.set("lang",language);
+  url.searchParams.set("limit","6");
+  url.searchParams.append("layer","city");
+  url.searchParams.append("layer","locality");
+  const res=await proxyFetch(url.toString(),signal);
+  if(!res.ok||signal?.aborted)return;
+  publish(photonCities(await res.json()));
+ }catch{
+  // Demo throttling/offline errors must not erase other geocoder results.
+ }
+}
+
 export async function searchPlaces(
  query:string,lang:string,signal?:AbortSignal,onUpdate?:(rows:Place[])=>void,
 ):Promise<Place[]> {
@@ -678,12 +719,13 @@ export async function searchPlaces(
  if(cached&&cached.expires>Date.now())return cached.rows;
  const incoming:Place[]=[];
  const arabic=/[\u0600-\u06ff]/.test(trimmed);
- const first=arabic?"ar":"en";
- const alternate=arabic?"en":"ar";
+ const first=queryLanguage(trimmed,lang);
+ const alternate=first==="en"?"ar":"en";
  // Arabic search terms are not reliably indexed by their romanization at
  // GeoNames/Open-Meteo. Reuse the trusted bundled city's English alias where
  // its actual Arabic name matches, without guessing a false transliteration.
- const exactAlias=arabic?local.find(p=>p.nameEn&&cityKey(p.name)===cityKey(trimmed))?.nameEn:null;
+ const exactAlias=arabic?local.find(p=>p.nameEn&&
+   cityKey(p.name).startsWith(cityKey(trimmed)))?.nameEn:null;
  const publish=(rows:Place[])=>{
   if(signal?.aborted)return;
   incoming.push(...rows);
@@ -696,10 +738,16 @@ export async function searchPlaces(
  // At most two parallel requests; the fast local result is already visible.
  // One uses the actual typed query; the second resolves the known bilingual
  // alias when possible, not an invented Arabic-to-Latin spelling.
- await Promise.all([
+ const requests=[
    request(trimmed,first),
-   request(exactAlias??trimmed,exactAlias?"en":alternate),
- ]);
+   ...(exactAlias||alternate!==first
+     ? [request(exactAlias??trimmed,exactAlias?"en":alternate)] : []),
+ ];
+ // GeoNames indexing misses some native-script names. Search the bounded
+ // OSM city-only fallback only for non-Latin names outside the local index.
+ if(local.length===0&&nonLatinCityQuery(trimmed)&&Array.from(trimmed).length>=3)
+   requests.push(requestPhoton(trimmed,first,signal,publish));
+ await Promise.all(requests);
  if(signal?.aborted)return local;
  // The canonical form repairs Arabic hamza/diacritic mismatches.
  const canonical=normalizePlaceQuery(trimmed);

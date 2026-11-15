@@ -68,3 +68,12 @@ test("both real 02:00 and 03:00 frames restore smooth slider labels only when vi
     timeMs:timeline,status:"timeline",gapMinutes:1,
   });
 });
+
+test("capture regression: visible ECMWF 13Z must never have a corrected label of 12Z",()=>{
+ const shown=h("2026-11-15T13:00:00.000Z");
+ const requested=h("2026-11-15T12:59:59.910Z");
+ const selected=mapForecastClock(requested,[shown]);
+ assert.equal(selected.timeMs,shown);
+ assert.equal(selected.status,"corrected-real-frame");
+ assert.equal(selected.gapMinutes,0);
+});

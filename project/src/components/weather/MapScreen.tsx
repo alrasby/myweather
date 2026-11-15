@@ -216,15 +216,28 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         modelRef.current?.setSourceBackedFallback(needFallback);
         modelRef.current?.setPlaybackActive(engine.playing);
         modelRef.current?.sync(info.timeMs);
+        // ModelField.sync commits its latest interpolation in a resolved-promise
+        // microtask. The first clock read above happened before that commit and
+        // could label 12:00Z while fully visible ECMWF tiles were 13:00Z.
+        // Read the *committed* source state after its microtask and ignore stale
+        // frame callbacks when the user scrubs rapidly.
+        queueMicrotask(()=>{
+          if(kindRef.current!==2||timelineUtcRef.current!==info.timeMs)return;
+          const clock=modelRef.current?.getMapClock(info.timeMs)??null;
+          visualClockRef.current=clock;
+          if(timeRef.current)
+            timeRef.current.textContent=formatClock(clock?.timeMs??info.timeMs,tzRef.current,langRef.current);
+          const at=performance.now();
+          if(diagnosticsOpenRef.current&&at-diagnosticsTickRef.current>1000){
+            diagnosticsTickRef.current=at;
+            setWeatherDiagnostics(modelRef.current?.diagnostics()??null);
+          }
+        });
         // While the next spatial hour decodes, fetch ONE lightweight genuine
         // world fallback only if the user is actively waiting for playback.
         if (engine.playing && info.playbackWaitingMs >= 1800) rainPlaybackQuickRef.current?.();
       }
       const now = performance.now();
-      if (diagnosticsOpenRef.current && now - diagnosticsTickRef.current > 1000) {
-        diagnosticsTickRef.current = now;
-        setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
-      }
       // Avoid formatting the clock, searching nearby forecast points and
       // rewriting slider labels 60 times/second while large ECMWF raster
       // tiles are decoding on mobile. The model itself still updates above.

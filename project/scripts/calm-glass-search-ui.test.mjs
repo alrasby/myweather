@@ -61,3 +61,13 @@ test("map playback header uses one centered time row with a dedicated value",()=
  assert.ok(row.includes('grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'));
  assert.ok(!row.includes('className="block text-[0.65rem] leading-tight text-muted"'));
 });
+
+test("source-clock correction runs AFTER engine sync and diagnostics describe actually visible opacity",()=>{
+ const sync=map.indexOf("modelRef.current?.sync(info.timeMs)");
+ const committed=map.indexOf("queueMicrotask",sync);
+ const actual=map.indexOf("getMapClock(info.timeMs)",committed);
+ assert.ok(sync>=0&&committed>sync&&actual>committed);
+ const field=read("src/weather/modelField.ts");
+ assert.ok(field.includes("requestedFrameOpacity: frame?.opacity ?? 0"));
+ assert.ok(field.includes("contributors.reduce((sum,[,item])"));
+});

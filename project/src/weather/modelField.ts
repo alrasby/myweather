@@ -68,7 +68,9 @@ export type WeatherModelDiagnostics = {
   currentTileCoverage?: CurrentTileCoverage[];
   stagedTileCount?: number;
   errors: number[];
+  /** Actual sum of visible source-frame weights, NOT the requested base frame. */
   visibleOpacity: number;
+  requestedFrameOpacity?: number;
   metadataAvailable: boolean;
   modelRunPinned: boolean;
   modelRunReferenceTime: string | null;
@@ -939,7 +941,11 @@ export class ModelField {
       currentTileCoverage: frame?.coverageSnapshot?.(),
       stagedTileCount: frame?.tileGates.reduce((total, gate) => total + gate.pending, 0),
       errors: frame?.errorCounts.slice() ?? [0, 0, 0],
-      visibleOpacity: frame?.opacity ?? 0,
+      // During a completed 12→13 UTC crossfade the requested base (12) may
+      // be transparent while frame 13 is fully visible. Do not report zero.
+      visibleOpacity: this.spatialVisible
+        ? Math.min(1,contributors.reduce((sum,[,item])=>sum+Math.max(0,item.opacity),0)) : 0,
+      requestedFrameOpacity: frame?.opacity ?? 0,
       metadataAvailable: this.times.length > 0,
       modelRunPinned: this.pinnedRun !== null,
       modelRunReferenceTime: this.pinnedRun ? new Date(this.pinnedRun.referenceTime).toISOString() : null,
