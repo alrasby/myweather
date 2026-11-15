@@ -16,7 +16,7 @@ export function validatePrivateGeocoderEndpoint(value:unknown):string|null {
 }
 export function privateGeocoderUrl(base:string,query:string,language:string):string {
  const endpoint=validatePrivateGeocoderEndpoint(base);
- if(!endpoint||Array.from(query.trim()).length<3||query.length>160)throw Error("invalid-geocoder-request");
+ if(!endpoint||Array.from(query.trim()).length<2||query.length>160)throw Error("invalid-geocoder-request");
  const url=new URL(endpoint);
  url.searchParams.set("q",query.trim());
  url.searchParams.set("lang",language.match(/^[a-z]{2,3}$/i)?language.toLowerCase():"en");

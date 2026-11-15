@@ -105,7 +105,7 @@ def updater():
 
 def search(q,limit=6):
     key=canonical(q)
-    if not 3<=len(key)<=100:return []
+    if not 2<=len(key)<=100:return []
     with sqlite3.connect("file:"+str(DB)+"?mode=ro",uri=True,timeout=3) as con:
         rows=con.execute("""
           SELECT a.n,a.k,c.id,c.name,c.lat,c.lon,c.country,c.pop
@@ -167,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
             q=args.get("q",[""])[0].strip();lang=args.get("lang",["en"])[0]
             try:limit=min(10,max(1,int(args.get("limit",["6"])[0])))
             except ValueError:self.respond(400,{"error":"bad-limit"});return
-            if not 3<=len(q)<=100 or not re.fullmatch(r"[a-z]{2,3}",lang):
+            if not 2<=len(q)<=100 or not re.fullmatch(r"[a-z]{2,3}",lang):
                 self.respond(400,{"error":"bad-query"});return
             try:items=search(q,limit)
             except sqlite3.Error:self.respond(503,{"error":"index-unavailable"});return

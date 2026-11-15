@@ -42,7 +42,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
     }
     // Two characters are handled exclusively by the synchronous city index.
     // Do not allocate a timer, controller or Android network work for them.
-    if (Array.from(q).length === 2) {
+    if (Array.from(q).length === 2 && local.length > 0) {
       setRemote({query:q,hits:local,settled:true});
       return;
     }
@@ -130,7 +130,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               );
             }) : (
               <li role="status" className="px-4 py-4 text-center text-sm text-muted">
-                {Array.from(q).length===2
+                {Array.from(q).length===2 && !local.length
                   ? lang === "ar" ? "أضف حرفًا ثالثًا للبحث العالمي" : "Type a third letter for worldwide search"
                   : settled ? t(lang, "noResults")
                   : lang === "ar" ? "جار البحث عن المدينة…" : "Searching for the city…"}

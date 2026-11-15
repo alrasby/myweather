@@ -36,7 +36,7 @@ test("city UI permits 2 characters, keeps current results, cancels superseded re
  assert.ok(city.includes("mergeCityResults(q,local,remote.query===q?remote.hits:[])"));
  assert.ok(api.includes("mergeCityResults")&&api.includes("relaxedCityQuery"));
  assert.ok(api.includes("cacheCities(key,result)"));
- assert.ok(api.includes("if(Array.from(trimmed).length===2)return local"));
+ assert.ok(api.includes("if(Array.from(trimmed).length===2&&local.length>0)return local"));
  assert.ok(api.includes("exactAlias"));
 });
 
@@ -88,7 +88,7 @@ test("map and ECMWF workers turn off with tab/background, without disabling save
  assert.ok(s.includes("}, [active, ready, kind]);"));
 });
 test("two-character local search starts no timer or remote provider work",()=>{
- assert.ok(city.includes('if (Array.from(q).length === 2)'));
+ assert.ok(city.includes('if (Array.from(q).length === 2 && local.length > 0)'));
  assert.ok(city.includes('setRemote({query:q,hits:local,settled:true})'));
  assert.ok(city.includes('},165);'));
 });

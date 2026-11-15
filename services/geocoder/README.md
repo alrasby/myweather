@@ -7,7 +7,7 @@ Service is independent from MyWeather Tide Engine. Railway root directory: `/ser
 - `GET /health` returns HTTP 503 until index ready, then version/counts and HTTP 200
 - `GET /api?q=دمشق&lang=ar&limit=6&layer=city&layer=locality` returns GeoJSON FeatureCollection with true GeoNames identifiers and sources
 - GET-only; 12 active DB requests, per-client 45/minute, 480/min service; cache for 10 minutes; CORS on public read-only endpoint; no query/location/IP logging
-- Queries must be at least 3 Unicode characters. The app answers 2-character suggestions from its offline bundled index.
+- Queries must be at least 2 Unicode characters. The app answers 2-character suggestions from its offline bundled index.
 - Search parser translates returned GeoNames features into the application's Place type. Attribution must say © GeoNames, CC BY 4.0 (not OSM for these records).
 
 Run tests: `cd services/geocoder && python -m unittest discover -s tests -v`.

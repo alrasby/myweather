@@ -21,5 +21,6 @@ test("production lookup only sends a bounded city prefix, never a credential",()
  assert.equal(u.searchParams.get("lang"),"ar");
  assert.deepEqual(u.searchParams.getAll("layer"),["city","locality"]);
  assert.equal(u.searchParams.get("limit"),"6");
- assert.throws(()=>privateGeocoderUrl(OWN,"مس","ar"),/invalid-geocoder-request/);
+ assert.ok(privateGeocoderUrl(OWN,"مس","ar").includes("%D9%85%D8%B3"));
+ assert.throws(()=>privateGeocoderUrl(OWN,"م","ar"),/invalid-geocoder-request/);
 });

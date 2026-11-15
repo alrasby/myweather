@@ -673,7 +673,7 @@ async function requestPhoton(query:string,language:string,signal:AbortSignal|und
  publish:(places:Place[])=>void):Promise<void>{
  const now=Date.now();
  while(photonIssued.length&&now-photonIssued[0]!>60_000)photonIssued.shift();
- if(!configuredPrivateGeocoder||photonIssued.length>=6||signal?.aborted)return;
+ if(!configuredPrivateGeocoder||photonIssued.length>=20||signal?.aborted)return;
  const delay=Math.max(0,photonNextAt-now);
  if(delay>0){
   await new Promise<void>((resolve)=>{
@@ -686,9 +686,9 @@ async function requestPhoton(query:string,language:string,signal:AbortSignal|und
  if(signal?.aborted)return;
  const at=Date.now();
  while(photonIssued.length&&at-photonIssued[0]!>60_000)photonIssued.shift();
- if(photonIssued.length>=6||at<photonNextAt)return;
+ if(photonIssued.length>=20||at<photonNextAt)return;
  photonIssued.push(at);
- photonNextAt=at+1400;
+ photonNextAt=at+350;
  try{
   const url=privateGeocoderUrl(configuredPrivateGeocoder!,query,language);
   // CapacitorHttp supports native HTTPS without browser CORS; for the web
@@ -711,7 +711,7 @@ export async function searchPlaces(
  const local=searchLocal(trimmed);
  // The hosted geocoder deliberately matches 2 letters as complete names only;
  // an instant local prefix list is more useful and saves an unnecessary call.
- if(Array.from(trimmed).length===2)return local;
+ if(Array.from(trimmed).length===2&&local.length>0)return local;
  const key=normalizePlaceQuery(trimmed).toLowerCase()+"|"+lang;
  const cached=citySearchCache.get(key);
  if(cached&&cached.expires>Date.now())return cached.rows;
@@ -738,6 +738,12 @@ export async function searchPlaces(
  // At most two parallel requests; the fast local result is already visible.
  // One uses the actual typed query; the second resolves the known bilingual
  // alias when possible, not an invented Arabic-to-Latin spelling.
+ // Open-Meteo handles two letters as full names only. The private GeoNames
+ // index handles real Unicode prefixes, including 東京 and Arabic pairs.
+ if(Array.from(trimmed).length===2) {
+   if(configuredPrivateGeocoder)await requestPhoton(trimmed,first,signal,publish);
+   return mergeCityResults(trimmed,local,incoming);
+ }
  const requests=[
    request(trimmed,first),
    ...(exactAlias||alternate!==first
