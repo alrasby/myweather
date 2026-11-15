@@ -100,11 +100,11 @@ test("15-day card receives subtle polish without changing its structure or basel
   assert.match(effectiveGlass, /\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s);
 });
 
-test("visible version stays 1.0.0 while upgrade-safe Android code advances to 66", () => {
+test("visible version stays 1.0.0 while upgrade-safe Android code advances to 67", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.ok(gradle.includes('versionCode 66') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='66' versionName='1.0.0'"));
+  assert.ok(gradle.includes('versionCode 67') && gradle.includes('versionName "1.0.0"'));
+  assert.ok(workflow.includes("versionCode='67' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
@@ -647,4 +647,17 @@ test("map Home idle warmup shares real ECMWF metadata with the next map attach",
  assert.ok(model.includes("pinSpatialRun(json)"), "preserve source run integrity");
  assert.ok(warm.includes("12_000") && warm.includes("45_000"), "bounded timeout and age");
  assert.ok(!warm.includes("localStorage") && !warm.includes("sessionStorage"), "no stale weather on disk");
+});
+
+test("clock changes are pushed to visible label on authentic ECMWF hour swap", () => {
+  const map=read("project/src/components/weather/MapScreen.tsx");
+  const model=read("project/src/weather/modelField.ts");
+  assert.ok(map.includes("modelRef.current.onClockFrameChanged = refreshSourceClock;"),
+    "new source-hour rendering must notify UI even without another playback tick");
+  assert.ok(map.includes("const liveClock = timeline !== null ? modelRef.current?.getMapClock(timeline)"),
+    "copy diagnostics must sample a fresh source-backed clock");
+  assert.ok(map.includes("mapLabelUtc: liveClock && Number.isFinite(liveClock.timeMs)"),
+    "do not copy stale previously memoized clock state");
+  assert.ok(model.includes("if (dominant !== this.lastClockFrame)"), "clock update is not 20Hz");
+  assert.ok(model.includes("this.onClockFrameChanged?.()"), "clock refresh is delivered");
 });
