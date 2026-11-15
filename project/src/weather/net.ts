@@ -1,5 +1,6 @@
 import { CapacitorHttp } from "@capacitor/core";
 import { proxyWeather } from "@/weather/proxy.functions";
+import { configuredPrivateGeocoder } from "@/weather/privateGeocoder";
 
 function nativeApp(): boolean {
   const cap = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
@@ -143,6 +144,14 @@ async function timedFetch(
 export async function proxyFetch(url: string, signal?: AbortSignal, extra?: Record<string, string>): Promise<Response> {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
   const hdrs = extra ? { ...headers, ...extra } : headers;
+  // A private CORS-enabled geocoder is NOT a weather-proxy URL. Calling the
+  // public weather proxy first always fails its SSRF allowlist and doubles
+  // traffic/time. Use one bounded direct fetch in web; native uses the
+  // existing CapacitorHttp path with its transport budget.
+  const privateGeocoder = configuredPrivateGeocoder &&
+    url.startsWith(configuredPrivateGeocoder + "?");
+  if (privateGeocoder && !nativeApp()) return timedFetch(url, signal, 6000, hdrs);
+
   if (nativeApp()) {
     try {
       const res = await nativePluginFetch(url, signal, 18000, hdrs);
