@@ -549,8 +549,11 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(model.includes("this.viewportRenderer?.clear();"));
  assert.ok(model.includes("if (zoomChanged) {"), "zoom changes must invalidate source grids");
  assert.ok(model.includes("if (cancelledSpeculation) {"), "large same-zoom moves are a separate case");
- assert.ok(model.includes("requested?.invalidateZoom?.(zoom, true)"),
-   "reuse the current hour's genuine raster GridLayer on same-zoom pans");
+ assert.ok(!model.includes("requested?.invalidateZoom?.(zoom, true)"),
+   "never force opacity=0 on the same ECMWF hour and unchanged zoom");
+ assert.ok(model.includes("this.sameZoomPanPreserved++") &&
+           model.includes("canHoldCertifiedSpatialViewport("),
+   "keep georeferenced genuine tiles visible during overlapping same-zoom refresh");
  assert.ok(model.includes("if (step !== this.base) this.discardFrame(step);"),
    "retire obsolete forecast hours without remounting the current one");
  assert.ok(model.includes("cancelledSpeculation = significantSpatialMove(origin,"),
