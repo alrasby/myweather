@@ -34,7 +34,10 @@ export function comparePointWithSpatial(
     ? Date.parse(ecmwfValidTime):NaN;
   const mapTime=iso(mapMs);
   const gap=pointTime&&mapTime?Math.round(Math.abs(point.current.t-mapMs)/60000):null;
-  const sameForecastHour=gap!==null&&gap<=60;
+  // A 16:59 point and a 17:01 map are 2 minutes apart but NOT the same UTC hour.
+  // Never infer source-hour equality from a 60-minute tolerance.
+  const sameForecastHour=gap!==null&&
+    Math.floor(point.current.t/3_600_000)===Math.floor(mapMs/3_600_000);
   const code=point.current?.code;
   const cover=point.current?.cloud;
   return {

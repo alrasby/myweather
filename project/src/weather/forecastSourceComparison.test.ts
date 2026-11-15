@@ -37,3 +37,15 @@ test('unknown old cached provider, missing map frame or invalid values never imp
  assert.equal(x?.sameForecastHour,false);
  assert.equal(comparePointWithSpatial(null,'2026-11-14T16:00:00Z'),null);
 });
+
+test('source comparison cannot label adjacent UTC hour buckets as the same hour',()=>{
+ const lastMinute={...london,current:{...london.current,t:current+59*60000}};
+ const nextHour=comparePointWithSpatial(lastMinute,'2026-11-14T17:01:00Z');
+ assert.equal(nextHour?.absoluteTimeGapMinutes,2);
+ assert.equal(nextHour?.sameForecastHour,false);
+ assert.equal(nextHour?.comparisonScope,'different-forecast-hours');
+ const within=comparePointWithSpatial(lastMinute,'2026-11-14T16:01:00Z');
+ assert.equal(within?.sameForecastHour,true);
+ const boundary=comparePointWithSpatial(london,'2026-11-14T17:00:00Z');
+ assert.equal(boundary?.sameForecastHour,false);
+});

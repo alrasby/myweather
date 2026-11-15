@@ -43,7 +43,9 @@ test("mobile glass keeps small-radius static blur and never modifies map tile ra
  assert.ok(design.includes(".glass-bar") && design.includes(".wx-card"));
  const values=[...design.matchAll(/backdrop-filter:\s*blur\((\d+)px\)/g)]
    .map(m=>Number(m[1]));
- assert.ok(values.length>=2 && values.every(n=>n<=16),"heavy blur harms low-end Android");
+ assert.ok(values.length>=1 && values.every(n=>n<=16),"heavy blur harms low-end Android");
+ assert.match(design,/\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s,"opaque scrolling cards must not force blur");
+ assert.match(design,/prefers-reduced-motion: reduce[\s\S]*?\.glass-bar, \.map-tool\s*\{[^}]*backdrop-filter:\s*none/,"reduced motion disables stationary blur");
  assert.ok(!design.includes("@keyframes") && !design.includes("background-attachment: fixed"));
  assert.ok(!design.includes(".leaflet-tile") && !design.includes(".wx-field"));
 });
@@ -80,4 +82,16 @@ test("attribution is visible, linked and includes the real ECMWF layer and MET N
  assert.ok(i18n.includes("MET Norway") && i18n.includes("ECMWF"));
  assert.ok(i18n.includes("non-commercial")&&i18n.includes("غير التجاري"));
  assert.ok(weather.includes("https://nabdhserv.net"));
+});
+
+test("focus and placeholder ink remain legible across light and dark tonal surfaces",()=>{
+ const focus=role("wx-focus"),card=role("wx-card-base"),search=role("wx-search-surface");
+ for(let i=0;i<2;i++) {
+   assert.ok(contrast(focus[i],card[i])>=3,
+     "focus ring / card "+i+" contrast="+contrast(focus[i],card[i]).toFixed(2));
+   assert.ok(contrast(focus[i],search[i])>=3,
+     "focus ring / search "+i+" contrast="+contrast(focus[i],search[i]).toFixed(2));
+ }
+ assert.ok(contrast("#526c80",search[0])>=4.5);
+ assert.ok(contrast("#c1d5e5",search[1])>=4.5);
 });

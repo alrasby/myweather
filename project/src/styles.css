@@ -335,8 +335,9 @@ html.light {
   color: var(--color-on-sky);
   border: 1px solid rgb(255 255 255 / 0.38);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.42);
-  backdrop-filter: blur(22px) saturate(1.7);
-  -webkit-backdrop-filter: blur(22px) saturate(1.7);
+  /* Small badge does not need a separate expensive blur pass. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .under-status {
@@ -817,7 +818,7 @@ html {
   --wx-elevation: 0 5px 18px rgb(13 38 62 / 0.11);
   --wx-search-surface: #e8f1f9;
   --wx-search-text: #163044;
-  --wx-focus: #f4b83d;
+  --wx-focus: #885000;
 }
 html:not(.light) {
   --wx-card-base: #10283c;
@@ -828,6 +829,7 @@ html:not(.light) {
   --wx-elevation: 0 6px 18px rgb(0 10 25 / 0.18);
   --wx-search-surface: #16344d;
   --wx-search-text: #f4faff;
+  --wx-focus: #f4b83d;
 }
 .glass-bar {
   background: var(--wx-glass-surface);
@@ -847,8 +849,9 @@ html:not(.light) {
   color: var(--wx-card-text);
   border: 1px solid var(--wx-card-outline);
   box-shadow: inset 0 1px 0 var(--wx-card-highlight), var(--wx-elevation);
-  backdrop-filter: blur(10px) saturate(1.12);
-  -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  /* Opaque tonal cards: backdrop blur is invisible but triggers GPU work on scroll. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 html:not(.light) .wx-card {
   --color-fg: var(--wx-card-text);
@@ -941,6 +944,10 @@ html:not(.light) .wx-search-field::placeholder {
   .wx-settings-chips button { padding-inline: 0.35rem; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .glass-bar, .map-tool {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
   .wx-city-row,
   .wx-settings-chips button { transition: none; }
   .wx-bottom-nav > button:active,
