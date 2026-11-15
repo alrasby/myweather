@@ -1,0 +1,91 @@
+name: MyWeather Android low-medium resource evidence
+on:
+  push:
+    branches: [feature/production-geocoder-ecmwf-startup-resource-safety-20261115]
+    paths:
+      - .github/workflows/android-device-perf.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: myweather-low-medium-probe
+  cancel-in-progress: true
+jobs:
+  debug-probe-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - name: Build QA-only debug APK (never production)
+        working-directory: project
+        env:
+          VITE_MYWEATHER_PERF_PROBE: '1'
+          VITE_MYWEATHER_GEOCODER_URL: https://myweather-city-search-production.up.railway.app/api
+        run: |
+          npm ci
+          npm run build:android
+          chmod +x android/gradlew
+          (cd android && ./gradlew --no-daemon :app:assembleDebug)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: myweather-debug-resource-probe
+          path: project/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 2
+  emulator-profiles:
+    needs: debug-probe-apk
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: low-1536mb
+            ram: 1536M
+            heap: 192M
+            cores: 2
+          - profile: medium-3072mb
+            ram: 3072M
+            heap: 256M
+            cores: 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@v4
+        with:
+          name: myweather-debug-resource-probe
+          path: probe
+      - run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Cold startup, source frame, PSS, background and network tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          ram-size: ${{ matrix.ram }}
+          heap-size: ${{ matrix.heap }}
+          cores: ${{ matrix.cores }}
+          disk-size: 6G
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash project/scripts/device-perf-smoke.sh probe/app-debug.apk ${{ matrix.profile }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: myweather-resource-${{ matrix.profile }}
+          path: device-perf-${{ matrix.profile }}/
+          retention-days: 7
