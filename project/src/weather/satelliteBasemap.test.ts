@@ -163,3 +163,32 @@ test("Esri handoff never invents new source imagery for invalid map geometry",()
  assert.deepEqual(satelliteHandoffDecision({...state,zoom:-1}),
    {underlay:true,worldParent:false});
 });
+
+test("queue-drain cannot detach authentic z2 background until viewport has actual z4 pixels",()=>{
+ const img={complete:true,naturalWidth:256};
+ const view={minX:0,maxX:512,minY:0,maxY:256,tileWidth:256,tileHeight:256};
+ const detail={_tileZoom:5,_tiles:{
+   first:{current:true,loaded:1,coords:{x:0,y:0,z:5},el:img},
+ },isLoading:()=>false};
+ const underlay={_tileZoom:4,_tiles:{} as Record<string,unknown>,isLoading:()=>false};
+ const world={_tileZoom:2,_tiles:{
+   earth:{current:true,loaded:1,coords:{x:0,y:0,z:2},el:img},
+ },isLoading:()=>false};
+ const coverage=()=>{
+   const fine=snapshotSatelliteRasterCoverage(detail,5,undefined,view);
+   const low=snapshotSatelliteRasterCoverage(underlay,5,undefined,view);
+   const globe=snapshotSatelliteRasterCoverage(world,5,undefined,view);
+   return satelliteHandoffDecision({zoom:5,zooming:false,mountedUnderlay:true,
+     mountedWorld:true,detailComplete:fine.complete,
+     underlayComplete:low.complete,worldComplete:globe.complete});
+ };
+ assert.equal(snapshotSatelliteRasterCoverage(detail,5,undefined,view).complete,false,
+   "Leaflet load with one actual tile is not complete for two required grid cells");
+ assert.equal(snapshotSatelliteRasterCoverage(world,5,undefined,view).complete,true);
+ assert.deepEqual(coverage(),{underlay:true,worldParent:true},
+   "never discard a source-backed parent solely due to a drained fine request queue");
+ underlay._tiles={ready:{current:true,loaded:2,coords:{x:0,y:0,z:4},el:img}};
+ assert.equal(snapshotSatelliteRasterCoverage(underlay,5,undefined,view).complete,true);
+ assert.deepEqual(coverage(),{underlay:true,worldParent:false},
+   "remove the extra z2 source only after new native-z4 imagery covers all screen cells");
+});
