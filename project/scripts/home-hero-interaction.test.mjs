@@ -401,7 +401,8 @@ test("one viewport generation publishes consistent model layers and retains sate
     handoff.includes("!state.underlayComplete && !state.detailComplete"),
     "keep real Esri source protection until a replacement covers the screen");
   assert.ok(map.includes("if (!decision.underlay && map.hasLayer(underlay)) underlay.remove()") &&
-    map.includes("if (!decision.worldParent && map.hasLayer(worldParent)) worldParent.remove()"),
+    map.includes("if (!decision.worldParent && map.hasLayer(worldParent)) {") &&
+    map.includes("worldParent.remove();"),
     "retire redundant native-z2/z4 grids without leaving opacity-hidden network requests");
   assert.ok(map.includes('layer.on("tileload", syncUnderlay)') &&
     map.includes('layer.on("load", syncUnderlay)'),
