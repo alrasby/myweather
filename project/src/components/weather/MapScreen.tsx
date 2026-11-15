@@ -633,6 +633,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         engine.attach(map);
         engine.setKind(kindRef.current);
         setReady(true);
+        if (import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1")
+          console.info("MYWEATHER_QA_MAP_MOUNT");
       } catch {
         if (!dead) setReady(false);
       }
@@ -666,6 +668,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     }
     modelRef.current?.setVisible(kind === 2);
     engine.setPaused(false);
+    if (import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1" && kind === 2)
+      console.info("MYWEATHER_QA_RAIN_ACTIVE");
     // Refresh the container without an implicit pan/jump after tab activation.
     map.invalidateSize({ pan: false, debounceMoveend: true });
     engine.resize();
