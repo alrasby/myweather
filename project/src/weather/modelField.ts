@@ -58,6 +58,10 @@ export type WeatherModelDiagnostics = {
   holdingPreviousFrame: boolean;
   /** A certified same-zoom source is held while nearby tile edges refresh. */
   viewportHeld?: boolean;
+  /** Number of truly overlapping source holds in this renderer session. */
+  viewportHoldActivations?: number;
+  /** Same-zoom pans that avoided unconditional opacity-zero reset. */
+  sameZoomPanPreserved?: number;
   loaded: boolean[];
   tileCounts: number[];
   /** Actual current Leaflet DOM raster coverage, unlike cumulative tileCounts. */
@@ -525,6 +529,8 @@ export class ModelField {
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
   private viewportHoldUntil = 0;
+  private viewportHoldActivations = 0;
+  private sameZoomPanPreserved = 0;
   private viewportSettleUntil = 0;
   private speculationResumeAt = 0;
   private viewportSettleTimer: number | null = null;
@@ -730,6 +736,7 @@ export class ModelField {
           this.spatialVisible = false;
           this.onMiss?.();
         } else {
+          this.sameZoomPanPreserved++;
           this.viewportHoldUntil = Date.now() + 450;
           this.refreshBase = this.base;
           this.refreshSince = Date.now();
@@ -925,6 +932,8 @@ export class ModelField {
       blendFraction: Number(this.blend.toFixed(3)),
       holdingPreviousFrame: this.holdingPreviousFrame,
       viewportHeld: frame?.viewportHeld ?? false,
+      viewportHoldActivations: this.viewportHoldActivations,
+      sameZoomPanPreserved: this.sameZoomPanPreserved,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
       currentTileCoverage: frame?.coverageSnapshot?.(),
@@ -1226,6 +1235,7 @@ export class ModelField {
       if (!ready && frame.ready && step === this.base && frame.errored.size === 0 &&
           canHoldCertifiedSpatialViewport(frame.lastCertifiedView, rasterView(),
             frame.opacity, frame.viewportHoldStartedAt, Date.now())) {
+        if (!frame.viewportHeld) this.viewportHoldActivations++;
         frame.viewportHeld = true;
         return;
       }
