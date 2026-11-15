@@ -7,7 +7,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: android-${{ github.workflow }}-${{ github.ref }}
+  # Keep the isolated tester RC independent of an orphaned pre-RC runner.
+  # All other PRs/branches retain their original cancellation group.
+  group: ${{ github.event.pull_request.number == 90 && format('android-qa-basemap-{0}', github.ref) || format('android-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 jobs:
   android:
