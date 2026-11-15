@@ -100,11 +100,11 @@ test("15-day card receives subtle polish without changing its structure or basel
   assert.match(effectiveGlass, /\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s);
 });
 
-test("visible version stays 1.0.0 while upgrade-safe Android code advances to 65", () => {
+test("visible version stays 1.0.0 while upgrade-safe Android code advances to 66", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.ok(gradle.includes('versionCode 65') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='65' versionName='1.0.0'"));
+  assert.ok(gradle.includes('versionCode 66') && gradle.includes('versionName "1.0.0"'));
+  assert.ok(workflow.includes("versionCode='66' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
@@ -620,4 +620,29 @@ test("ECMWF source selection rejects CSS-hidden tiles even when Leaflet emits lo
    "a CSS-staged canvas cannot satisfy ready");
  assert.ok(UI.includes("weatherDiagnostics.currentTileCoverage.map"),
    "on-device diagnostics must expose the viewport, not only historical tile counts");
+});
+
+test("richer Home rain remains a single bounded lightweight canvas and never fabricates weather", () => {
+  const sky = read("project/src/components/weather/SkyBackdrop.tsx");
+  const rain = read("project/src/weather/heroRainStreaks.ts");
+  assert.ok(sky.includes('heroRainStreaks(code, plan.coverage, wind)'), "only WMO-driven rain");
+  assert.ok(sky.includes('if (plan.precipitation === "snow")'), "original snow remains");
+  assert.ok(sky.includes('ctx.lineCap = "round"'), "smooth variable-length rain streaks");
+  assert.ok(rain.includes('Math.min(64, Math.round('), "bounded particle count");
+  assert.ok(sky.includes('timer = window.setTimeout(() =>'), "keep existing low-frame-rate scheduler");
+  assert.ok(sky.includes('observer?.disconnect()'), "remove observer after Home unmount");
+});
+
+test("map Home idle warmup shares real ECMWF metadata with the next map attach", () => {
+ const app=read("project/src/components/weather/WeatherApp.tsx");
+ const model=read("project/src/weather/modelField.ts");
+ const warm=read("project/src/weather/spatialMetadataWarmup.ts");
+ assert.ok(app.includes("void loadMapScreen().catch(() => undefined)"));
+ assert.ok(app.includes('prefs.dataSaver') && app.includes('document.hidden'));
+ assert.ok(app.includes("warmSpatialMetadata()"));
+ assert.ok(model.includes("this.ready = readSpatialMetadata()"));
+ assert.ok(model.includes("modelVariablesReady(json.variables)"), "do not accept incomplete ECMWF variables");
+ assert.ok(model.includes("pinSpatialRun(json)"), "preserve source run integrity");
+ assert.ok(warm.includes("12_000") && warm.includes("45_000"), "bounded timeout and age");
+ assert.ok(!warm.includes("localStorage") && !warm.includes("sessionStorage"), "no stale weather on disk");
 });
