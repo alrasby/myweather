@@ -44,7 +44,8 @@ test("global zoom tile footprints match the bounded aligned .om data crop",()=>{
  const world=spatialTileOptions("wx-clouds",true,true);
  assert.equal(world.tileSize,512);
  assert.equal(world.zoomOffset,-1);
- assert.equal(world.keepBuffer,0);
+ assert.equal(world.keepBuffer,1,
+   "retain ONE ring of genuine 512px world-view tiles to stop pan flashing");
  assert.equal(world.maxNativeZoom,12);
  const region=spatialTileOptions("wx-clouds",true,false);
  assert.equal(region.tileSize,1024);
