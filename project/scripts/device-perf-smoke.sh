@@ -18,7 +18,11 @@ for CYCLE in 1 2 3; do
   START=$(grep 'TotalTime:' "$OUT/launch-$CYCLE.txt" | grep -oE '[0-9]+' | tail -1 || true)
   sleep 3
   adb shell input tap "$((WIDTH/2))" "$((HEIGHT-43))"
-  for T in $(seq 1 13); do
+  sleep 4
+  # The Map defaults to Temperature on a fresh install. Explicitly activate
+  # Rain & snow (right-side third layer control) for ECMWF source timing.
+  adb shell input tap "$((WIDTH-31))" "$((HEIGHT/2-4))"
+  for T in $(seq 1 20); do
     sleep 2
     if adb logcat -d | grep -q MYWEATHER_ECMWF_PERF; then break; fi
   done
