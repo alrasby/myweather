@@ -100,6 +100,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const imageryRef = useRef<TileLayer | null>(null);
   const satelliteDiagnosticsRef = useRef<(() => {
     detail: SatelliteRasterCoverage; underlay: SatelliteRasterCoverage; worldParent: SatelliteRasterCoverage;
+    handoff: { protectedActivations: number; releasedAfterCoverage: number; zooming: boolean };
   }) | null>(null);
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
@@ -350,10 +351,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             },
           );
         };
+        let protectedActivations = 0;
+        let releasedAfterCoverage = 0;
+        let wasProtecting = false;
         satelliteDiagnosticsRef.current = () => ({
           detail: tileCoverage(imagery, detailTileErrors),
           underlay: tileCoverage(underlay, underlayTileErrors),
           worldParent: tileCoverage(worldParent, worldParentTileErrors),
+          handoff: {protectedActivations, releasedAfterCoverage, zooming},
         });
 
         // Never tear down a georeferenced parent on a mere Leaflet 'load'
@@ -376,12 +381,23 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               underlayComplete: low.complete,
               worldComplete: world.complete,
             });
+            // Count only distinct source-protection episodes, not every
+            // individual tileload event. The optional copied report can then
+            // prove whether the basemap parent truly survived missing detail.
+            const protection = !zooming && map.getZoom() > 4 &&
+              decision.worldParent && !detail.complete && !low.complete;
+            if (protection && !wasProtecting) protectedActivations++;
+            wasProtecting = protection;
             // Mount protection BEFORE removing anything else. A replacement
             // that has not filled the real screen cannot authorize removal.
             if (decision.underlay && !map.hasLayer(underlay)) underlay.addTo(map);
             if (decision.worldParent && !map.hasLayer(worldParent)) worldParent.addTo(map);
             if (!decision.underlay && map.hasLayer(underlay)) underlay.remove();
-            if (!decision.worldParent && map.hasLayer(worldParent)) worldParent.remove();
+            if (!decision.worldParent && map.hasLayer(worldParent)) {
+              if (!zooming && (low.complete || detail.complete))
+                releasedAfterCoverage++;
+              worldParent.remove();
+            }
           } finally {
             syncingSatellite = false;
           }
