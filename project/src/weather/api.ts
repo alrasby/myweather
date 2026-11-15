@@ -720,7 +720,9 @@ export async function searchPlaces(
  const incoming:Place[]=[];
  const arabic=/[\u0600-\u06ff]/.test(trimmed);
  const first=queryLanguage(trimmed,lang);
- const alternate=first==="en"?"ar":"en";
+ const hanOnly=/\p{Script=Han}/u.test(trimmed) &&
+   !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(trimmed);
+ const alternate=hanOnly?(first==="ja"?"zh":"ja"):first==="en"?"ar":"en";
  // Arabic search terms are not reliably indexed by their romanization at
  // GeoNames/Open-Meteo. Reuse the trusted bundled city's English alias where
  // its actual Arabic name matches, without guessing a false transliteration.

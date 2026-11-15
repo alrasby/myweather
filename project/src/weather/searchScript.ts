@@ -4,7 +4,9 @@ export function queryLanguage(query:string,preferred:string):string {
  if(/\p{Script=Arabic}/u.test(query))return ["ar","fa","ur","ps"].includes(base)?base:"ar";
  if(/\p{Script=Hangul}/u.test(query))return "ko";
  if(/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(query))return "ja";
- if(/\p{Script=Han}/u.test(query))return "zh";
+ // Han characters alone are shared by Chinese and Japanese; UI language is
+ // the only reliable preference, and the geocoder tries the other as fallback.
+ if(/\p{Script=Han}/u.test(query))return base==="ja"?"ja":"zh";
  if(/\p{Script=Cyrillic}/u.test(query))
    return /[іїєґ]/iu.test(query)||base==="uk"?"uk":base==="bg"?"bg":"ru";
  if(/\p{Script=Greek}/u.test(query))return "el";
