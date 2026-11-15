@@ -1,0 +1,144 @@
+name: MyWeather Play candidate — signed AAB and tester APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/android-play-candidate.yml
+      - project/android/app/build.gradle
+      - project/src/weather/buildInfo.ts
+      - project/distribution/**
+      - project/scripts/verify-play-candidate.mjs
+  workflow_dispatch:
+    inputs:
+      upload_internal_draft:
+        description: "Upload AAB as a DRAFT to Google Play INTERNAL testing (requires configured app and scoped Google Play secret)"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: myweather-play-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  signed-play-candidate:
+    # Never expose release keys to a fork or unreviewed PR.
+    if: github.ref == 'refs/heads/main' && github.repository == 'alrasby/myweather'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: play-internal-candidate
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            project/android/**/*.gradle*
+            project/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Install pinned Android SDK components
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      - name: Install locked dependencies
+        working-directory: project
+        run: npm ci
+      - name: Verify Play candidate identity and source privacy guardrails
+        run: node project/scripts/verify-play-candidate.mjs
+      - name: Typecheck and Android WebView build
+        working-directory: project
+        env:
+          VITE_MYWEATHER_GEOCODER_URL: https://myweather-city-search-production.up.railway.app/api
+          VITE_EOT20_TIDE_ENABLED: "0"
+        run: |
+          npm run typecheck
+          npm run build:android
+          node scripts/verify-android-bundle.mjs
+      - name: Build signed Google Play AAB and sideload tester APK
+        working-directory: project/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MYWEATHER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MYWEATHER_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MYWEATHER_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MYWEATHER_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Existing signing key secrets not configured" >&2; exit 1
+          fi
+          trap 'rm -f keystore.properties release.jks' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          chmod 600 release.jks
+          {
+            printf 'storeFile=release.jks\n'
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > keystore.properties
+          chmod 600 keystore.properties
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:bundleRelease :app:assembleRelease
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$AAB" && test -s "$APK"
+          unzip -t "$AAB" >/dev/null
+          jarsigner -verify -strict "$AAB" > /tmp/myweather-aab-verify.log
+          grep -q 'jar verified' /tmp/myweather-aab-verify.log
+          keytool -printcert -jarfile "$AAB" > /tmp/myweather-aab-certificate.txt
+          BUNDLE_CERT="$(sed -n 's/.*SHA256: //p' /tmp/myweather-aab-certificate.txt | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED="3beb5ef19402c3411be1ad094a9f51fea80d3a35e5b92971b47f5f84169a0e91"
+          if [ "$BUNDLE_CERT" != "$EXPECTED" ]; then echo "AAB upload certificate changed unexpectedly" >&2; exit 1; fi
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" > /tmp/myweather-apk-certificate.txt
+          grep -qi "$EXPECTED" /tmp/myweather-apk-certificate.txt
+          BADGING="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | grep -F "name='net.nabdhserv.myweather' versionCode='69' versionName='1.0.0'"
+          printf '%s\n' "$BADGING" | grep -F "targetSdkVersion:'36'"
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK" >/dev/null
+          mkdir -p app/build/outputs/play-candidate
+          cp "$AAB" app/build/outputs/play-candidate/MyWeather-1.0.0-build69-upload.aab
+          cp "$APK" app/build/outputs/play-candidate/MyWeather-1.0.0-build69-test.apk
+          (
+            cd app/build/outputs/play-candidate
+            sha256sum *.aab *.apk > SHA256SUMS.txt
+            printf 'GitHub SHA: %s\npackage: net.nabdhserv.myweather\nversion: 1.0.0\nversionCode: 69\ntargetSdk: 36\nAAB+APK signer SHA256: %s\nPyFES: disabled\nPlay upload: not automatic\n' "$GITHUB_SHA" "$EXPECTED" > RELEASE_INFO.txt
+          )
+      - name: Save private testing artifacts (does not publish to Google Play)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyWeather-PlayCandidate-1.0.0-Build69
+          path: project/android/app/build/outputs/play-candidate/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Require Google Play authorization for explicit internal DRAFT upload
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_internal_draft
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.MYWEATHER_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Play Console integration not yet connected: add MYWEATHER_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON with app-scoped internal testing permissions; upload not attempted." >&2
+            exit 1
+          fi
+      - name: Create Google Play INTERNAL testing DRAFT only (never production)
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_internal_draft
+        uses: r0adkll/upload-google-play@v1.1.4
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.MYWEATHER_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: net.nabdhserv.myweather
+          releaseFiles: project/android/app/build/outputs/play-candidate/MyWeather-1.0.0-build69-upload.aab
+          tracks: internal
+          status: draft
+          releaseName: MyWeather 1.0.0 RC1 (Build 69)
+          changesNotSentForReview: true
+          whatsNewDirectory: project/distribution/whatsnew
