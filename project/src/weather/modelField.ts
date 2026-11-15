@@ -1499,8 +1499,14 @@ export class ModelField {
         // Never gate the entire viewport again: the strict barrier caused a
         // 32.8s first-frame regression on the tested Android WebView. Soften
         // only genuine newly decoded overlay tiles on large pan/zoom updates.
+        // Polish only a genuinely NEW, visible source tile after dragging
+        // settles. Never re-animate a retained Leaflet canvas (which would
+        // cause repeated shimmer on the same forecast pixels). The 110-ms
+        // high-alpha compositor effect is safe on compact Android too.
+        const newTile = event?.tile && !certifiedTiles[index]!.has(event.tile);
         softenSpatialTileArrival(event?.tile as SpatialTileNode | undefined,
-          !this.compactSpatialTiles && frame.ready && frame.opacity > 0.15 && !refreshBatch,
+          !!newTile && !this.viewportMoving && frame.ready &&
+          frame.opacity > 0.15 && !refreshBatch,
           window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
         const since = event?.tile ? tileStart.get(event.tile) : undefined;
         if (since !== undefined) {
