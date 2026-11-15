@@ -300,8 +300,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // global coverage during fast long-distance pans. At z3 the former
         // z4 underlay requested IDENTICAL images as the detail layer, so
         // both went blank together and exposed the #101820 map host.
-        // The z2 parent uses 1/4 as many tiles per dimension and is mounted
-        // ONLY while detailed low-zoom imagery is incomplete.
+        // The native-z2 parent covers four times as many pixels per axis
+        // with each genuine Esri tile. Keeping this tiny grid mounted through
+        // z6 lets a rapid NEXT pan reuse real geo-anchored imagery, instead
+        // of re-mounting it only after a dark screen is already visible.
         const worldParent = L.tileLayer(imageryUrl, {
           maxNativeZoom: SATELLITE_WORLD_PARENT_NATIVE_ZOOM,
           maxZoom: 16, zIndex: -1,
