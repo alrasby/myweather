@@ -170,7 +170,9 @@ test("queue-drain cannot detach authentic z2 background until viewport has actua
  const detail={_tileZoom:5,_tiles:{
    first:{current:true,loaded:1,coords:{x:0,y:0,z:5},el:img},
  },isLoading:()=>false};
- const underlay={_tileZoom:4,_tiles:{} as Record<string,unknown>,isLoading:()=>false};
+ const underlay={_tileZoom:4,_tiles:{} as Record<string,{
+   current:boolean;loaded:number;coords:{x:number;y:number;z:number};el:typeof img
+ }>,isLoading:()=>false};
  const world={_tileZoom:2,_tiles:{
    earth:{current:true,loaded:1,coords:{x:0,y:0,z:2},el:img},
  },isLoading:()=>false};
