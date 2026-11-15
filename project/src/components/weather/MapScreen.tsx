@@ -333,7 +333,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (dead) return;
         leafletRef.current = L;
         map = L.map(el, {
-          zoomControl: false,
+          // Only debug QA APKs expose Leaflet's accessible zoom controls,
+          // so emulator source-coverage tests can traverse 3↔6 without
+          // altering the production map or gesture behaviour.
+          zoomControl: import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1",
           attributionControl: false,
           minZoom: minZoomFor(el),
           maxZoom: 16,
