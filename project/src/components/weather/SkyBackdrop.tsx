@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import moonFace from "@/assets/moon-face.jpg";
 import { heroAtmosphere } from "@/weather/heroAtmosphere";
+import { heroRainStreaks } from "@/weather/heroRainStreaks";
 
 type SkyKind = "clear" | "partly" | "cloud" | "storm";
 type RGB = [number, number, number];
@@ -556,6 +557,7 @@ export function HeroPrecipitation({ code, cover, wind, direction }: {
     if (!ctx) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const sign = Number.isFinite(direction) && Math.sin(direction * Math.PI / 180) > 0 ? -1 : 1;
+    const rainDrops = plan.precipitation === "rain" ? heroRainStreaks(code, plan.coverage, wind) : [];
     let alive = true;
     let visible = !document.hidden;
     let intersecting = true;
@@ -577,30 +579,50 @@ export function HeroPrecipitation({ code, cover, wind, direction }: {
       ctx.setTransform(pw / w, 0, 0, ph / h, 0, 0);
       ctx.clearRect(0, 0, w, h);
       const t = reduceMotion ? 0 : Math.max(0, (now - start) / 1000);
-      // Keep precipitation sparse and in the hero only. It represents WMO
-      // weather state, not fake real-time particle positions over the map.
-      if (plan.precipitation !== "none") {
-        const snow = plan.precipitation === "snow";
+      // Only draw WMO-reported rain or snow in the original upper hero
+      // canvas. Rain positions are precomputed once per condition, not per
+      // frame: no additional canvas, bitmap, timer, API call or 60fps loop.
+      if (plan.precipitation === "snow") {
         const count = Math.round(10 + plan.coverage * 20);
-        const speed = snow ? 11 : 61;
-        ctx.globalAlpha = snow ? 0.69 : 0.33;
-        ctx.lineWidth = snow ? 1.1 : 0.85;
-        ctx.strokeStyle = snow ? "#edf8ff" : "#d5efff";
+        ctx.globalAlpha = 0.69;
         ctx.fillStyle = "#f5fbff";
         for (let i = 0; i < count; i++) {
           const u = ((Math.sin((i + 1) * 63.21) * 43758.5453) % 1 + 1) % 1;
           const v = ((Math.sin((i + 1) * 17.37) * 21732.913) % 1 + 1) % 1;
-          const x = ((u * w + sign * t * (snow ? 2 : 9)) % w + w) % w;
-          const y = ((v * (h + 20) + t * speed * (0.68 + (i % 5) * 0.12)) % (h + 20)) - 10;
-          if (snow) {
+          const x = ((u * w + sign * t * 2) % w + w) % w;
+          const y = ((v * (h + 20) + t * 11 * (0.68 + (i % 5) * 0.12)) % (h + 20)) - 10;
+          ctx.beginPath();
+          ctx.arc(x, y, 0.65 + (i % 3) * 0.32, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (plan.precipitation === "rain") {
+        // Very subtle veil gives the near/far drops depth without affecting
+        // forecast cards, model readings, or requiring expensive blur.
+        ctx.globalAlpha = code >= 95 ? 0.030 : 0.014;
+        ctx.fillStyle = "#d8ebf6";
+        ctx.fillRect(0, 0, w, h);
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#e1f2ff";
+        const area = h + 34;
+        for (const drop of rainDrops) {
+          const driftX = sign * drop.drift;
+          const x = ((drop.x * (w + 24) + driftX * t) % (w + 24) + (w + 24)) % (w + 24) - 12;
+          const y = ((drop.y * area + t * drop.speed) % area + area) % area - 17;
+          const lean = (driftX / drop.speed) * drop.length;
+          ctx.globalAlpha = drop.opacity;
+          ctx.lineWidth = drop.width;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - lean, y + drop.length);
+          ctx.stroke();
+          // Only the sparse close drops have an illuminated bead at the
+          // leading edge; distant fine rain stays subdued on bright clouds.
+          if (drop.depth === 2) {
+            ctx.globalAlpha = drop.opacity * 0.52;
+            ctx.fillStyle = "#f7fcff";
             ctx.beginPath();
-            ctx.arc(x, y, 0.65 + (i % 3) * 0.32, 0, Math.PI * 2);
+            ctx.arc(x - lean, y + drop.length, 0.65, 0, Math.PI * 2);
             ctx.fill();
-          } else {
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineTo(x - sign * 1.5, y + 6.5 + (i % 3));
-            ctx.stroke();
           }
         }
       }
