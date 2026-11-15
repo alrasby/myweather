@@ -197,6 +197,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engine.canAdvanceRainTime = (timeMs) => modelRef.current?.canAdvanceTo(timeMs) ?? true;
     engineRef.current = engine;
     let lastRainLabelAt = 0;
+    // PERF PROBE: embedded ONLY in dedicated debug QA builds. Production
+    // Vite bundles constant-fold this condition out of the shipped app.
+    let probeReported = false;
     const paint = (info: FrameInfo) => {
       timelineUtcRef.current = Number.isFinite(info.timeMs) ? info.timeMs : null;
       visualClockRef.current = kindRef.current === 2
@@ -282,6 +285,29 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           valueRef.current.textContent = info.sample
             ? sampleText(info.sample, kindRef.current, current, language)
             : "—";
+        }
+      }
+      if(import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1" &&
+         !probeReported && kindRef.current===2){
+        const snapshot=modelRef.current?.diagnostics();
+        const firstComplete=snapshot?.startupMs.firstCompleteReady;
+        if(firstComplete!=null&&Number.isFinite(firstComplete)&&
+           snapshot?.visibleOpacity != null && snapshot.visibleOpacity>0.6){
+          probeReported=true;
+          console.info("MYWEATHER_ECMWF_PERF "+JSON.stringify({
+            capturedAt:new Date().toISOString(),
+            startupMs:snapshot.startupMs,
+            source:snapshot.source,
+            frame:snapshot.frame,
+            displayedFrame:snapshot.displayedFrame,
+            sourceReadP95Ms:snapshot.viewportRenderer.readP95Ms,
+            renderP95Ms:snapshot.viewportRenderer.renderP95Ms,
+            sharedDatasetReads:snapshot.viewportRenderer.datasetReadJoins,
+            nativeQueueP95Ms:snapshot.performance.nativeQueue.p95Ms,
+            heapMb:snapshot.performance.runtime.heapUsedMb,
+            modelRunPinned:snapshot.modelRunPinned,
+            visibleOpacity:snapshot.visibleOpacity
+          }));
         }
       }
       const grid = engine.activeGrid();
