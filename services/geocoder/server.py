@@ -14,14 +14,22 @@ LOCK=threading.Lock()
 CALLS=defaultdict(deque)
 TOTAL=deque()
 SLOTS=threading.BoundedSemaphore(12)
+INDEX_REVISION="global-city-aliases-v2"
+# GeoNames ID for this mapped populated place; official Arabic wilayat name
+# and romanizations are curated, not guessed from another town.
+KAMIL_ID=11054689
+KAMIL_ALIASES=("الكامل والوافي","الكامل و الوافي","الكامل","الوافي",
+  "ولاية الكامل والوافي","Al Kamil Wal Wafi","Al Kamil Wa Al Wafi",
+  "Al Kamil","Al Wafi","Al-Kamil Wal-Wafi")
 
 def canonical(s):
     s=unicodedata.normalize("NFKC",s).casefold()
     s="".join(c for c in unicodedata.normalize("NFKD",s)
               if unicodedata.category(c) not in ("Mn","Me","Cf"))
-    return " ".join(s.translate(str.maketrans({
+    s=s.translate(str.maketrans({
       "أ":"ا","إ":"ا","آ":"ا","ٱ":"ا","ى":"ي","ی":"ي","ک":"ك",
-      "ة":"ه","ؤ":"و","ئ":"ي","ـ":""})).split())
+      "ة":"ه","ؤ":"و","ئ":"ي","ـ":""}))
+    return " ".join(re.sub(r"[-_.,'’/]+"," ",s).split())
 
 def make_index(archive,path):
     path=Path(path)
@@ -37,6 +45,21 @@ def make_index(archive,path):
         CREATE TABLE meta(k TEXT PRIMARY KEY,v TEXT);
         """)
         count=alias_count=0
+        found_kamil=False
+        def index_aliases(city_id,names):
+            nonlocal alias_count
+            seen=set()
+            for name in names:
+                label=name.strip()[:120]
+                key=canonical(label)
+                # Index compact Unicode variants in addition to human-spaced
+                # aliases: 'الكامل و الوافي' == 'الكامل والوافي'.
+                for candidate in (key,key.replace(" ","")):
+                    if not 2<=len(candidate)<=100 or candidate in seen or "http" in candidate:
+                        continue
+                    seen.add(candidate)
+                    con.execute("INSERT INTO aliases VALUES(?,?,?)",(candidate,label,city_id))
+                    alias_count+=1
         with zipfile.ZipFile(archive) as z:
             member=next((n for n in z.namelist() if n.endswith("cities1000.txt")),None)
             if not member: raise ValueError("invalid geonames archive")
@@ -50,21 +73,26 @@ def make_index(archive,path):
                     except ValueError:continue
                     con.execute("INSERT INTO cities VALUES(?,?,?,?,?,?)",
                                 (cid,v[1][:120],lat,lon,v[8][:2],pop))
-                    seen=set()
-                    for name in (v[1],v[2],*v[3].split(",")[:160]):
-                        name=name.strip()[:120]
-                        k=canonical(name)
-                        if not 2<=len(k)<=100 or k in seen or "http" in k:continue
-                        seen.add(k)
-                        con.execute("INSERT INTO aliases VALUES(?,?,?)",(k,name,cid))
-                        alias_count+=1
+                    names=(v[1],v[2],*v[3].split(",")[:160])
+                    if cid==KAMIL_ID:
+                        found_kamil=True
+                        names=(*names,*KAMIL_ALIASES)
+                    index_aliases(cid,names)
                     count+=1
                     if count>330_000:raise ValueError("unexpected city count")
+        if not found_kamil:
+            # Source dump can omit an administrative seat. Use its mapped
+            # GeoNames populated-place ID/point, not an invented town.
+            con.execute("INSERT INTO cities VALUES(?,?,?,?,?,?)",
+                        (KAMIL_ID,"Al Kamil Wal Wafi",22.18068,59.22442,"OM",38543))
+            index_aliases(KAMIL_ID,KAMIL_ALIASES)
+            count+=1
         if count<5:raise ValueError("incomplete city archive")
         con.execute("CREATE INDEX alias_prefix ON aliases(k,city_id)")
         con.execute("INSERT INTO meta VALUES('builtUtc',?)",(datetime.now(timezone.utc).isoformat(),))
         con.execute("INSERT INTO meta VALUES('cities',?)",(str(count),))
         con.execute("INSERT INTO meta VALUES('aliases',?)",(str(alias_count),))
+        con.execute("INSERT INTO meta VALUES('indexRevision',?)",(INDEX_REVISION,))
         con.commit()
         return count,alias_count
     finally:con.close()
@@ -72,7 +100,8 @@ def make_index(archive,path):
 def stats():
     with sqlite3.connect("file:"+str(DB)+"?mode=ro",uri=True) as con:
         values=dict(con.execute("SELECT k,v FROM meta"))
-    return {"cities":int(values["cities"]),"aliases":int(values["aliases"]),"version":values["builtUtc"]}
+    return {"cities":int(values["cities"]),"aliases":int(values["aliases"]),
+            "version":values["builtUtc"],"indexRevision":values.get("indexRevision")}
 
 def rebuild():
     ROOT.mkdir(parents=True,exist_ok=True)
@@ -96,7 +125,11 @@ def rebuild():
 def updater():
     while True:
         try:
-            if not DB.exists() or time.time()-DB.stat().st_mtime>30*86400:rebuild()
+            refresh=not DB.exists() or time.time()-DB.stat().st_mtime>30*86400
+            if not refresh:
+                try:refresh=stats().get("indexRevision")!=INDEX_REVISION
+                except (sqlite3.Error,KeyError,ValueError):refresh=True
+            if refresh:rebuild()
             STATE.update(ready=True,error=None,**stats())
         except Exception as e:
             STATE["error"]=type(e).__name__
@@ -106,15 +139,18 @@ def updater():
 def search(q,limit=6):
     key=canonical(q)
     if not 2<=len(key)<=100:return []
+    needles={key,key.replace(" ","")}
+    rows=[]
     with sqlite3.connect("file:"+str(DB)+"?mode=ro",uri=True,timeout=3) as con:
-        rows=con.execute("""
-          SELECT a.n,a.k,c.id,c.name,c.lat,c.lon,c.country,c.pop
-          FROM aliases a JOIN cities c ON c.id=a.city_id
-          WHERE a.k>=? AND a.k<? LIMIT 2500
-        """,(key,key+"\uffff")).fetchall()
+        for needle in needles:
+            rows.extend(con.execute("""
+              SELECT a.n,a.k,c.id,c.name,c.lat,c.lon,c.country,c.pop
+              FROM aliases a JOIN cities c ON c.id=a.city_id
+              WHERE a.k>=? AND a.k<? LIMIT 2500
+            """,(needle,needle+"\uffff")).fetchall())
     best={}
     for display,k,cid,name,lat,lon,country,pop in rows:
-        score=(int(k==key),pop)
+        score=(int(k in needles),int(k.startswith(key)),pop)
         if cid not in best or score>best[cid][0]:
             best[cid]=(score,{"type":"Feature",
               "geometry":{"type":"Point","coordinates":[lon,lat]},

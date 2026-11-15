@@ -47,3 +47,18 @@ class CityIndexTests(unittest.TestCase):
             sample=server.search("Dublin")[0]
             self.assertEqual(sample["properties"]["country"],"IE")
             self.assertAlmostEqual(sample["geometry"]["coordinates"][0],-6.2)
+
+    def test_kamil_wal_wafi_full_and_short_names_across_arabic_spaces(self):
+        with patch.object(server,"DB",self.db):
+            for q in ("الكامل","الكامل والوافي","الكامل و الوافي",
+                      "ولاية الكامل والوافي","Al Kamil","Al Kamil Wa Al Wafi",
+                      "Al-Kamil Wal-Wafi"):
+                got=server.search(q)
+                self.assertTrue(got,q)
+                self.assertEqual(got[0]["properties"]["geonames_id"],11054689,q)
+                self.assertEqual(got[0]["properties"]["country"],"OM",q)
+            self.assertEqual(server.search("zzyyunknowncity"),[])
+    def test_offline_index_revision_requires_atomic_rebuild_after_upgrade(self):
+        with sqlite3.connect(self.db) as con:
+            value=con.execute("SELECT v FROM meta WHERE k='indexRevision'").fetchone()
+        self.assertEqual(value[0],server.INDEX_REVISION)
