@@ -17,14 +17,48 @@ for CYCLE in 1 2 3; do
   adb shell am start -W -n "$PACKAGE/.MainActivity" >"$OUT/launch-$CYCLE.txt"
   START=$(grep 'TotalTime:' "$OUT/launch-$CYCLE.txt" | grep -oE '[0-9]+' | tail -1 || true)
   sleep 3
-  adb shell input tap "$((WIDTH/2))" "$((HEIGHT-43))"
-  sleep 4
-  # The Map defaults to Temperature on a fresh install. Explicitly activate
-  # Rain & snow (right-side third layer control) for ECMWF source timing.
-  adb shell input tap "$((WIDTH-31))" "$((HEIGHT/2-4))"
+  # A real medium-memory emulator trace revealed cycle 2 never LEFT Home:
+  # a blind early tap falsely looked like an ECMWF cold-start failure.
+  # Do not start ECMWF timing until the actual WebView map and rain layer
+  # confirm activation. Retries ONLY navigate to the intended screen;
+  # no source readiness, elapsed time or tile threshold is bypassed.
+  MAP_MOUNTED=0
+  for ATTEMPT in 1 2 3 4 5; do
+    adb shell input tap "$((WIDTH/2))" "$((HEIGHT-43))"
+    for CHECK in 1 2 3; do
+      sleep 1
+      # Consume ALL logcat; grep -q can SIGPIPE adb under pipefail.
+      if adb logcat -d | grep -F 'MYWEATHER_QA_MAP_MOUNT' >/dev/null; then
+        MAP_MOUNTED=1; break
+      fi
+    done
+    if [ "$MAP_MOUNTED" -eq 1 ]; then break; fi
+  done
+  if [ "$MAP_MOUNTED" -ne 1 ]; then
+    adb shell screencap -p /sdcard/myweather-qa.png
+    adb pull /sdcard/myweather-qa.png "$OUT/navigation-failed-$CYCLE.png" >/dev/null || true
+    adb logcat -d >"$OUT/navigation-failed-$CYCLE.log"
+    echo "QA incomplete: Home never navigated to a mounted map in cycle $CYCLE" >&2
+    exit 1
+  fi
+  # Actual third map tool selects Rain/snow. The test cannot pass by
+  # clicking the HOME screen where the same coordinates have no action.
+  RAIN_ACTIVE=0
+  for ATTEMPT in 1 2 3 4; do
+    adb shell input tap "$((WIDTH-31))" "$((HEIGHT/2-4))"
+    sleep 2
+    if adb logcat -d | grep -F 'MYWEATHER_QA_RAIN_ACTIVE' >/dev/null; then
+      RAIN_ACTIVE=1; break
+    fi
+  done
+  if [ "$RAIN_ACTIVE" -ne 1 ]; then
+    adb logcat -d >"$OUT/navigation-failed-$CYCLE.log"
+    echo "QA incomplete: no real Rain/snow layer activation in cycle $CYCLE" >&2
+    exit 1
+  fi
   for T in $(seq 1 20); do
     sleep 2
-    if adb logcat -d | grep -q MYWEATHER_ECMWF_PERF; then break; fi
+    if adb logcat -d | grep -F 'MYWEATHER_ECMWF_PERF ' >/dev/null; then break; fi
   done
   adb logcat -d >"$OUT/logcat-$CYCLE.log"
   # Map icon center lies in the bottom ~48px on 320x640 test renders.
