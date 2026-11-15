@@ -198,6 +198,15 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engine.canAdvanceRainTime = (timeMs) => modelRef.current?.canAdvanceTo(timeMs) ?? true;
     engineRef.current = engine;
     let lastRainLabelAt = 0;
+    const refreshSourceClock = () => {
+      const timeline = timelineUtcRef.current;
+      if (dead || timeline === null || kindRef.current !== 2) return;
+      const clock = modelRef.current?.getMapClock(timeline) ?? null;
+      visualClockRef.current = clock;
+      if (timeRef.current)
+        timeRef.current.textContent = formatClock(clock?.timeMs ?? timeline, tzRef.current, langRef.current);
+    };
+
     // PERF PROBE: embedded ONLY in dedicated debug QA builds. Production
     // Vite bundles constant-fold this condition out of the shipped app.
     let probeReported = false;
@@ -240,10 +249,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // frame callbacks when the user scrubs rapidly.
         queueMicrotask(()=>{
           if(kindRef.current!==2||timelineUtcRef.current!==info.timeMs)return;
-          const clock=modelRef.current?.getMapClock(info.timeMs)??null;
-          visualClockRef.current=clock;
-          if(timeRef.current)
-            timeRef.current.textContent=formatClock(clock?.timeMs??info.timeMs,tzRef.current,langRef.current);
+          refreshSourceClock();
           const at=performance.now();
           if(diagnosticsOpenRef.current&&at-diagnosticsTickRef.current>1000){
             diagnosticsTickRef.current=at;
@@ -579,6 +585,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         }
 
         if (modelRef.current) {
+          // Source hour changes may occur after a tile finishes, outside the
+          // 180ms text throttle; correct the label at the exact visual swap.
+          modelRef.current.onClockFrameChanged = refreshSourceClock;
           // Show one coherent model at a time. The earlier permanent overlap
           // doubled precipitation colours and allowed coarse 72x36 fallback
           // cells to remain visible as rectangles over real ECMWF spatial tiles.
@@ -1402,7 +1411,16 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           </p>
           <button type="button" className="my-1 rounded border border-white/35 px-2 py-1"
             onClick={() => {
+              // Recompute clock against the SAME live model state sampled
+              // for this diagnostic, not an older throttled React ref.
               const report = modelRef.current?.diagnostics();
+              const timeline = timelineUtcRef.current;
+              const liveClock = timeline !== null ? modelRef.current?.getMapClock(timeline) ?? null : null;
+              if (liveClock && kindRef.current === 2) {
+                visualClockRef.current = liveClock;
+                if (timeRef.current)
+                  timeRef.current.textContent = formatClock(liveClock.timeMs, tzRef.current, langRef.current);
+              }
               if (!report || !navigator.clipboard?.writeText) {
                 setCopyStatus(lang === "ar" ? "النسخ غير متاح" : "Clipboard unavailable");
                 return;
@@ -1423,10 +1441,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 mapZoom: currentZoom ?? null,
                 viewportSpanDegrees,
                 mapTimelineUtc: timelineUtcRef.current === null ? null : new Date(timelineUtcRef.current).toISOString(),
-                mapLabelUtc: visualClockRef.current && Number.isFinite(visualClockRef.current.timeMs)
-                  ? new Date(visualClockRef.current.timeMs).toISOString() : null,
-                mapClockStatus: visualClockRef.current?.status ?? null,
-                mapClockGapMinutes: visualClockRef.current?.gapMinutes ?? null,
+                mapLabelUtc: liveClock && Number.isFinite(liveClock.timeMs)
+                  ? new Date(liveClock.timeMs).toISOString() : null,
+                mapClockStatus: liveClock?.status ?? null,
+                mapClockGapMinutes: liveClock?.gapMinutes ?? null,
                 satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
                 // Local point forecast vs global ECMWF can legitimately differ.
