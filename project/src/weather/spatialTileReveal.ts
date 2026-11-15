@@ -20,11 +20,12 @@ export function softenSpatialTileArrival(tile: SpatialTileNode | undefined,
   if (!allowed || reducedMotion || !tile || tile.style.visibility === "hidden" ||
       typeof tile.animate !== "function") return false;
   try {
-    // A very low starting alpha flashes a dark 1024px rectangular patch
-    // over satellite imagery. Keep genuine pixels mostly visible from the
-    // first paint and use only a short compositor transition for the edge.
-    tile.animate([{ opacity: 0.68 }, { opacity: 1 }],
-      { duration: 160, easing: "ease-out" });
+    // Refine the transition without the low-alpha flash visible on mobile:
+    // the genuine ECMWF pixel starts 92% visible, reaches full opacity in
+    // 110 ms, and never changes the forecast's hue, palette, or geometry.
+    // WAAPI is transient: no extra canvas, bitmap, timer or weather read.
+    tile.animate([{ opacity: 0.92 }, { opacity: 1 }],
+      { duration: 110, easing: "ease-out" });
     return true;
   } catch {
     return false;
