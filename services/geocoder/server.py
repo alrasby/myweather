@@ -14,7 +14,7 @@ LOCK=threading.Lock()
 CALLS=defaultdict(deque)
 TOTAL=deque()
 SLOTS=threading.BoundedSemaphore(12)
-INDEX_REVISION="global-city-aliases-v2"
+INDEX_REVISION="global-city-aliases-v3"
 # GeoNames ID for this mapped populated place; official Arabic wilayat name
 # and romanizations are curated, not guessed from another town.
 KAMIL_ID=11054689
@@ -48,18 +48,22 @@ def make_index(archive,path):
         found_kamil=False
         def index_aliases(city_id,names):
             nonlocal alias_count
-            seen=set()
+            selected={}
             for name in names:
                 label=name.strip()[:120]
                 key=canonical(label)
-                # Index compact Unicode variants in addition to human-spaced
-                # aliases: 'الكامل و الوافي' == 'الكامل والوافي'.
                 for candidate in (key,key.replace(" ","")):
-                    if not 2<=len(candidate)<=100 or candidate in seen or "http" in candidate:
+                    if not 2<=len(candidate)<=100 or "http" in candidate:
                         continue
-                    seen.add(candidate)
-                    con.execute("INSERT INTO aliases VALUES(?,?,?)",(candidate,label,city_id))
-                    alias_count+=1
+                    # A compact key generated from 'د مشق' must not suppress
+                    # the later exact, correctly-spaced label 'دمشق'. Pick
+                    # one representative per key AFTER examining all names.
+                    old=selected.get(candidate)
+                    if old is None or (key==candidate and canonical(old)!=candidate):
+                        selected[candidate]=label
+            for candidate,label in selected.items():
+                con.execute("INSERT INTO aliases VALUES(?,?,?)",(candidate,label,city_id))
+                alias_count+=1
         with zipfile.ZipFile(archive) as z:
             member=next((n for n in z.namelist() if n.endswith("cities1000.txt")),None)
             if not member: raise ValueError("invalid geonames archive")
