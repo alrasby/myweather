@@ -53,6 +53,18 @@ export function spatialFrameReadyDuringRefresh(
   return modelTileFrameReady(loaded, errored, deliveredTiles);
 }
 
+/** A partial same-zoom visual hold needs at least one real source-certified
+ * on-screen tile in EACH of the three fields. This does NOT claim full
+ * viewport readiness: existing complete-coverage rules remain unchanged. */
+export function canVisuallyHoldSpatialTiles(
+  layers: readonly {required:number;delivered:number}[],
+): boolean {
+  return layers.length===SPATIAL_LAYER_COUNT && layers.every(item=>
+    Number.isInteger(item.required) && item.required>0 &&
+    Number.isInteger(item.delivered) && item.delivered>0 &&
+    item.delivered<=item.required);
+}
+
 /** Show a real ECMWF cloud layer as soon as its complete viewport arrives,
  * without waiting for separate precipitation/snowfall decoders. Rain and snow
  * remain hidden until their own queues complete; no invented forecast data. */
