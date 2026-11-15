@@ -571,8 +571,18 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                     longitude: bounds.getEast() - bounds.getWest(),
                   },
                 );
+                // Compare the *rendered DOM time label*, not only the
+                // model's internal clock. This catches the real 17Z text /
+                // 18Z dominant raster regression on an actual WebView.
+                const timeline = timelineUtcRef.current;
+                const clock = timeline === null ? null : modelRef.current?.getMapClock(timeline) ?? null;
+                const expectedText = clock
+                  ? formatClock(clock.timeMs, tzRef.current, langRef.current) : null;
+                const renderedText = timeRef.current?.textContent ?? null;
                 console.info("MYWEATHER_ECMWF_VIEWPORT " + JSON.stringify({
                   generation, afterMs, ...result,
+                  sourceClockTextMatches: expectedText !== null &&
+                    renderedText !== null && expectedText === renderedText,
                 }));
               }, afterMs));
             }
