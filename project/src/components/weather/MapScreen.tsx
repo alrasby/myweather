@@ -14,6 +14,7 @@ import { satelliteHandoffDecision, snapshotSatelliteRasterCoverage, type Satelli
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { mapRainReading } from "@/weather/mapRainIndicator";
+import { viewportQaSnapshot } from "@/weather/viewportQa";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
 import { compassFrom } from "@/weather/heading";
@@ -539,6 +540,41 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           imagery.off("tileload", mountLabels);
         });
         modelRef.current?.attach(L, map);
+        // Debug-emulator ONLY. The production bundle removes this branch.
+        // Record genuine per-viewport ECMWF coverage after every settled
+        // pan/zoom, without logging center coordinates or user place names.
+        if (import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1") {
+          const probeMap = map;
+          let viewportGeneration = 0;
+          const pendingProbes: number[] = [];
+          const onProbeViewportSettled = () => {
+            const generation = ++viewportGeneration;
+            for (const timer of pendingProbes.splice(0)) window.clearTimeout(timer);
+            for (const afterMs of [750, 6000, 16000]) {
+              pendingProbes.push(window.setTimeout(() => {
+                if (dead || generation !== viewportGeneration || kindRef.current !== 2) return;
+                const bounds = probeMap.getBounds();
+                const result = viewportQaSnapshot(
+                  modelRef.current?.diagnostics() ?? null,
+                  probeMap.getZoom(),
+                  {
+                    latitude: bounds.getNorth() - bounds.getSouth(),
+                    longitude: bounds.getEast() - bounds.getWest(),
+                  },
+                );
+                console.info("MYWEATHER_ECMWF_VIEWPORT " + JSON.stringify({
+                  generation, afterMs, ...result,
+                }));
+              }, afterMs));
+            }
+          };
+          probeMap.on("moveend", onProbeViewportSettled);
+          probeMap.once("unload", () => {
+            probeMap.off("moveend", onProbeViewportSettled);
+            for (const timer of pendingProbes.splice(0)) window.clearTimeout(timer);
+          });
+        }
+
         if (modelRef.current) {
           // Show one coherent model at a time. The earlier permanent overlap
           // doubled precipitation colours and allowed coarse 72x36 fallback
