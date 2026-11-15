@@ -65,7 +65,7 @@ test("city navigation and settings controls retain UX without redesign", () => {
   const settings = read("project/src/components/weather/SettingsScreen.tsx");
   assert.ok(!home.includes("scroller.current.scrollTop = 0"), "city swipes should not reset vertical scroll");
   for (const field of ["rainFrom", "windFrom", "dustFrom"]) {
-    assert.ok(settings.includes(`<Field label={t(lang, "${field}")}>\n          <Chips\n            disabled={!prefs.alerts}`),
+    assert.ok(settings.includes(`<Field label={t(lang, "${field}")} inline>\n          <Chips\n            disabled={!prefs.alerts}`),
       `${field} must not be keyboard-activatable when alerts are off`);
   }
   assert.ok(settings.includes('aria-label={title}'), "switches need accessible names");
