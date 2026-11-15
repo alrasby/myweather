@@ -77,3 +77,19 @@ test("capture regression: visible ECMWF 13Z must never have a corrected label of
  assert.equal(selected.status,"corrected-real-frame");
  assert.equal(selected.gapMinutes,0);
 });
+
+
+test("real Build 66 zoom-6 frame 18Z corrects an unrefreshed 17Z label near hourly boundary",()=>{
+ const timeline=h("2026-11-15T17:59:54.960Z");
+ const shown=h("2026-11-15T18:00:00.000Z");
+ const clock=mapForecastClock(timeline,[shown],false);
+ assert.deepEqual(clock,{
+   timeMs:shown,status:"corrected-real-frame",gapMinutes:0,
+ });
+});
+
+test("source-change callback must not erase real two-hour interpolation",()=>{
+ const timeline=h("2026-11-15T17:30:00Z");
+ const clock=mapForecastClock(timeline,[h("2026-11-15T17:00:00Z"),h("2026-11-15T18:00:00Z")]);
+ assert.deepEqual(clock,{timeMs:timeline,status:"timeline",gapMinutes:30});
+});
