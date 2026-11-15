@@ -258,6 +258,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           valueRef.current.setAttribute("aria-label",
             (rain.amountMm===null?"—":valueRef.current.textContent)+" · "+title);
         } else {
+          // The same DOM node displays temperature/wind: never leave rain-only
+          // provenance metadata behind when users switch map layers.
+          valueRef.current.removeAttribute("title");
+          valueRef.current.removeAttribute("aria-label");
           valueRef.current.textContent = info.sample
             ? sampleText(info.sample, kindRef.current, current, language)
             : "—";
