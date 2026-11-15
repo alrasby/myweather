@@ -29,5 +29,5 @@ export function privateGeocoderUrl(base:string,query:string,language:string):str
  * and bundled city search continue working; never silently use a public demo.
  */
 export const configuredPrivateGeocoder=validatePrivateGeocoderEndpoint(
- import.meta.env.VITE_MYWEATHER_GEOCODER_URL,
+ import.meta.env?.VITE_MYWEATHER_GEOCODER_URL,
 );
