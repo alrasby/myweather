@@ -11,6 +11,7 @@ import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
 import { cityKey, mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
 import { queryLanguage, nonLatinCityQuery } from "@/weather/searchScript";
 import { photonCities } from "@/weather/photonCity";
+import { configuredPrivateGeocoder, privateGeocoderUrl } from "@/weather/privateGeocoder";
 import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -664,15 +665,15 @@ function cacheCities(key:string,rows:Place[]):void {
 /** Local matches are shown immediately by CitiesScreen. Each genuine remote
  * reply progressively updates that view without waiting for slower providers;
  * all updates are guarded by the active AbortSignal. */
-// Public Photon is a DEMO, not a replacement for a contracted/self-hosted
-// production geocoder. Max six native-script fallbacks per minute per device.
+// Configured private/contracted geocoder. The public Photon DEMO is NEVER
+// called by shipping builds; six fallback lookups/min/device prevent abuse.
 const photonIssued:number[]=[];
 let photonNextAt=0;
 async function requestPhoton(query:string,language:string,signal:AbortSignal|undefined,
  publish:(places:Place[])=>void):Promise<void>{
  const now=Date.now();
  while(photonIssued.length&&now-photonIssued[0]!>60_000)photonIssued.shift();
- if(photonIssued.length>=6||signal?.aborted)return;
+ if(!configuredPrivateGeocoder||photonIssued.length>=6||signal?.aborted)return;
  const delay=Math.max(0,photonNextAt-now);
  if(delay>0){
   await new Promise<void>((resolve)=>{
@@ -689,13 +690,10 @@ async function requestPhoton(query:string,language:string,signal:AbortSignal|und
  photonIssued.push(at);
  photonNextAt=at+1400;
  try{
-  const url=new URL("https://photon.komoot.io/api/");
-  url.searchParams.set("q",query);
-  url.searchParams.set("lang",language);
-  url.searchParams.set("limit","6");
-  url.searchParams.append("layer","city");
-  url.searchParams.append("layer","locality");
-  const res=await proxyFetch(url.toString(),signal);
+  const url=privateGeocoderUrl(configuredPrivateGeocoder!,query,language);
+  // CapacitorHttp supports native HTTPS without browser CORS; for the web
+  // deploy the trusted endpoint with CORS limited to the application origin.
+  const res=await proxyFetch(url,signal);
   if(!res.ok||signal?.aborted)return;
   publish(photonCities(await res.json()));
  }catch{
@@ -747,7 +745,8 @@ export async function searchPlaces(
  ];
  // GeoNames indexing misses some native-script names. Search the bounded
  // OSM city-only fallback only for non-Latin names outside the local index.
- if(local.length===0&&nonLatinCityQuery(trimmed)&&Array.from(trimmed).length>=3)
+ if(configuredPrivateGeocoder&&local.length===0&&nonLatinCityQuery(trimmed)&&
+    Array.from(trimmed).length>=3)
    requests.push(requestPhoton(trimmed,first,signal,publish));
  await Promise.all(requests);
  if(signal?.aborted)return local;

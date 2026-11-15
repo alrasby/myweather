@@ -71,3 +71,11 @@ test("source-clock correction runs AFTER engine sync and diagnostics describe ac
  assert.ok(field.includes("requestedFrameOpacity: frame?.opacity ?? 0"));
  assert.ok(field.includes("contributors.reduce((sum,[,item])"));
 });
+
+test("production lookup never hardcodes the public Photon demo host",()=>{
+ const cfg=read("src/weather/privateGeocoder.ts");
+ assert.ok(cfg.includes("VITE_MYWEATHER_GEOCODER_URL"));
+ assert.ok(cfg.includes("photon.komoot.io"));
+ assert.ok(!api.includes('new URL("https://photon.komoot.io/api/")'));
+ assert.ok(api.includes("configuredPrivateGeocoder&&local.length===0"));
+});
