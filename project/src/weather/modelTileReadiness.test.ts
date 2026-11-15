@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { modelTileFrameReady, modelVariablesReady, spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, SPATIAL_LAYER_COUNT } from "./modelTileReadiness.ts";
+import { modelTileFrameReady, modelVariablesReady, spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, canVisuallyHoldSpatialTiles, SPATIAL_LAYER_COUNT } from "./modelTileReadiness.ts";
 import { SpatialTileReveal, canStageSpatialRefresh } from "./spatialTileReveal.ts";
 
 test("cloud, rain and snowfall must all load successfully", () => {
@@ -104,4 +104,20 @@ test("batch reveal is allowed only when the previous raster still covers the new
   assert.equal(canStageSpatialRefresh(a, { ...a, south: 58, north: 78 }), false);
   assert.equal(canStageSpatialRefresh(a, { ...a, west: 368, east: 398 }), true);
   assert.equal(canStageSpatialRefresh(a, { ...a, east: NaN }), false);
+});
+
+test("only three real, currently delivered ECMWF fields can visually hold across a partial pan",()=>{
+ const count=(required:number,delivered:number)=>({required,delivered});
+ const partial=[count(3,1),count(3,1),count(3,2)];
+ assert.equal(canVisuallyHoldSpatialTiles(partial),true,
+   "real source-backed partial overlap may remain visible but is NOT full readiness");
+ assert.equal(canVisuallyHoldSpatialTiles([count(3,1),count(3,0),count(3,1)]),false);
+ assert.equal(canVisuallyHoldSpatialTiles([count(3,0),count(3,0),count(3,0)]),false);
+ assert.equal(canVisuallyHoldSpatialTiles([count(3,1),count(3,1)]),false);
+ assert.equal(canVisuallyHoldSpatialTiles([count(1,2),count(3,1),count(3,1)]),false);
+ assert.equal(canVisuallyHoldSpatialTiles([count(3,1),count(0,1),count(3,1)]),false);
+ assert.equal(canVisuallyHoldSpatialTiles([count(3,1),count(3,NaN),count(3,1)]),false);
+ assert.equal(spatialFrameReadyDuringRefresh(true,[false,false,false],
+   new Set(),[3,3,3],false),false,
+   "a visual overlap is NOT proof of a complete newly visited geography");
 });
