@@ -4,7 +4,7 @@ import {mapForecastClock,type MapForecastClock} from "@/weather/mapForecastClock
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
 import { planSpatialRequests, canAdvanceSpatialTime, significantSpatialMove } from "@/weather/modelFrameQueue";
-import { SpatialTileReveal, canStageSpatialRefresh, softenSpatialTileArrival, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
+import { SpatialTileReveal, canStageSpatialRefresh, canHoldCertifiedSpatialViewport, softenSpatialTileArrival, type SpatialTileNode, type SpatialRasterView } from "@/weather/spatialTileReveal";
 import { SpatialNativeQueue, spatialNativePriority } from "@/weather/spatialNativeQueue";
 import {canRetainStartedEcmwfRange,certifiedAbortedEcmwfRange} from "@/weather/spatialCanceledRange";
 import { SpatialRangeCache } from "@/weather/spatialRangeCache";
@@ -56,6 +56,8 @@ export type WeatherModelDiagnostics = {
   compositedFrames?: { frame: number; validTime: string; opacity: number }[];
   blendFraction?: number;
   holdingPreviousFrame: boolean;
+  /** A certified same-zoom source is held while nearby tile edges refresh. */
+  viewportHeld?: boolean;
   loaded: boolean[];
   tileCounts: number[];
   /** Actual current Leaflet DOM raster coverage, unlike cumulative tileCounts. */
@@ -499,7 +501,7 @@ export class ModelField {
   private failedUntil = new Map<number, number>();
   private loading = new Set<number>();
   private pendingTimers = new Map<number, number>();
-  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; revalidateCurrentTiles?: () => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; coverageSnapshot?: () => CurrentTileCoverage[]; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number }>();
+  private frames = new Map<number, { layers: AnyLayer[]; token: number; opacity: number; ready: boolean; coverageZoom: number | null; requestedZoom: number; invalidateZoom?: (zoom: number, force?: boolean) => void; revalidateCurrentTiles?: () => void; previewReady: boolean; previewMask: number; previewOpacityKey: string; coverageSnapshot?: () => CurrentTileCoverage[]; loaded: boolean[]; errored: Set<number>; tileCounts: number[]; errorCounts: number[]; layerStartedAt: number[]; layerFirstTileAt: number[]; layerLastTileAt: number[]; layerFinishedAt: number[]; snowStartTimer?: number; tileGates: SpatialTileReveal[]; renderGeneration: SpatialRenderGeneration; layerGeneration: number[]; revealTimer?: number; lastCertifiedView: SpatialRasterView | null; viewportHoldStartedAt: number; viewportHeld: boolean }>();
   private diagnosticMode: WeatherDiagnosticMode = "all";
   private spatialVisible = false;
   private lastDisplayedStep: number | null = null;
@@ -715,18 +717,23 @@ export class ModelField {
         return;
       }
       if (cancelledSpeculation) {
-        // Retire irrelevant forecast hours, but reuse the same-hour GridLayer
-        // and its certified DOM tiles. Full pixel-bounds coverage now rejects
-        // a loaded OLD continent and recovers from true cached current tiles.
+        // SAME-ZOOM continental panning must not force all three ECMWF
+        // GridLayers to opacity=0. The previous code called
+        // invalidateZoom(zoom,true) even when zoom/model hour were unchanged;
+        // that alone caused a black-out and repeated fallback flicker.
+        // Existing canvases remain georeferenced; the deferred full-viewport
+        // proof will still reject tiles belonging to an old continent.
         for (const step of [...this.frames.keys()]) {
           if (step !== this.base) this.discardFrame(step);
         }
-        const requested = this.frames.get(this.base);
-        requested?.invalidateZoom?.(zoom, true);
-        this.orderKey = "";
-        this.spatialVisible = false;
-        this.holdingPreviousFrame = false;
-        this.onMiss?.();
+        if (!this.frames.has(this.base)) {
+          this.spatialVisible = false;
+          this.onMiss?.();
+        } else {
+          this.viewportHoldUntil = Date.now() + 450;
+          this.refreshBase = this.base;
+          this.refreshSince = Date.now();
+        }
         if (this.visible) this.pump();
         return;
       }
@@ -847,7 +854,10 @@ export class ModelField {
     if (this.viewportMoving || Date.now() < this.viewportSettleUntil) return false;
     const { i } = this.bracket(ms);
     const ready = new Set<number>();
-    for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
+    for (const [step, frame] of this.frames) if (frame.ready && !frame.viewportHeld) ready.add(step);
+    // Prior georeferenced source pixels remain visible during a nearby pan,
+    // but must NOT authorize advancing into an unrendered forecast hour.
+    if ([...this.frames.values()].some(frame => frame.viewportHeld && frame.opacity > 0.1)) return false;
     const blocked = new Set<number>();
     for (const [step, until] of this.failedUntil) if (until > Date.now()) blocked.add(step);
     return canAdvanceSpatialTime(i, ready, blocked, this.loading, this.sourceBackedFallback);
@@ -914,6 +924,7 @@ export class ModelField {
           })) : [],
       blendFraction: Number(this.blend.toFixed(3)),
       holdingPreviousFrame: this.holdingPreviousFrame,
+      viewportHeld: frame?.viewportHeld ?? false,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
       currentTileCoverage: frame?.coverageSnapshot?.(),
@@ -1180,6 +1191,9 @@ export class ModelField {
       renderGeneration: new SpatialRenderGeneration(),
       layerGeneration: Array<number>(SPATIAL_LAYER_COUNT).fill(0),
       revealTimer: undefined as number | undefined,
+      lastCertifiedView: null as SpatialRasterView | null,
+      viewportHoldStartedAt: 0,
+      viewportHeld: false,
     };
     this.frames.set(step, frame);
     if (!this.anyReady()) this.onMiss?.();
@@ -1205,6 +1219,17 @@ export class ModelField {
         frame.tileGates.every(gate => gate.pending === 0);
       const ready = spatialFrameReadyDuringRefresh(
         frame.ready, frame.loaded, frame.errored, frame.tileCounts, coverageCertified);
+      // If previously certified source tiles still cover >=78% of a nearby
+      // same-zoom viewport, keep their REAL mapped pixels visible for a
+      // strictly bounded time. New tiles remain staged until all variables
+      // finish. Never treat this hold as proof of new-viewport completion.
+      if (!ready && frame.ready && step === this.base && frame.errored.size === 0 &&
+          canHoldCertifiedSpatialViewport(frame.lastCertifiedView, rasterView(),
+            frame.opacity, frame.viewportHoldStartedAt, Date.now())) {
+        frame.viewportHeld = true;
+        return;
+      }
+      frame.viewportHeld = false;
       // Keep current genuine fallback until all three ECMWF layers finish,
       // rather than visibly replacing them in three separate passes.
       const preview = !this.compactSpatialTiles &&
@@ -1230,7 +1255,11 @@ export class ModelField {
       if (ready === frame.ready) {
         // On a successful viewport refresh the existing frame stays visible;
         // resume prefetch once all queues finish, without hiding its imagery.
-        if (ready && frame.loaded.every(Boolean)) this.pump();
+        if (ready && frame.loaded.every(Boolean)) {
+          frame.lastCertifiedView = rasterView();
+          frame.viewportHoldStartedAt = 0;
+          this.pump();
+        }
         // First real cloud tiles can paint immediately while rain/snow finish.
         // Avoid repainting on every individual tileload event.
         if (previewChanged && step === this.base) this.applyOpacity();
@@ -1243,6 +1272,8 @@ export class ModelField {
       frame.ready = ready;
       this.orderKey = "";
       if (ready) {
+        frame.lastCertifiedView = rasterView();
+        frame.viewportHoldStartedAt = 0;
         frame.coverageZoom = map.getZoom();
         frame.requestedZoom = map.getZoom();
         if (step === this.base && this.firstCompleteReadyMs === null) {
@@ -1286,7 +1317,14 @@ export class ModelField {
       const previousTick = this.pendingTimers.get(step);
       if (previousTick !== undefined) window.clearTimeout(previousTick);
       this.pendingTimers.delete(step);
-      if (!alive() || frame.ready) return;
+      if (!alive()) return;
+      // Revalidate current pixel bounds, not just a previous viewport's
+      // success. An already-ready frame can enter a new pan without a
+      // fresh tileload callback when Leaflet reuses existing DOM canvases.
+      if (frame.ready) {
+        refresh();
+        if (frame.ready && !frame.viewportHeld) return;
+      }
       // Leaflet may finish its active tile queue while a moveend has
       // invalidated the former generation's load callback. Recover only
       // when real tiles for THIS layer were delivered and GridLayer reports
@@ -1316,7 +1354,7 @@ export class ModelField {
         }
         refresh();
       }
-      if (frame.ready) return;
+      if (frame.ready && !frame.viewportHeld) return;
       if (spatialFrameTimedOut(Date.now(), startedAt, lastProgressAt)) {
         giveUp();
         return;
@@ -1330,6 +1368,9 @@ export class ModelField {
     frame.invalidateZoom = (zoom, force = false) => {
       if (!alive() || (!force && !spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom))) return;
       frame.requestedZoom = zoom;
+      frame.viewportHeld = false;
+      frame.viewportHoldStartedAt = 0;
+      frame.lastCertifiedView = null;
       // A newly zoomed viewport must not inherit a historical layer's
       // cumulative tile count. That marked a frame ready with zero new
       // delivered tiles and left broken rectangular ECMWF patches.
@@ -1389,6 +1430,7 @@ export class ModelField {
         // A new loading generation supersedes the old state for this
         // particular variable, even if other variables still show old tiles.
         frame.layerGeneration[index] = frame.renderGeneration.loading(index);
+        if (frame.ready && !frame.viewportHoldStartedAt) frame.viewportHoldStartedAt = Date.now();
         if (frame.revealTimer !== undefined) window.clearTimeout(frame.revealTimer);
         frame.revealTimer = undefined;
         refreshBatch = (frame.ready || frame.previewReady) &&
@@ -1439,7 +1481,7 @@ export class ModelField {
         // 32.8s first-frame regression on the tested Android WebView. Soften
         // only genuine newly decoded overlay tiles on large pan/zoom updates.
         softenSpatialTileArrival(event?.tile as SpatialTileNode | undefined,
-          frame.ready && frame.opacity > 0.15 && !refreshBatch,
+          !this.compactSpatialTiles && frame.ready && frame.opacity > 0.15 && !refreshBatch,
           window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
         const since = event?.tile ? tileStart.get(event.tile) : undefined;
         if (since !== undefined) {
