@@ -141,6 +141,12 @@ test("z5 and closer map levels retain a z2 parent only until actual z4 or detail
    {underlay:true,worldParent:false});
  assert.deepEqual(satelliteHandoffDecision({...state,detailComplete:true}),
    {underlay:true,worldParent:false});
+ assert.deepEqual(satelliteHandoffDecision({...state,zoom:6,mountedWorld:false}),
+   {underlay:true,worldParent:true},
+   "cover a long z6 pan with one real tiny z2 source grid while z4/detailed imagery is missing");
+ assert.deepEqual(satelliteHandoffDecision({...state,zoom:6,mountedWorld:false,underlayComplete:true}),
+   {underlay:true,worldParent:false},
+   "release extra z2 once genuinely visible z4 source covers zoom6");
  assert.deepEqual(satelliteHandoffDecision({...state,zoom:7}),
    {underlay:true,worldParent:true},
    "briefly retain the already-mounted real parent if the new zoom has no z4 coverage");
