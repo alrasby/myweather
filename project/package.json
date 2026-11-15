@@ -25,7 +25,7 @@
     "build:android": "vite build --config vite.android.config.ts && npx cap sync android",
     "prebuild": "node scripts/build-shoreline.mjs",
     "prebuild:android": "node scripts/build-shoreline.mjs",
-    "qa:release": "node --test scripts/design-quality.test.mjs scripts/device-qa-evidence.test.mjs && node --experimental-strip-types --test src/weather/displayQuality.test.ts src/weather/forecastVerification.test.ts src/weather/forecastSourceComparison.test.ts src/weather/mapForecastClock.test.ts"
+    "qa:release": "node --test scripts/design-quality.test.mjs scripts/calm-glass-search-ui.test.mjs scripts/device-qa-evidence.test.mjs && node --experimental-strip-types --test src/weather/placeSearchQuality.test.ts src/weather/displayQuality.test.ts src/weather/forecastVerification.test.ts src/weather/forecastSourceComparison.test.ts src/weather/mapForecastClock.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",

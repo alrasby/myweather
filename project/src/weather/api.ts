@@ -8,6 +8,7 @@ import { proxyFetch } from "@/weather/net";
 import { parseMarineSnapshot } from "@/weather/marineTides";
 import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
+import { mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
 import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -611,13 +612,6 @@ export function loadWeather(
   return job;
 }
 
-function searchLangs(query: string, lang: string): string[] {
-  const arabic = /[\u0600-\u06FF]/.test(query);
-  const first = arabic ? "ar" : lang || "en";
-  const second = arabic ? "en" : "ar";
-  return first === second ? [first] : [first, second];
-}
-
 async function geocode(name: string, language: string, signal?: AbortSignal): Promise<Place[]> {
   const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
   url.searchParams.set("name", name);
@@ -635,7 +629,11 @@ async function geocode(name: string, language: string, signal?: AbortSignal): Pr
       return [];
     }
   }
-  return (json.results ?? []).map((row) => {
+  if (!json || typeof json !== "object" || !Array.isArray(json.results)) return [];
+  return json.results.filter((row) => {
+    const lat = Number(row.latitude), lon = Number(row.longitude);
+    return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat)<=90 && Math.abs(lon)<=180 && typeof row.name==="string" && row.name.trim().length>0;
+  }).map((row) => {
     const lat = Number(row.latitude);
     const lon = Number(row.longitude);
     return {
@@ -652,44 +650,59 @@ async function geocode(name: string, language: string, signal?: AbortSignal): Pr
   });
 }
 
-function mergePlaces(local: Place[], remote: Place[]): Place[] {
-  const out: Place[] = [];
-  const seen = new Set<string>();
-  const key = (place: Place) => `${place.lat.toFixed(2)},${place.lon.toFixed(2)}`;
-  for (const place of [...local, ...remote]) {
-    const id = key(place);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(place);
-    if (out.length >= 12) break;
-  }
-  return out;
+// Small bounded in-memory cache: returning to an exact query is immediate.
+const citySearchCache = new Map<string,{ expires:number; rows:Place[] }>();
+const CITY_CACHE_TTL=3*60_000;
+function cacheCities(key:string,rows:Place[]):void {
+ citySearchCache.delete(key);
+ citySearchCache.set(key,{expires:Date.now()+CITY_CACHE_TTL,rows});
+ if(citySearchCache.size>36)citySearchCache.delete(citySearchCache.keys().next().value!);
 }
 
-export async function searchPlaces(query: string, lang: string, signal?: AbortSignal): Promise<Place[]> {
-  const trimmed = query.trim();
-  if (trimmed.length < 2) return [];
-  // Worldwide point search: work even if the target is a tiny island, sea
-  // coordinate or absent from all city-name/geocoding providers.
-  const coordinates = parseCoordinatePlace(trimmed);
-  if (coordinates) return [coordinates];
-  const local = searchLocal(trimmed);
-  const forms = [trimmed];
-  const folded = normalizePlaceQuery(trimmed);
-  if (folded && folded !== trimmed) forms.push(folded);
-  const jobs: Promise<Place[]>[] = [];
-  for (const form of forms) {
-    for (const language of searchLangs(form, lang)) {
-      jobs.push(
-        geocode(form, language, signal).catch((err) => {
-          if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
-          return [];
-        }),
-      );
-    }
-  }
-  const remote = (await Promise.all(jobs)).flat();
-  return mergePlaces(local, remote);
+/** Local matches are shown immediately by CitiesScreen. Each genuine remote
+ * reply progressively updates that view without waiting for slower providers;
+ * all updates are guarded by the active AbortSignal. */
+export async function searchPlaces(
+ query:string,lang:string,signal?:AbortSignal,onUpdate?:(rows:Place[])=>void,
+):Promise<Place[]> {
+ const trimmed=query.trim();
+ if(Array.from(trimmed).length<2)return [];
+ const coordinate=parseCoordinatePlace(trimmed);
+ if(coordinate)return [coordinate];
+ const local=searchLocal(trimmed);
+ const key=normalizePlaceQuery(trimmed).toLowerCase()+"|"+lang;
+ const cached=citySearchCache.get(key);
+ if(cached&&cached.expires>Date.now())return cached.rows;
+ const incoming:Place[]=[];
+ const first=/[\u0600-\u06ff]/.test(trimmed)?"ar":(lang==="ar"?"ar":"en");
+ const languages=first==="ar"?["ar","en"]:["en","ar"];
+ const publish=(rows:Place[])=>{
+  if(signal?.aborted)return;
+  incoming.push(...rows);
+  if(rows.length)onUpdate?.(mergeCityResults(trimmed,local,incoming));
+ };
+ const request=async (name:string,language:string)=>{
+  try{publish(await geocode(name,language,signal));}
+  catch(e){if(signal?.aborted || (e instanceof Error&&e.name==="AbortError"))return;}
+ };
+ // Two provider language views are enough for responsive bilingual lookup.
+ // Open-Meteo matches only exact names for 2 chars, prefix for 3+ (official API).
+ await Promise.all(languages.map(language=>request(trimmed,language)));
+ if(signal?.aborted)return local;
+ // The canonical form repairs Arabic hamza/diacritic mismatches.
+ const canonical=normalizePlaceQuery(trimmed);
+ if(!incoming.length&&canonical!==trimmed){
+  await request(canonical,first);
+ }
+ // A full name that fails by its final character can still return its true
+ // location via Open-Meteo's prefix index; never expand a 2-letter query.
+ if(!incoming.length){
+  const relaxed=relaxedCityQuery(trimmed);
+  if(relaxed&&relaxed!==trimmed&&relaxed!==canonical)await request(relaxed,first);
+ }
+ const result=mergeCityResults(trimmed,local,incoming);
+ if(!signal?.aborted)cacheCities(key,result);
+ return result;
 }
 
 export function placeFromCoords(lat: number, lon: number, name: string, country = "", admin = ""): Place {

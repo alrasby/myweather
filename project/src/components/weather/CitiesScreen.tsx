@@ -1,7 +1,8 @@
 import { Check, ChevronDown, ChevronLeft, ChevronUp, Plus, Star, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { searchPlaces } from "@/weather/api";
 import { searchLocal } from "@/weather/places-index";
+import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { placeCountry, placeTitle } from "@/weather/format";
 import { t } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
@@ -18,53 +19,40 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
   const makePrimary = useWeather((s) => s.makePrimary);
   const setActive = useWeather((s) => s.setActive);
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<Place[]>([]);
-  const [settled, setSettled] = useState(false);
+  const [remote, setRemote] = useState<{query:string;hits:Place[];settled:boolean}>({query:"",hits:[],settled:false});
+  const q=query.trim();
+  const local=useMemo(()=>parseCoordinatePlace(q)?[parseCoordinatePlace(q)!]:searchLocal(q),[q]);
+  // Render the matching query only: React effects run after paint, so stale
+  // rows from a just-completed old request must never flash under new input.
+  const hits=remote.query===q?remote.hits:local;
+  const settled=remote.query===q&&remote.settled;
   const kept = (hit: Place) =>
     places.some((p) => p.id === hit.id || (Math.abs(p.lat - hit.lat) < 0.02 && Math.abs(p.lon - hit.lon) < 0.02));
 
   const base = textBase();
 
   useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setHits([]);
-      setSettled(false);
+    if (Array.from(q).length < 2) {
+      setRemote({query:q,hits:[],settled:false});
       return;
     }
     const ac = new AbortController();
-    const local = searchLocal(q);
-    setHits(local);
-    setSettled(false);
-    let ignore = false;
-    let killer = 0;
-    const timer = window.setTimeout(() => {
-      killer = window.setTimeout(() => {
-        ignore = true;
-        ac.abort();
-        setHits(local);
-        setSettled(true);
-      }, 4000);
-      void searchPlaces(q, base, ac.signal)
-        .then((rows) => {
-          if (ignore) return;
-          setHits(rows.length ? rows : local);
-          setSettled(true);
-        })
-        .catch(() => {
-          if (ignore) return;
-          setHits(local);
-          setSettled(true);
-        })
-        .finally(() => window.clearTimeout(killer));
-    }, 100);
-    return () => {
-      ignore = true;
-      ac.abort();
-      window.clearTimeout(timer);
-      window.clearTimeout(killer);
-    };
-  }, [query, base]);
+    let current = true;
+    setRemote({query:q,hits:local,settled:false});
+    // Local results are synchronous; a short throttle protects the provider
+    // while retaining responsive 2-character search on every keypress.
+    const delay=window.setTimeout(()=>{
+      const timeout=window.setTimeout(()=>ac.abort(),3600);
+      void searchPlaces(q,base,ac.signal,rows=>{
+        if(current&&!ac.signal.aborted)setRemote({query:q,hits:rows,settled:false});
+      }).then(rows=>{
+        if(current&&!ac.signal.aborted)setRemote({query:q,hits:rows,settled:true});
+      }).catch(()=>{
+        if(current)setRemote(v=>v.query===q?{...v,settled:true}:v);
+      }).finally(()=>window.clearTimeout(timeout));
+    },90);
+    return ()=>{current=false;window.clearTimeout(delay);ac.abort();};
+  },[q,base,local]);
 
   return (
     <div className="wx-city-screen h-full overflow-y-auto px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)] pt-3">
@@ -87,10 +75,10 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
           className="wx-search-field h-12 w-full rounded-full px-4 text-sm outline-none"
         />
       </label>
-      {query.trim().length >= 2 ? (
+      {Array.from(q).length >= 2 ? (
         <section className="mt-3">
           <p className="mb-1.5 px-2 text-[0.72rem] font-medium text-muted">{t(lang, "searchResults")}</p>
-          <ul id="wx-city-search-results" className="wx-card divide-y divide-line">
+          <ul id="wx-city-search-results" aria-busy={!settled && hits.length === 0} className="wx-card divide-y divide-line">
           {settled && hits.length === 0 ? (
             <li role="status" className="px-4 py-3 text-sm text-muted">{t(lang, "noResults")}</li>
           ) : (

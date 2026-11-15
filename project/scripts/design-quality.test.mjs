@@ -56,10 +56,12 @@ test("48px mobile touch targets, keyboard focus, contrast and reduced motion are
  assert.ok(cities.includes("wx-city-action")&&cities.includes("h-12 w-12"));
  assert.ok(cities.includes('type="search"')&&cities.includes('aria-controls="wx-city-search-results"'));
  assert.ok(settings.includes("min-h-12 w-full")&&settings.includes('role="switch"'));
- assert.ok(settings.includes("translate-x-7 rtl:-translate-x-7"));
+ assert.ok(settings.includes("wx-settings-toggle") && settings.includes("wx-toggle-thumb"));
  assert.ok(design.includes(":focus-visible") && design.includes("prefers-reduced-motion") &&
    design.includes("prefers-contrast: more") && design.includes("forced-colors: active"));
  assert.ok(design.includes("max-width: 360px"));
+ assert.ok(settings.includes("wx-sources-details") && settings.includes("<details"));
+ assert.ok(design.includes(".wx-settings-toggle[aria-checked="));
 });
 test("Arabic and English, city actions, forecast panels and stored settings retain behavior",()=>{
  assert.ok(app.includes("root.dir = ui.dir") && app.includes("root.lang = ui.tag"));

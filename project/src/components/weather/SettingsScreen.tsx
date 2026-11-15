@@ -1,4 +1,5 @@
 import { t } from "@/weather/i18n";
+import { ChevronDown } from "lucide-react";
 import { useWeather } from "@/weather/store";
 import type { Lang, MorningAt, Prefs, QuietHours, RefreshMin, ShadeKind } from "@/weather/types";
 import { useEffect, useState, type ReactNode } from "react";
@@ -16,7 +17,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
   }, []);
 
   return (
-    <div className="wx-settings h-full overflow-y-auto px-3.5 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-3">
+    <div className="wx-settings h-full overflow-y-auto px-3 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-2.5">
       <Card title={t(lang, "appearance")}>
         <Field label={t(lang, "language")}>
           <Chips
@@ -99,7 +100,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         {widgetReady ? (
           <button
             type="button"
-            className="wx-settings-action rounded-2xl border border-line px-3 py-3 text-start"
+            className="wx-settings-action min-h-12 rounded-xl border border-line px-3 py-2.5 text-start"
             onClick={() => {
               const bridge = (window as unknown as { AndroidWidget?: { openSettings?: () => void } }).AndroidWidget;
               bridge?.openSettings?.();
@@ -217,8 +218,12 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         <Toggle on={prefs.storms} title={t(lang, "storms")} hint={t(lang, "stormsHint")} onClick={() => setPrefs({ storms: !prefs.storms })} />
       </Card>
 
-      <section className="wx-card wx-settings-card mb-3 px-4 py-4">
-        <h2 className="text-[0.95rem] font-semibold text-fg">{t(lang, "sources")}</h2>
+      <details className="wx-card wx-settings-card wx-sources-details mb-2.5 px-3.5 py-3">
+        <summary className="wx-sources-summary flex min-h-12 cursor-pointer items-center justify-between gap-2 text-[0.9rem] font-semibold text-fg">
+          {t(lang, "sources")}
+          <ChevronDown aria-hidden="true" className="wx-sources-chevron size-4 shrink-0" />
+        </summary>
+        <div className="wx-sources-content">
         <p className="mt-1.5 text-[0.75rem] leading-relaxed text-muted">{t(lang, "sourcesBody")}</p>
         <nav aria-label={lang === "ar" ? "روابط المصادر والتراخيص" : "Sources and licenses"}
           className="wx-source-links mt-3 flex flex-wrap gap-2">
@@ -245,7 +250,8 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         >
           {notice === "cleared" ? t(lang, "cleared") : t(lang, "clearCache")}
         </button>
-      </section>
+        </div>
+      </details>
       <div className="flex justify-center pb-1 pt-1">
         <p dir="ltr" className="credit credit-glass inline-flex items-center gap-1 rounded-full px-3 py-1 text-[0.68rem] font-medium">
           Made with <span className="text-danger">♥</span> By NabdhServ.Net
@@ -257,9 +263,9 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="wx-card wx-settings-card mb-3 px-4 py-4">
+    <section className="wx-card wx-settings-card mb-2.5 px-3.5 py-3">
       <h2 className="flex items-center gap-2 text-[0.95rem] font-semibold tracking-tight text-fg"><span aria-hidden="true" className="wx-settings-dot" />{title}</h2>
-      <div className="mt-3.5 flex flex-col gap-4">{children}</div>
+      <div className="mt-2.5 flex flex-col gap-2.5">{children}</div>
     </section>
   );
 }
@@ -267,7 +273,7 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <p className="mb-2 text-[0.75rem] font-medium text-muted">{label}</p>
+      <p className="mb-1 text-[0.75rem] font-medium text-muted">{label}</p>
       {children}
     </div>
   );
@@ -290,7 +296,7 @@ function Chips<T extends string>({
   const grid = Boolean(cols && options.length > cols);
   return (
     <div
-      className={`chip-track wx-settings-chips gap-1 p-1 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "opacity-45" : ""}`}
+      className={`chip-track wx-settings-chips gap-0.5 p-0.5 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "opacity-45" : ""}`}
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {options.map(([id, label]) => {
@@ -300,7 +306,7 @@ function Chips<T extends string>({
             key={id}
             type="button"
             onClick={() => onChange(id)}
-            className={`flex min-h-12 w-full items-center justify-center rounded-full px-2 py-1.5 text-center text-[0.78rem] leading-tight ${on ? "chip-on font-semibold" : "text-fg/85"}`}
+            className={`flex min-h-12 w-full items-center justify-center rounded-full px-1.5 py-1 text-center text-[0.76rem] leading-snug ${on ? "chip-on font-semibold" : "text-fg/85"}`}
             aria-pressed={on}
             disabled={disabled}
           >
@@ -314,10 +320,10 @@ function Chips<T extends string>({
 
 function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: string; hint?: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <div className={`flex items-center gap-3 border-t border-line pt-3.5 ${disabled ? "opacity-45" : ""}`}>
+    <div className={`wx-settings-toggle-row flex items-center gap-2.5 border-t border-line pt-2 ${disabled ? "opacity-45" : ""}`}>
       <div className="min-w-0 flex-1">
         <p className="text-[0.8rem] font-semibold leading-snug text-fg">{title}</p>
-        {hint ? <p className="mt-0.5 text-[0.72rem] leading-relaxed text-muted">{hint}</p> : null}
+        {hint ? <p className="mt-0.5 text-[0.72rem] leading-snug text-muted">{hint}</p> : null}
       </div>
       <button
         type="button"
@@ -326,9 +332,9 @@ function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: st
         aria-checked={on}
         disabled={disabled}
         onClick={onClick}
-        className={`flex h-12 w-16 shrink-0 items-center rounded-full p-1 ${on ? "bg-chip" : "bg-line"}`}
+        className="wx-settings-toggle grid h-12 w-12 shrink-0 place-items-center rounded-xl"
       >
-        <span className={`size-7 rounded-full bg-on-sky shadow-sm transition-transform ${on ? "translate-x-7 rtl:-translate-x-7" : ""}`} />
+        <span className="wx-toggle-track" aria-hidden="true"><span className="wx-toggle-thumb" /></span>
       </button>
     </div>
   );

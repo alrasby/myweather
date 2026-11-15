@@ -1166,14 +1166,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   return (
     <div className="map-stage relative h-full min-h-0 w-full">
       <div ref={hostRef} dir="ltr" className="map-host absolute inset-0" style={{ background: "#101820" }} />
-      {/* Always-visible map-source credit, independent of the hidden diagnostic
-          panel and disabled Leaflet attribution control. No map events/tiles. */}
-      <div className="wx-map-source-credit" dir="ltr"
-        aria-label={lang === "ar" ? "مصادر بيانات الخريطة" : "Map data attribution"}>
-        <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">© Esri</a>
-        <span aria-hidden="true"> · </span>
-        <a href="https://open-meteo.com/en/license" target="_blank" rel="noopener noreferrer">ECMWF / Open-Meteo</a>
-      </div>
       <div className="cyclone-layer" dir="ltr">
         {cycloneMsg ? (
           <button
@@ -1566,6 +1558,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </button>
             </div>
           ) : null}
+          {/* Real provider credit remains visible, compact and attached to the
+              playback card so phone height/RTL never creates floating gaps. */}
+          <div className="wx-map-source-credit pointer-events-auto" dir="ltr"
+            aria-label={lang === "ar" ? "مصادر بيانات الخريطة" : "Map data attribution"}>
+            <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">© Esri</a>
+            <span aria-hidden="true"> · </span>
+            <a href="https://open-meteo.com/en/license" target="_blank" rel="noopener noreferrer">ECMWF / Open-Meteo</a>
+          </div>
           <div className="wx-card map-bar pointer-events-auto px-2 py-1.5">
             <div className="flex items-center gap-2" dir="ltr">
               <button
