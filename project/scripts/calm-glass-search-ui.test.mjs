@@ -63,10 +63,13 @@ test("map playback header uses one centered time row with a dedicated value",()=
 });
 
 test("source-clock correction runs AFTER engine sync and diagnostics describe actually visible opacity",()=>{
+ const helper=map.indexOf("const refreshSourceClock = () => {");
+ const sourceClock=map.indexOf("getMapClock(timeline)",helper);
  const sync=map.indexOf("modelRef.current?.sync(info.timeMs)");
  const committed=map.indexOf("queueMicrotask",sync);
- const actual=map.indexOf("getMapClock(info.timeMs)",committed);
- assert.ok(sync>=0&&committed>sync&&actual>committed);
+ const actual=map.indexOf("refreshSourceClock();",committed);
+ assert.ok(helper>=0&&sourceClock>helper&&sync>sourceClock&&committed>sync&&actual>committed,
+   "post-sync microtask must refresh the live ECMWF clock through shared source-aware helper");
  const field=read("src/weather/modelField.ts");
  assert.ok(field.includes("requestedFrameOpacity: frame?.opacity ?? 0"));
  assert.ok(field.includes("contributors.reduce((sum,[,item])"));
