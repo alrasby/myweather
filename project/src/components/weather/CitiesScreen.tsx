@@ -67,9 +67,9 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
   }, [query, base]);
 
   return (
-    <div className="h-full overflow-y-auto px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)] pt-3">
+    <div className="wx-city-screen h-full overflow-y-auto px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)] pt-3">
       <header className="glass-bar sticky top-3 z-20 mb-4 flex items-center gap-2 rounded-full p-1.5">
-        <button type="button" onClick={onClose} className="grid size-11 place-items-center rounded-full" aria-label={t(lang, "back")}>
+        <button type="button" onClick={onClose} className="grid size-12 place-items-center rounded-full" aria-label={t(lang, "back")}>
           <ChevronLeft className="size-5 rtl:rotate-180" />
         </button>
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{t(lang, "cities")}</h1>
@@ -77,30 +77,34 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
       <label className="mt-4 block">
         <span className="sr-only">{t(lang, "searchPh")}</span>
         <input
+          type="search"
+          inputMode="search"
+          autoComplete="off"
+          aria-controls="wx-city-search-results"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t(lang, "searchPh")}
-          className="h-12 w-full rounded-full border border-line bg-surface-solid/65 px-4 text-on-sky outline-none placeholder:text-on-sky/60"
+          className="wx-search-field h-12 w-full rounded-full px-4 text-sm outline-none"
         />
       </label>
       {query.trim().length >= 2 ? (
         <section className="mt-3">
           <p className="mb-1.5 px-2 text-[0.72rem] font-medium text-muted">{t(lang, "searchResults")}</p>
-          <ul className="wx-card divide-y divide-line">
+          <ul id="wx-city-search-results" className="wx-card divide-y divide-line">
           {settled && hits.length === 0 ? (
-            <li className="px-4 py-3 text-sm text-muted">{t(lang, "noResults")}</li>
+            <li role="status" className="px-4 py-3 text-sm text-muted">{t(lang, "noResults")}</li>
           ) : (
             hits.map((hit) => {
               const saved = kept(hit);
               return (
-              <li key={hit.id} className="flex items-center gap-3 px-3 py-2">
+              <li key={hit.id} className="wx-city-row flex items-center gap-3 px-3 py-2">
                 <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { /* Preview only: saving requires the separate + button. */ viewPlace(hit); setQuery(""); onClose(); }}>
                   <p className="truncate text-sm text-fg">{placeTitle(hit, lang)}</p>
                   <p className="truncate text-xs text-muted">{[hit.admin, placeCountry(hit, lang)].filter(Boolean).join(" · ")}</p>
                 </button>
                 <button
                   type="button"
-                  className="flex h-11 w-11 items-center justify-center text-accent disabled:opacity-80"
+                  className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-accent disabled:opacity-80"
                   aria-label={saved ? t(lang, "saved") : t(lang, "save")}
                   disabled={saved}
                   onClick={() => addPlace(hit, null, { activate: false })}
@@ -120,7 +124,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
         {places.map((place, index) => {
           const on = place.id === activeId;
           return (
-            <li key={place.id} className="wx-card flex items-center gap-2 px-3 py-2">
+            <li key={place.id} className="wx-card wx-city-row flex items-center gap-2 px-2 py-2">
               <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { setActive(place.id); onClose(); }}>
                 <p className={`truncate text-sm ${on ? "text-accent" : "text-fg"}`}>{placeTitle(place, lang)}</p>
                 <p className="truncate text-xs text-muted">
@@ -128,16 +132,16 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
                   {placeCountry(place, lang)}
                 </p>
               </button>
-              <button type="button" className="flex h-11 w-11 items-center justify-center text-muted" aria-label={t(lang, "up")} disabled={index === 0} onClick={() => movePlace(place.id, -1)}>
+              <button type="button" className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-muted" aria-label={t(lang, "up")} disabled={index === 0} onClick={() => movePlace(place.id, -1)}>
                 <ChevronUp className="size-4" />
               </button>
-              <button type="button" className="flex h-11 w-11 items-center justify-center text-muted" aria-label={t(lang, "down")} disabled={index === places.length - 1} onClick={() => movePlace(place.id, 1)}>
+              <button type="button" className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-muted" aria-label={t(lang, "down")} disabled={index === places.length - 1} onClick={() => movePlace(place.id, 1)}>
                 <ChevronDown className="size-4" />
               </button>
-              <button type="button" className="flex h-11 w-11 items-center justify-center text-accent" aria-label={t(lang, "makePrimary")} onClick={() => makePrimary(place.id)}>
+              <button type="button" className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-accent" aria-label={t(lang, "makePrimary")} onClick={() => makePrimary(place.id)}>
                 <Star className={`size-4 ${place.primary ? "fill-accent" : ""}`} />
               </button>
-              <button type="button" className="flex h-11 w-11 items-center justify-center text-muted" aria-label={t(lang, "delete")} onClick={() => removePlace(place.id)}>
+              <button type="button" className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-muted" aria-label={t(lang, "delete")} onClick={() => removePlace(place.id)}>
                 <Trash2 className="size-4" />
               </button>
             </li>
