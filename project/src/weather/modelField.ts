@@ -55,6 +55,14 @@ export type WeatherModelDiagnostics = {
   displayedValidTime: string | null;
   /** Source-backed frames participating in an authentic temporal blend. */
   compositedFrames?: { frame: number; validTime: string; opacity: number }[];
+  /** Every actually contributing source hour with its OWN certified DOM
+   * coverage. Base-hour coverage alone is insufficient at an hour rollover. */
+  compositedViewportCoverage?: {
+    frame: number;
+    validTime: string;
+    opacity: number;
+    coverage: CurrentTileCoverage[];
+  }[];
   blendFraction?: number;
   holdingPreviousFrame: boolean;
   /** A certified same-zoom source is held while nearby tile edges refresh. */
@@ -937,6 +945,15 @@ export class ModelField {
         ? contributors.map(([step, item]) => ({
             frame: step, validTime: new Date(this.times[step]!).toISOString(),
             opacity: Number(item.opacity.toFixed(3)),
+          })) : [],
+      // A user trace showed requested 17Z almost invisible while 18Z was
+      // 100% visible. Audit the DOM tiles of the ACTUALLY displayed frame,
+      // not stale/transparent requested-hour tiles.
+      compositedViewportCoverage: this.spatialVisible
+        ? contributors.map(([step, item]) => ({
+            frame: step, validTime: new Date(this.times[step]!).toISOString(),
+            opacity: item.opacity,
+            coverage: item.coverageSnapshot?.() ?? [],
           })) : [],
       blendFraction: Number(this.blend.toFixed(3)),
       holdingPreviousFrame: this.holdingPreviousFrame,
