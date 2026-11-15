@@ -5,19 +5,19 @@
  * may appear at the boundaries between separately transformed images.
  */
 export const SATELLITE_UNDERLAY_NATIVE_ZOOM = 4;
-/** Broad world pans must not display the dark map host while all detailed
- * Esri tile requests are still pending. A z2 parent is a REAL satellite tile,
- * not a fake background; it is kept only while low-zoom detail is incomplete.
- * Importantly, do not request a third satellite grid at close zoom levels. */
+/** A real native-z2 Esri grid keeps a tiny, geographically anchored parent
+ * resident through successive world and regional pans. Re-mounting it only
+ * after fine images vanish exposes a black viewport in the intervening frames.
+ * Keep it warm through z6; beyond that, only a previously mounted parent may
+ * survive until a genuine replacement is available. */
 export const SATELLITE_WORLD_PARENT_NATIVE_ZOOM = 2;
 export function shouldKeepWorldSatelliteParent(zoom: number, detailedReady: boolean): boolean {
-  // At z3–z4 the native z4 parent requests the very SAME Esri image as
-  // the detailed layer. A z2 parent must remain mounted and warm even after
-  // detail initially becomes ready: a global fling can otherwise expose
-  // the black map host before Leaflet emits the next 'loading' event.
-  // Zoom5 already has a distinct, permanent native-z4 parent.
-  return Number.isFinite(zoom) && zoom >= 0 &&
-    (zoom <= 4 || (zoom === 5 && !detailedReady));
+  // Formerly the z2 grid was removed as soon as z4/detail was ready.
+  // The next distant pan then had to FETCH the protection again, too late
+  // for several source-backed background cells. Keep z2 resident at z3–z6
+  // only; these are at most a handful of 256px native Esri tiles.
+  void detailedReady;
+  return Number.isFinite(zoom) && zoom >= 0 && zoom <= 6;
 }
 
 /** At z3/z4 a maxNativeZoom=4 parent requests exactly the same Esri URLs
@@ -32,6 +32,68 @@ export function needsSatelliteUnderlay(
   nativeZoom = SATELLITE_UNDERLAY_NATIVE_ZOOM,
 ): boolean {
   return Number.isFinite(zoom) && zoom > nativeZoom;
+}
+
+
+/** Source-verified Esri parent handoff. The existing low-detail parents are
+ * REAL georeferenced Esri tiles, never a screenshot of an obsolete continent.
+ * Do not remove one parent merely because another GridLayer emitted `load`:
+ * that event does not certify every current screen pixel tile.
+ *
+ * During the pinch, retain mounted parents and pre-mount only small coarser
+ * grids that could safely cover the next zoom. At z3–z6, keeping the one
+ * native-z2 source resident avoids a gap AFTER an earlier completed screen
+ * released it. Above z6, unmount the inherited parent ONLY once the actual
+ * replacement covers the current viewport. This reuses the existing z2/z4
+ * sources, never a screenshot, a new provider, or fabricated weather pixels.
+ */
+export type SatelliteHandoffInput = Readonly<{
+  zoom: number;
+  zooming: boolean;
+  mountedUnderlay: boolean;
+  mountedWorld: boolean;
+  detailComplete: boolean;
+  underlayComplete: boolean;
+  worldComplete: boolean;
+}>;
+export type SatelliteHandoffDecision = Readonly<{
+  underlay: boolean;
+  worldParent: boolean;
+}>;
+export function satelliteHandoffDecision(
+  state: SatelliteHandoffInput,
+): SatelliteHandoffDecision {
+  if (!Number.isFinite(state.zoom) || state.zoom < 0) {
+    return {underlay: state.mountedUnderlay, worldParent: state.mountedWorld};
+  }
+  const z = state.zoom;
+  if (state.zooming) {
+    return {
+      // At least the z4 image grid may participate in a pinch starting from
+      // the world boundary; do not dismantle old georeferenced imagery.
+      underlay: state.mountedUnderlay || z >= 4,
+      worldParent: state.mountedWorld || z <= 6,
+    };
+  }
+  if (z <= 4) {
+    // z4 underlay is redundant at z3/4 but can temporarily protect the
+    // handoff from z5 while the z2 parent AND fine detail are both incomplete.
+    return {
+      worldParent: true,
+      underlay: state.mountedUnderlay &&
+        !state.worldComplete && !state.detailComplete,
+    };
+  }
+  // At z5+ the genuine z4 imagery remains the standard parent. Keep the
+  // small native-z2 Esri grid mounted and warm at z5–z6 even when the
+  // current screen happens to be complete: prefetch-on-miss was too late for
+  // rapid pans. At z7+ merely preserve an already mounted z2 parent until
+  // a real, complete z4/detail viewport replaces it, limiting memory.
+  const needsProtection = !state.underlayComplete && !state.detailComplete;
+  return {
+    underlay: true,
+    worldParent: z <= 6 || (state.mountedWorld && needsProtection),
+  };
 }
 
 /** Chromium on high-density Android devices can expose a 1 CSS-pixel

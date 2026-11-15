@@ -5,6 +5,7 @@ import type {Map as LeafletMap} from "leaflet";
 import {ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics} from "./modelField";
 import {ReadyTileClient, parseReadyManifest, type ReadyManifest} from "./readyTileClient";
 import {pilotManifestIsUsable} from "./readyTilePilotConfig";
+import {mapForecastClock,type MapForecastClock} from "./mapForecastClock";
 
 type Mode="probing"|"ready"|"legacy";
 export class ReadyTileModel extends ModelField {
@@ -102,11 +103,15 @@ export class ReadyTileModel extends ModelField {
     this.origin,manifest,
     ()=>{if(this.mode!=="ready"||!this.visiblePilot)return;
       this.livePilot=true;this.onLive?.();},
-    ()=>{if(this.mode==="ready")this.fallback();}
+    ()=>{if(this.mode==="ready")this.fallback()},
+    undefined,()=>{if(this.mode==="ready"&&this.visiblePilot&&this.livePilot){
+      this.livePilot=false;this.onMiss?.();
+    }}
    );
    this.mode="ready";
    this.moveHandler=()=>{
     if(this.mode!=="ready"||!this.visiblePilot)return;
+    this.client?.viewportMoved();
     this.warmTiles();
    };
    map.on("moveend",this.moveHandler);
@@ -134,7 +139,10 @@ export class ReadyTileModel extends ModelField {
     this.client=new ReadyTileClient(this.L as ConstructorParameters<typeof ReadyTileClient>[0],
       this.mapPilot as unknown as ConstructorParameters<typeof ReadyTileClient>[1],this.origin,manifest,
       ()=>{if(this.mode==="ready"&&this.visiblePilot){this.livePilot=true;this.onLive?.();}},
-      ()=>{if(this.mode==="ready")this.fallback();});
+      ()=>{if(this.mode==="ready")this.fallback()},
+      undefined,()=>{if(this.mode==="ready"&&this.visiblePilot&&this.livePilot){
+        this.livePilot=false;this.onMiss?.();
+      }});
    }
    this.sync(this.requestedMs||Date.now());
   }
@@ -172,6 +180,13 @@ export class ReadyTileModel extends ModelField {
  setDiagnosticMode(mode:WeatherDiagnosticMode){
   this.diagnosticPilot=mode;
   if(this.mode==="legacy")super.setDiagnosticMode(mode);
+ }
+ getMapClock(timelineMs:number):MapForecastClock{
+  if(this.mode==="legacy")return super.getMapClock(timelineMs);
+  const validTime=this.mode==="ready"&&this.visiblePilot&&this.livePilot
+   ? this.client?.displayedTime??null : null;
+  const sourceTime=validTime?Date.parse(validTime):NaN;
+  return mapForecastClock(timelineMs,Number.isFinite(sourceTime)?[sourceTime]:[]);
  }
  diagnostics():WeatherModelDiagnostics{
   if(this.mode==="legacy")return {...super.diagnostics(),backend:"om-on-device",

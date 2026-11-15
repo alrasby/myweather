@@ -46,10 +46,14 @@ export function spatialTileOptions(
     // At low zoom the physical source crop covers the visible tile grid
     // exactly. Do not pre-decode offscreen rings of entire continents.
     // The aligned .om read covers current physical raster tiles only.
-    // Offscreen buffered tiles would be drawn with partial/transparent data
-    // and then reused by Leaflet without a new tileload on later pans.
-    // Disable that cache on non-isolated mobile; web keeps its old buffer.
-    keepBuffer: compact ? 0 : 1,
+    // On compact WORLD views a single Leaflet retention ring prevents
+    // previously decoded, georeferenced ECMWF tiles from being removed at
+    // every short pan. This does NOT prefetch a new world ring: Leaflet's
+    // keepBuffer retains already rendered tiles, while updateWhenIdle still
+    // defers new network work until movement settles. Bounded to one ring
+    // at 512px only: regional 1024px Android tiles stay at zero buffer to
+    // avoid excessive WebView memory and previously partial raster reuse.
+    keepBuffer: compact && !world ? 0 : 1,
     maxNativeZoom: compact && !world ? 13 : 12,
     maxZoom: 16,
   };

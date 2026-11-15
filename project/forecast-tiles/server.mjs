@@ -9,8 +9,18 @@ if(!Number.isInteger(port)||port<1||port>65535)throw new Error('invalid-tile-por
 const origin='http://'+host+':'+port;
 const dist=resolve(import.meta.dirname,'dist');
 const cache=resolve(process.env.TILE_CACHE_DIR||'./.weather-tile-cache');
+// This pilot must not grow an unbounded tile directory on a small host.
+// The environment controls only limits, never weather values or source URLs.
+const configuredMb=Number(process.env.TILE_CACHE_MAX_MB??384);
+const configuredEntries=Number(process.env.TILE_CACHE_MAX_ENTRIES??30000);
+if(!Number.isSafeInteger(configuredMb)||configuredMb<16||configuredMb>4096||
+   !Number.isSafeInteger(configuredEntries)||configuredEntries<1||configuredEntries>250000)
+ throw new Error('invalid-tile-cache-limits');
 const producer=createBrowserProducer(origin);
-const gateway=createTileGateway({renderTile:producer.renderTile,cacheDir:cache});
+const gateway=createTileGateway({
+ renderTile:producer.renderTile,cacheDir:cache,
+ maxCacheBytes:configuredMb*1024*1024,maxCacheEntries:configuredEntries,
+});
 const server=createServer(async(req,res)=>{
  const path=(req.url||'').split('?')[0];
  if(!path.startsWith('/__render/')){gateway.server.emit('request',req,res);return;}

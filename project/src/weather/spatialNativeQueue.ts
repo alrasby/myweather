@@ -29,7 +29,14 @@ export class SpatialNativeQueue {
     return new Error("spatial-request-aborted");
   }
 
-  async run<T>(signal: AbortSignal | undefined, job: () => Promise<T>, priority: 0 | 1 = 0): Promise<T> {
+  /** A started native HTTP range cannot actually be aborted by Capacitor.
+   * Allow its fully received result through ONLY for source-verified cache
+   * warming. The caller has already been rejected by SpatialRangeFlights;
+   * queued (not-yet-started) tasks remain cancellable. */
+  async run<T>(
+    signal: AbortSignal | undefined, job: () => Promise<T>,
+    priority: 0 | 1 = 0, retainCompletedAfterAbort = false,
+  ): Promise<T> {
     if (signal?.aborted) throw this.abortError();
     if (this.active < this.limit && this.waiters.length === 0) {
       this.active++;
@@ -56,7 +63,7 @@ export class SpatialNativeQueue {
     try {
       if (signal?.aborted) throw this.abortError();
       const result = await job();
-      if (signal?.aborted) throw this.abortError();
+      if (signal?.aborted && !retainCompletedAfterAbort) throw this.abortError();
       return result;
     } finally {
       this.active--;

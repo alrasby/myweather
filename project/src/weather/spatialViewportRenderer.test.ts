@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, spatialStateCoversBounds, pinLoadedSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, spatialStateCoversBounds, pinLoadedSpatialState, certifiedResidentSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -167,4 +167,53 @@ test("stale prior viewport decoded arrays must NEVER paint the next geography",(
  // Cross-dateline latitude bands are handled conservatively, never treating
  // a narrower old crop as valid for newly exposed visible regions.
  assert.equal(spatialStateCoversBounds([-180,60,180,85],[-180,45,180,65]),false);
+});
+
+test("certified hot reuse only accepts the exact decoded source and covering viewport",()=>{
+ const file=base.slice(5);
+ const values=new Float32Array([12,32,71]);
+ const state={omFileUrl:file,dataOptions:{variable:"cloud_cover",deltaTimeHours:1,
+   bounds:[-22,44,-5,63]},data:{values,scaleFactor:100}};
+ const wanted=[-18,46,-7,60];
+ const hit=certifiedResidentSpatialState([state] as never,file,"cloud_cover",wanted,1);
+ assert.ok(hit);
+ assert.notStrictEqual(hit,state,"pin a shallow read-only data reference");
+ assert.equal(hit!.data?.values,values);
+ state.data=null as never;
+ assert.equal(hit!.data?.values,values,"upstream eviction cannot invalidate accepted hot data");
+ assert.equal(certifiedResidentSpatialState([state] as never,file,"cloud_cover",wanted,1),null);
+});
+test("hot reuse refuses cached old continent, wrong model hour, variable or missing bounds",()=>{
+ const file=base.slice(5),wanted=[-18,46,-7,60];
+ const old={omFileUrl:file,dataOptions:{variable:"cloud_cover",deltaTimeHours:1,
+   bounds:[-65,0,-25,30]},data:{values:new Float32Array([11])}};
+ assert.equal(certifiedResidentSpatialState([old] as never,file,"cloud_cover",wanted,1),null);
+ const good={...old,dataOptions:{...old.dataOptions,bounds:[-22,44,-5,63]}};
+ assert.equal(certifiedResidentSpatialState([good] as never,file+"?new-hour","cloud_cover",wanted,1),null);
+ assert.equal(certifiedResidentSpatialState([good] as never,file,"precipitation",wanted,1),null);
+ assert.equal(certifiedResidentSpatialState([{...good,dataOptions:{
+   ...good.dataOptions,bounds:undefined}}] as never,file,"cloud_cover",wanted,1),null);
+ assert.equal(certifiedResidentSpatialState([good] as never,file,"cloud_cover",[-18,44,20,65],1),null);
+});
+test("unsafe, absent and dateline-wrapped bounds go through official OM verification",()=>{
+ const file=base.slice(5);
+ const data={omFileUrl:file,dataOptions:{variable:"cloud_cover",deltaTimeHours:1,
+   bounds:[-180,-70,180,70]},data:{values:new Float32Array([12])}};
+ for(const wanted of [null,undefined,[],[-12,46,NaN,60],[170,30,-170,60],[-12,40,-12,50]]) {
+   assert.equal(certifiedResidentSpatialState([data] as never,file,"cloud_cover",wanted,1),
+     null,JSON.stringify(wanted));
+ }
+});
+
+test("capture manifest or differently accumulated precipitation can never borrow another forecast hour",()=>{
+ const file=base.slice(5),wanted=[-18,46,-7,60];
+ const state={omFileUrl:file,dataOptions:{variable:"precipitation",
+   deltaTimeHours:3,bounds:[-22,44,-5,63]},data:{values:new Float32Array([2])}};
+ assert.equal(certifiedResidentSpatialState([state] as never,file,
+   "precipitation",wanted,1),null,"1-hour precipitation cannot use a 3-hour rate");
+ assert.ok(certifiedResidentSpatialState([state] as never,file,"precipitation",wanted,3));
+ assert.equal(certifiedResidentSpatialState([state] as never,file,"precipitation",wanted,NaN),null);
+ assert.equal(certifiedResidentSpatialState([state] as never,
+   "https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/latest.json",
+   "precipitation",wanted,3),null,"latest.json valid_times_N may change underlying source hour");
 });

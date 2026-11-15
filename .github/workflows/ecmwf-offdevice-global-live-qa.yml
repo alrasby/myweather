@@ -1,0 +1,47 @@
+name: ECMWF Off-Device — Global Live Source QA
+on:
+  push:
+    branches:
+      - feature/ecmwf-offdevice-qa-hardening-20261114
+    paths:
+      - 'project/forecast-tiles/**'
+      - '.github/workflows/ecmwf-offdevice-global-live-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ecmwf-offdevice-global-live-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  global-real-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 23
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+      - name: Locked dependencies
+        run: npm ci
+      - name: Offline invariants before any upstream network activity
+        run: |
+          node --test forecast-tiles/rasterParity.test.mjs forecast-tiles/pngIntegrity.test.mjs forecast-tiles/gateway.test.mjs forecast-tiles/diskTileCache.test.mjs
+      - name: Bundle original source-backed ECMWF Chromium producer
+        run: npx vite build --config forecast-tiles/vite.config.ts
+      - name: Install headless Chromium with system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Inspect pinned real ECMWF global z3, regional z6/z7, date-line seams, and next UTC hour
+        run: node forecast-tiles/global-live-qa.mjs
+      - name: Retain actual source PNG samples and metrics (QA only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecmwf-global-live-source-qa
+          path: project/forecast-tiles/qa-global-source/
+          if-no-files-found: warn
+          retention-days: 3

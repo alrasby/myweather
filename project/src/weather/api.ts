@@ -294,6 +294,7 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
       bundle.daily.length < 3 || !isRecentObservation(bundle.current.t, Date.now())) {
     throw new Error("incomplete-or-stale-open-meteo-forecast");
   }
+  bundle.forecastSource = "open-meteo-best-match";
   return bundle;
 }
 
@@ -482,6 +483,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
   const nearest = hourly.reduce((best, row) => (Math.abs(row.t - now) < Math.abs(best.t - now) ? row : best));
   const instant = series[0]?.data?.instant?.details ?? {};
   return {
+    forecastSource: "met-no",
     placeId: place.id,
     timezone,
     offset,

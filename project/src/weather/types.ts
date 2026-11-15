@@ -113,6 +113,8 @@ export type WeatherBundle = {
   timezone: string;
   offset: number;
   fetchedAt: number;
+  /** Actual point-forecast provider; old cache entries may have no provenance. */
+  forecastSource?: "open-meteo-best-match" | "met-no";
   current: CurrentWeather;
   hourly: HourPoint[];
   daily: DayPoint[];

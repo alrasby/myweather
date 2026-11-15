@@ -10,7 +10,7 @@ import { ReadyTileModel } from "@/weather/readyTileModel";
 import { readReadyTilePilotOrigin } from "@/weather/readyTilePilotConfig";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { shouldKeepSatelliteParent, shouldKeepWorldSatelliteParent, snapshotSatelliteRasterCoverage, type SatelliteRasterCoverage, type SatelliteRasterLayerLike, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
+import { satelliteHandoffDecision, snapshotSatelliteRasterCoverage, type SatelliteRasterCoverage, type SatelliteRasterLayerLike, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
@@ -24,6 +24,7 @@ import { loadLiveCyclones, type LiveCyclone } from "@/weather/cyclones";
 import { loadStormsOnce } from "@/weather/storms";
 import { stormGradeKey, type PaintedSystem } from "@/weather/synoptic";
 import { activePlace, useWeather } from "@/weather/store";
+import { comparePointWithSpatial } from "@/weather/forecastSourceComparison";
 import type { FieldSample, GridField, Lang, Place, ShadeKind, WeatherBundle } from "@/weather/types";
 import "leaflet/dist/leaflet.css";
 
@@ -99,6 +100,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const imageryRef = useRef<TileLayer | null>(null);
   const satelliteDiagnosticsRef = useRef<(() => {
     detail: SatelliteRasterCoverage; underlay: SatelliteRasterCoverage; worldParent: SatelliteRasterCoverage;
+    handoff: { protectedActivations: number; releasedAfterCoverage: number; zooming: boolean };
   }) | null>(null);
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
@@ -123,6 +125,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const detailRef = useRef<GridField | null>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
+  const timelineUtcRef = useRef<number | null>(null);
+  const visualClockRef = useRef<{timeMs:number;status:string;gapMinutes:number|null}|null>(null);
   const valueRef = useRef<HTMLSpanElement>(null);
   const clickTimer = useRef(0);
   const popupAbort = useRef<AbortController | null>(null);
@@ -193,6 +197,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engineRef.current = engine;
     let lastRainLabelAt = 0;
     const paint = (info: FrameInfo) => {
+      timelineUtcRef.current = Number.isFinite(info.timeMs) ? info.timeMs : null;
+      visualClockRef.current = kindRef.current === 2
+        ? modelRef.current?.getMapClock(info.timeMs) ?? null : null;
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -225,7 +232,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       const current = prefsRef.current;
       const language = langRef.current;
       if (timeRef.current) {
-        timeRef.current.textContent = formatClock(info.timeMs, tzRef.current, language);
+        timeRef.current.textContent = formatClock(
+          visualClockRef.current?.timeMs ?? info.timeMs, tzRef.current, language);
       }
       if (valueRef.current) {
         if (kindRef.current === 2) {
@@ -292,12 +300,16 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         // global coverage during fast long-distance pans. At z3 the former
         // z4 underlay requested IDENTICAL images as the detail layer, so
         // both went blank together and exposed the #101820 map host.
-        // The z2 parent uses 1/4 as many tiles per dimension and is mounted
-        // ONLY while detailed low-zoom imagery is incomplete.
+        // The native-z2 parent covers four times as many pixels per axis
+        // with each genuine Esri tile. Keeping this tiny grid mounted through
+        // z6 lets a rapid NEXT pan reuse real geo-anchored imagery, instead
+        // of re-mounting it only after a dark screen is already visible.
         const worldParent = L.tileLayer(imageryUrl, {
           maxNativeZoom: SATELLITE_WORLD_PARENT_NATIVE_ZOOM,
           maxZoom: 16, zIndex: -1,
-          updateWhenIdle: false, updateWhenZooming: false,
+          // A z2 source grid is cheap. Keep it geographically synchronized
+          // during pinch zoom so the old map cannot shrink into a black box.
+          updateWhenIdle: false, updateWhenZooming: true,
           updateInterval: 300, keepBuffer: 3,
         }).addTo(map);
         const worldParentTileErrors = new WeakSet<object>();
@@ -317,30 +329,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         const underlayTileErrors = new WeakSet<object>();
-        underlay.on("tileerror", (event) => underlayTileErrors.add(event.tile));
-        // At z5+ the z4 parent survives every pan. At z3/z4 it is a
-        // duplicate Esri request and must be unmounted, not opacity-hidden.
-        let detailedReady = false;
-        let detailedErrors = false;
-        const syncUnderlay = () => {
-          if (!map) return;
-          const zoom = map.getZoom();
-          const keepUnderlay = shouldKeepSatelliteParent(zoom, detailedReady);
-          if (keepUnderlay && !map.hasLayer(underlay)) underlay.addTo(map);
-          else if (!keepUnderlay && map.hasLayer(underlay)) underlay.remove();
-          const keepWorld = shouldKeepWorldSatelliteParent(zoom, detailedReady);
-          // Unmount the extra raster grid when it provides no value.
-          // Opacity=0 alone still causes Leaflet to download every tile.
-          if (keepWorld && !map.hasLayer(worldParent)) worldParent.addTo(map);
-          else if (!keepWorld && map.hasLayer(worldParent)) worldParent.remove();
-        };
-        map.on("zoomstart", () => {
-          detailedReady = false;
-          detailedErrors = false;
-          syncUnderlay();
-        });
-        map.on("zoomend", syncUnderlay);
-        syncUnderlay();
+        // The z4 underlay remains source-correct at the zoom boundary. The
+        // low-resolution z2 parent is never stretched into fake data: Leaflet
+        // keeps both parent grids anchored to real Esri coordinates.
         const imagery = L.tileLayer(imageryUrl, {
           maxZoom: 16,
           zIndex: 1,
@@ -356,37 +347,98 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           return snapshotSatelliteRasterCoverage(
             map!.hasLayer(layer) ? layer as unknown as SatelliteRasterLayerLike : null,
             map!.getZoom(), failed, {
-              // Leaflet's Bounds type permits unset min/max during
-              // transitional layouts; fail closed instead of throwing.
               minX: pixels.min?.x ?? NaN, maxX: pixels.max?.x ?? NaN,
               minY: pixels.min?.y ?? NaN, maxY: pixels.max?.y ?? NaN,
               tileWidth: size.x, tileHeight: size.y,
             },
           );
         };
+        let protectedActivations = 0;
+        let releasedAfterCoverage = 0;
+        let wasProtecting = false;
         satelliteDiagnosticsRef.current = () => ({
           detail: tileCoverage(imagery, detailTileErrors),
           underlay: tileCoverage(underlay, underlayTileErrors),
           worldParent: tileCoverage(worldParent, worldParentTileErrors),
+          handoff: {protectedActivations, releasedAfterCoverage, zooming},
         });
-        imagery.on("loading", () => {
-          detailedReady = false;
-          detailedErrors = false;
+
+        // Never tear down a georeferenced parent on a mere Leaflet 'load'
+        // event. That event can complete while another part of the viewport
+        // has no created tile (or while the map's zoom CSS is transforming).
+        let zooming = false;
+        let syncingSatellite = false;
+        const syncUnderlay = () => {
+          if (!map || syncingSatellite) return;
+          syncingSatellite = true;
+          try {
+            const detail = tileCoverage(imagery, detailTileErrors);
+            const low = tileCoverage(underlay, underlayTileErrors);
+            const world = tileCoverage(worldParent, worldParentTileErrors);
+            const decision = satelliteHandoffDecision({
+              zoom: map.getZoom(), zooming,
+              mountedUnderlay: map.hasLayer(underlay),
+              mountedWorld: map.hasLayer(worldParent),
+              detailComplete: detail.complete,
+              underlayComplete: low.complete,
+              worldComplete: world.complete,
+            });
+            // Count only distinct source-protection episodes, not every
+            // individual tileload event. The optional copied report can then
+            // prove whether the basemap parent truly survived missing detail.
+            const protection = !zooming && map.getZoom() > 4 &&
+              decision.worldParent && !detail.complete && !low.complete;
+            if (protection && !wasProtecting) protectedActivations++;
+            wasProtecting = protection;
+            // Mount protection BEFORE removing anything else. A replacement
+            // that has not filled the real screen cannot authorize removal.
+            if (decision.underlay && !map.hasLayer(underlay)) underlay.addTo(map);
+            if (decision.worldParent && !map.hasLayer(worldParent)) worldParent.addTo(map);
+            if (!decision.underlay && map.hasLayer(underlay)) underlay.remove();
+            if (!decision.worldParent && map.hasLayer(worldParent)) {
+              if (!zooming && (low.complete || detail.complete))
+                releasedAfterCoverage++;
+              worldParent.remove();
+            }
+          } finally {
+            syncingSatellite = false;
+          }
+        };
+        const onSatelliteZoomStart = () => {
+          zooming = true;
+          // Keep the existing real parent canvases throughout pinch animation.
+          // For an approaching low-zoom view, begin warming the tiny z2 grid
+          // before zoomend; no additional image provider or tile type.
           syncUnderlay();
-        });
-        imagery.on("tileerror", (event) => {
-          detailTileErrors.add(event.tile);
-          // A Leaflet 'load' event only means the queue drained; it does
-          // NOT prove every Esri image was delivered. Keep a real parent
-          // image behind failed tiles instead of exposing a black rectangle.
-          detailedErrors = true;
-          detailedReady = false;
+        };
+        const onSatelliteZoomEnd = () => {
+          zooming = false;
           syncUnderlay();
+        };
+        map.on("zoomstart", onSatelliteZoomStart);
+        map.on("zoomend", onSatelliteZoomEnd);
+        map.on("moveend", syncUnderlay);
+        for (const [layer, errors] of [
+          [imagery, detailTileErrors],
+          [underlay, underlayTileErrors],
+          [worldParent, worldParentTileErrors],
+        ] as const) {
+          layer.on("loading", syncUnderlay);
+          layer.on("tileload", syncUnderlay);
+          layer.on("load", syncUnderlay);
+          layer.on("tileerror", (event) => {
+            errors.add(event.tile);
+            syncUnderlay();
+          });
+        }
+        // Release coverage checks on map disposal; layers are disposed by
+        // Leaflet and no per-frame poll, timer or new canvas is introduced.
+        map.once("unload", () => {
+          map?.off("zoomstart", onSatelliteZoomStart);
+          map?.off("zoomend", onSatelliteZoomEnd);
+          map?.off("moveend", syncUnderlay);
         });
-        imagery.on("load", () => {
-          detailedReady = !detailedErrors;
-          syncUnderlay();
-        });
+        syncUnderlay();
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
@@ -1098,6 +1150,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   };
   openSystemRef.current = openSystem;
 
+  const cityForecastComparison = weatherDiagnosticsOpen && bundle?.placeId === place.id
+    ? comparePointWithSpatial(bundle, weatherDiagnostics?.source === "spatial"
+      ? weatherDiagnostics.displayedValidTime : null)
+    : null;
   const layer = layerByKind(kind);
   const ticks = legendTicks(layer);
   const gradient = `linear-gradient(to right, ${layer.stops
@@ -1215,6 +1271,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
+          {cityForecastComparison ? (
+            <p>
+              {lang === "ar" ? "توقع المدينة" : "City point"}:
+              {" "}{cityForecastComparison.pointProvider}
+              {" · WMO "}{cityForecastComparison.pointWmoCode ?? "—"}
+              {" · "}{lang === "ar" ? "الغيوم" : "cloud cover"}{" "}{cityForecastComparison.pointCloudCoverPct ?? "—"}%
+              {" · UTC "}{cityForecastComparison.pointValidTime ?? "—"}
+              {" · ECMWF "}{cityForecastComparison.mapEcmwfValidTime ?? "—"}
+              {" · "}{cityForecastComparison.comparisonScope}
+            </p>
+          ) : null}
           {weatherDiagnostics?.spatialViewportPolicy ? <p>
             {lang === "ar" ? "خطة فك البيانات" : "Decode plan"}: {
               weatherDiagnostics.spatialViewportPolicy.allow
@@ -1252,8 +1319,20 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 dataSaver: prefs.dataSaver,
                 mapZoom: currentZoom ?? null,
                 viewportSpanDegrees,
+                mapTimelineUtc: timelineUtcRef.current === null ? null : new Date(timelineUtcRef.current).toISOString(),
+                mapLabelUtc: visualClockRef.current && Number.isFinite(visualClockRef.current.timeMs)
+                  ? new Date(visualClockRef.current.timeMs).toISOString() : null,
+                mapClockStatus: visualClockRef.current?.status ?? null,
+                mapClockGapMinutes: visualClockRef.current?.gapMinutes ?? null,
                 satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
+                // Local point forecast vs global ECMWF can legitimately differ.
+                // Record both genuine source times without copying precise
+                // coordinates or claiming a winner from raster colour alone.
+                cityForecastComparison: bundleRef.current?.placeId === placeRef.current.id
+                  ? comparePointWithSpatial(bundleRef.current,
+                    report.source === "spatial" ? report.displayedValidTime : null)
+                  : null,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
                 () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
@@ -1286,6 +1365,9 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           <p>{lang === "ar" ? "الإطار المعروض فعليًا" : "Displayed frame"}: {weatherDiagnostics?.displayedFrame ?? "—"}
             {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
           </p>
+          <p>{lang === "ar" ? "وقت شريط الخريطة (UTC)" : "Map timeline clock (UTC)"}: {timelineUtcRef.current === null ? "—" : new Date(timelineUtcRef.current).toISOString()}</p>
+          <p>{lang === "ar" ? "الوقت المكتوب على الصورة (UTC)" : "Visible map label UTC"}: {visualClockRef.current ? new Date(visualClockRef.current.timeMs).toISOString() : "—"}
+            {" · "}{visualClockRef.current?.status ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المطلوب" : "Requested model time"}: {weatherDiagnostics?.requestedValidTime ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المعروض" : "Displayed model time"}: {weatherDiagnostics?.displayedValidTime ?? "—"}</p>
           {(weatherDiagnostics?.compositedFrames?.length ?? 0) > 1 ? (

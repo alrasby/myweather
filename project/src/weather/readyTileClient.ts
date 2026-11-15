@@ -1,5 +1,6 @@
 /** QA candidate: display immutable ready-made ECMWF PNGs, never decode .om on phone. */
 import {planReadyTilePrefetch} from './readyTilePlan.ts';
+import {snapshotSatelliteRasterCoverage, type SatelliteRasterLayerLike} from './satelliteBasemap.ts';
 import {TinyTileDemandModel, type TileSignals, type TileAction} from './tinyTileDemandModel.ts';
 export type ReadyLayer='cloud_cover'|'precipitation'|'snowfall_water_equivalent';
 const LAYERS:readonly ReadyLayer[]=['cloud_cover','precipitation','snowfall_water_equivalent'];
@@ -28,10 +29,19 @@ export function readyTileUrl(base:string,m:ReadyManifest,r:{hour:number;layer:Re
  if(!LAYERS.includes(r.layer)||!Number.isInteger(r.hour)||r.hour<0||r.hour>=m.validTimes.length||![r.z,r.x,r.y].every(Number.isInteger)||r.z<0||r.z>m.maxNativeZoom||r.x<0||r.y<0||r.x>=2**r.z||r.y>=2**r.z)throw new Error('invalid-ready-tile');
  return readyTilesBase(base)+'/v1/tiles/'+m.runId+'/'+r.hour+'/'+r.layer+'/'+r.z+'/'+r.x+'/'+r.y+'.png';
 }
-type Layer={on:(name:string,cb:()=>void)=>Layer;addTo:(map:MapLike)=>Layer;setOpacity:(opacity:number)=>Layer;getContainer?:()=>{style:{transition:string}}|null;remove:()=>void};
-type MapLike={getCenter:()=>{lat:number;lng:number};getZoom:()=>number};
+type Layer=SatelliteRasterLayerLike & {
+ on:(name:string,cb:()=>void)=>Layer;addTo:(map:MapLike)=>Layer;
+ setOpacity:(opacity:number)=>Layer;getContainer?:()=>{style:{transition:string}}|null;
+ getTileSize?:()=>{x:number;y:number};remove:()=>void;
+};
+type MapLike={
+ getCenter:()=>{lat:number;lng:number};getZoom:()=>number;
+ getPixelBounds?:()=>{min?:{x:number;y:number};max?:{x:number;y:number}};
+};
 type LeafletLike={tileLayer:(url:string,options:Record<string,unknown>)=>Layer};
-type Frame={hour:number;layers:Layer[];loaded:boolean[];counts:number[];timer:ReturnType<typeof setTimeout>|null;failed:boolean};
+type Frame={hour:number;layers:Layer[];loaded:boolean[];counts:number[];
+ timer:ReturnType<typeof setTimeout>|null;failed:boolean;coverageLost:boolean;
+ commit:(()=>void)|null};
 export class ReadyTileClient{
  private current:Frame|null=null;
  private incoming:Frame|null=null;
@@ -49,18 +59,62 @@ export class ReadyTileClient{
  private readonly base:string;
  private readonly onReady:(time:string)=>void;
  private readonly onMiss:()=>void;
+ private readonly onCoverageLost:()=>void;
  private readonly prefetchImages:(url:string)=>HTMLImageElement;
  readonly manifest:ReadyManifest;
  constructor(L:LeafletLike,map:MapLike,base:string,manifest:ReadyManifest,onReady:(time:string)=>void,onMiss:()=>void,
-  prefetchImages:(url:string)=>HTMLImageElement=url=>{const img=new Image();img.decoding='async';img.src=url;return img;}){
-  this.L=L;this.map=map;this.onReady=onReady;this.onMiss=onMiss;this.prefetchImages=prefetchImages;
+  prefetchImages:(url:string)=>HTMLImageElement=url=>{const img=new Image();img.decoding='async';img.src=url;return img;},
+  onCoverageLost:()=>void=()=>{}){
+  this.L=L;this.map=map;this.onReady=onReady;this.onMiss=onMiss;
+  this.onCoverageLost=onCoverageLost;this.prefetchImages=prefetchImages;
   this.base=readyTilesBase(base);this.manifest=parseReadyManifest(manifest);
  }
- get displayedTime():string|null{return this.current?this.manifest.validTimes[this.current.hour]??null:null;}
- get displayedHour():number|null{return this.current?.hour??null;}
- isReady(hour:number):boolean{return this.current?.hour===hour||!!this.incoming&&this.incoming.hour===hour&&this.incoming.loaded.every(Boolean)&&!this.incoming.failed;}
+ get displayedTime():string|null{return this.current&&!this.current.coverageLost?this.manifest.validTimes[this.current.hour]??null:null;}
+ get displayedHour():number|null{return this.current&&!this.current.coverageLost?this.current.hour:null;}
+ isReady(hour:number):boolean{
+  return !!(this.current?.hour===hour&&!this.current.coverageLost)||
+   !!(this.incoming&&this.incoming.hour===hour&&this.incoming.loaded.every(Boolean)&&
+      !this.incoming.failed&&this.coversViewport(this.incoming));
+ }
  private disposeFrame(f:Frame|null){if(!f)return;if(f.timer)clearTimeout(f.timer);for(const layer of f.layers)layer.remove();}
  private clearPredictor(){for(const img of this.prefetched.values())img.src='';this.prefetched.clear();}
+ /** A 'load' event only means Leaflet's queue drained. Count EVERY source
+  * pixel tile needed by the actual viewport, including uncreated cells;
+  * use real decoded IMG data rather than tileload counters or old geography.
+  * This is the isolated QA renderer, not a modification to the live .om path. */
+ private coversViewport(frame:Frame):boolean{
+  const b=this.map.getPixelBounds?.(),z=this.map.getZoom();
+  if(!b?.min||!b.max)return false;
+  return frame.layers.length===LAYERS.length&&frame.layers.every(layer=>{
+   const size=layer.getTileSize?.();
+   if(!size)return false;
+   return snapshotSatelliteRasterCoverage(layer,z,undefined,{
+    minX:b.min!.x,maxX:b.max!.x,minY:b.min!.y,maxY:b.max!.y,
+    tileWidth:size.x,tileHeight:size.y,
+   }).complete;
+  });
+ }
+ private refreshVisibleCoverage(frame:Frame):void{
+  if(this.destroyed||this.current!==frame||frame.failed)return;
+  if(this.coversViewport(frame)){
+   if(frame.coverageLost){
+    frame.coverageLost=false;
+    frame.layers.forEach(layer=>layer.setOpacity(1));
+    this.onReady(this.manifest.validTimes[frame.hour]!);
+   }
+  }else if(!frame.coverageLost){
+   frame.coverageLost=true;
+   frame.layers.forEach(layer=>layer.setOpacity(0));
+   this.onCoverageLost();
+  }
+ }
+ /** Call at the map's final pixel viewport (including zoom changes).
+  * It does not start new downloads; Leaflet keeps its tile priority. */
+ viewportMoved():void{
+  if(this.destroyed)return;
+  if(this.current)this.refreshVisibleCoverage(this.current);
+  this.incoming?.commit?.();
+ }
  /** Publish only after all three valid real-data image layers finish. */
  show(hour:number){
   if(this.destroyed||Date.now()<this.failedUntil||!Number.isInteger(hour)||hour<0||hour>=this.manifest.validTimes.length)return;
@@ -68,7 +122,8 @@ export class ReadyTileClient{
   this.disposeFrame(this.incoming);this.incoming=null;
   if(this.fadeTimer){clearTimeout(this.fadeTimer);this.fadeTimer=null;}
   if(this.retiring){if(this.oldTimer)clearTimeout(this.oldTimer);this.disposeFrame(this.retiring);this.retiring=null;this.oldTimer=null;}
-  const frame:Frame={hour,layers:[],loaded:[false,false,false],counts:[0,0,0],timer:null,failed:false};
+  const frame:Frame={hour,layers:[],loaded:[false,false,false],counts:[0,0,0],
+    timer:null,failed:false,coverageLost:false,commit:null};
   this.incoming=frame;
   const fail=()=>{
    if(this.destroyed)return;
@@ -87,13 +142,14 @@ export class ReadyTileClient{
    if(!this.current)this.onMiss();
   };
   const complete=()=>{
-   if(this.destroyed||this.incoming!==frame||frame.failed||!frame.loaded.every(Boolean)||frame.counts.some(x=>x===0))return;
+   if(this.destroyed||this.incoming!==frame||frame.failed||!frame.loaded.every(Boolean)||
+      frame.counts.some(x=>x===0)||!this.coversViewport(frame))return;
    if(frame.timer)clearTimeout(frame.timer);frame.timer=null;
    const old=this.current;this.current=frame;this.incoming=null;
    // Only adjacent hours from the same pinned forecast run may blend.
    // GPU fades both complete authentic frames; no pixel generation or optical flow.
    const reduceMotion=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-   const adjacent=!!old&&Math.abs(old.hour-hour)===1&&!reduceMotion;
+   const adjacent=!!old&&!old.coverageLost&&Math.abs(old.hour-hour)===1&&!reduceMotion;
    if(old&&adjacent){
     for(const layer of [...old.layers,...frame.layers]){
      const element=layer.getContainer?.();
@@ -118,13 +174,21 @@ export class ReadyTileClient{
    }
    this.onReady(this.manifest.validTimes[hour]!);
   };
+  frame.commit=complete;
   for(const [index,variable] of LAYERS.entries()){
    const pane=index===0?'wx-clouds':'wx-model';
    const first=readyTileUrl(this.base,this.manifest,{hour,layer:variable,z:0,x:0,y:0});
    const template=first.replace(/\/0\/0\/0\.png$/,'/{z}/{x}/{y}.png');
    const layer=this.L.tileLayer(template,{pane,opacity:0,tileSize:256,maxNativeZoom:this.manifest.maxNativeZoom,maxZoom:16,keepBuffer:2,updateWhenIdle:true,updateWhenZooming:false});
-   layer.on('tileload',()=>{if(this.incoming===frame)frame.counts[index]++;});
-   layer.on('load',()=>{if(this.incoming===frame){frame.loaded[index]=true;complete();}});
+   layer.on('tileload',()=>{
+    if(this.incoming===frame){frame.counts[index]++;complete();}
+    else if(this.current===frame)this.refreshVisibleCoverage(frame);
+   });
+   layer.on('load',()=>{
+    if(this.incoming===frame){frame.loaded[index]=true;complete();}
+    else if(this.current===frame)this.refreshVisibleCoverage(frame);
+   });
+   layer.on('loading',()=>{if(this.current===frame)this.refreshVisibleCoverage(frame);});
    layer.on('tileerror',fail);frame.layers.push(layer);
   }
   frame.timer=setTimeout(fail,12000);
