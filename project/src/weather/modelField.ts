@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from "leaflet";
-import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
+import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, canVisuallyHoldSpatialTiles, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import {mapForecastClock,type MapForecastClock} from "@/weather/mapForecastClock";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
 import { chooseWeatherSource } from "@/weather/modelSourceSwitch";
@@ -1244,7 +1244,7 @@ export class ModelField {
           // Do not keep an opacity-1 overlay when Leaflet has already
           // disposed every genuine on-screen tile. Each of the three
           // independent source layers must still contribute a real tile.
-          coverage.every(item => item.delivered > 0) &&
+          canVisuallyHoldSpatialTiles(coverage) &&
           canHoldCertifiedSpatialViewport(frame.lastCertifiedView, rasterView(),
             frame.opacity, frame.viewportHoldStartedAt, Date.now())) {
         if (!frame.viewportHeld) this.viewportHoldActivations++;
