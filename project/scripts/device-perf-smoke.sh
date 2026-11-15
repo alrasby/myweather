@@ -17,16 +17,18 @@ for CYCLE in 1 2 3; do
   adb shell am start -W -n "$PACKAGE/.MainActivity" >"$OUT/launch-$CYCLE.txt"
   START=$(grep 'TotalTime:' "$OUT/launch-$CYCLE.txt" | grep -oE '[0-9]+' | tail -1 || true)
   sleep 3
-  adb shell input tap "$((WIDTH/2))" "$((HEIGHT-80))"
+  adb shell input tap "$((WIDTH/2))" "$((HEIGHT-43))"
   for T in $(seq 1 13); do
     sleep 2
     if adb logcat -d | grep -q MYWEATHER_ECMWF_PERF; then break; fi
   done
   adb logcat -d >"$OUT/logcat-$CYCLE.log"
+  # Map icon center lies in the bottom ~48px on 320x640 test renders.
+  # Do not mark ECMWF success until its source-ready log appears.
   adb shell dumpsys meminfo "$PACKAGE" >"$OUT/meminfo-$CYCLE.txt" || true
   adb shell screencap -p /sdcard/myweather-qa.png
   adb pull /sdcard/myweather-qa.png "$OUT/screenshot-$CYCLE.png" >/dev/null || true
-  PSS=$(grep 'TOTAL PSS:' "$OUT/meminfo-$CYCLE.txt" | grep -oE '[0-9]+' | tail -1 || true)
+  PSS=$(sed -n 's/^[[:space:]]*TOTAL PSS:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$OUT/meminfo-$CYCLE.txt" | head -1 || true)
   LINE=$(grep MYWEATHER_ECMWF_PERF "$OUT/logcat-$CYCLE.log" | tail -1 || true)
   export PROBE_JSON="$LINE"
   READS=$(python3 - <<'PY'
@@ -45,7 +47,7 @@ for N in $(seq 1 10); do
   adb shell input keyevent KEYCODE_HOME
   sleep 1
   adb shell am start -n "$PACKAGE/.MainActivity" >/dev/null || true
-  adb shell input tap "$((WIDTH/2))" "$((HEIGHT-80))" || true
+  adb shell input tap "$((WIDTH/2))" "$((HEIGHT-43))" || true
 done
 adb shell dumpsys meminfo "$PACKAGE" >"$OUT/meminfo-after-10-resumes.txt" || true
 adb shell svc wifi disable >"$OUT/network.txt" 2>&1 || true
