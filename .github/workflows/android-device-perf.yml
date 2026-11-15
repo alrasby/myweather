@@ -1,13 +1,15 @@
 name: MyWeather Android low-medium resource evidence
 on:
   push:
-    branches: [feature/production-geocoder-ecmwf-startup-resource-safety-20261115, feature/myweather10-viewport-release-gates-20261115]
+    branches: [feature/production-geocoder-ecmwf-startup-resource-safety-20261115, feature/myweather10-viewport-release-gates-20261115, qa/myweather-final-source-acceptance-20261115]
     paths:
       - .github/workflows/android-device-perf.yml
       - project/scripts/device-perf-smoke.sh
       - project/src/components/weather/MapScreen.tsx
       - project/src/weather/viewportQa.ts
       - project/src/weather/viewportQa.test.ts
+      - project/src/weather/mapForecastClock.ts
+      - project/src/weather/mapForecastClock.test.ts
       - project/src/weather/modelField.ts
       - project/src/weather/spatialViewportRenderer.ts
       - project/src/weather/places-index.ts
