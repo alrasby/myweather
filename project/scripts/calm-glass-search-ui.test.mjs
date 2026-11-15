@@ -16,7 +16,8 @@ test("compact licensing credit is docked immediately above playback card, not ab
  const bar=map.indexOf('className="wx-card map-bar');
  assert.ok(dock>=0&&credit>dock&&bar>credit);
  const block=css.slice(css.indexOf(".wx-map-source-credit {"),css.indexOf(".wx-map-source-credit a {"));
- assert.ok(block.includes("position: relative")&&!block.includes("bottom:"));
+ assert.ok(block.includes("position: relative"));
+ assert.doesNotMatch(block, /(?:^|\n)\s*bottom\s*:/, "credit cannot have an absolute bottom offset");
  assert.ok(map.includes("https://www.esri.com/")&&map.includes("https://open-meteo.com/en/license"));
 });
 test("source disclosure stays available and the homepage/map settings are preserved",()=>{
