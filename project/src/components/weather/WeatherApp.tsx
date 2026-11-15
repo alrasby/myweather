@@ -191,8 +191,8 @@ export function WeatherApp() {
           ) : null}
         </section>
       </div>
-      <nav className="safe-bottom pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center">
-        <div className="glass-bar pointer-events-auto mb-1.5 flex w-[min(76%,19.5rem)] rounded-full px-0.5 py-0.5">
+      <nav aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"} className="safe-bottom pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center">
+        <div className="glass-bar wx-bottom-nav pointer-events-auto mb-1.5 flex rounded-full">
           {(
             [
               ["home", House, "home"],
@@ -205,9 +205,9 @@ export function WeatherApp() {
               type="button"
               onClick={() => setTab(id)}
               aria-current={tab === id ? "page" : undefined}
-              className={`flex min-h-10 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[0.62rem] leading-none ${tab === id ? "nav-on" : "text-on-sky/90"}`}
+              className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[0.71rem] leading-none ${tab === id ? "nav-on" : "text-on-sky/90"}`}
             >
-              <Icon className="size-4" />
+              <Icon className="size-[1.12rem]" aria-hidden="true" />
               <span className="nav-label max-w-full px-1 text-center">{t(lang, key)}</span>
             </button>
           ))}
