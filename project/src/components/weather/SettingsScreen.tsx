@@ -219,10 +219,25 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
 
       <section className="wx-card wx-settings-card mb-3 px-4 py-4">
         <h2 className="text-[0.95rem] font-semibold text-fg">{t(lang, "sources")}</h2>
-        <p className="mt-1.5 text-[0.72rem] leading-relaxed text-muted">{t(lang, "sourcesBody")}</p>
+        <p className="mt-1.5 text-[0.75rem] leading-relaxed text-muted">{t(lang, "sourcesBody")}</p>
+        <nav aria-label={lang === "ar" ? "روابط المصادر والتراخيص" : "Sources and licenses"}
+          className="wx-source-links mt-3 flex flex-wrap gap-2">
+          {([
+            ["Open-Meteo", "https://open-meteo.com/en/license"],
+            ["MET Norway", "https://docs.api.met.no/doc/License.html"],
+            ["ECMWF", "https://www.ecmwf.int/"],
+            ["Esri", "https://www.esri.com/"],
+            ["CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"],
+          ] as const).map(([label, href]) => (
+            <a key={href} href={href} target="_blank" rel="noopener noreferrer" dir="ltr"
+              className="inline-flex min-h-12 items-center rounded-full border border-line px-3 py-2 text-xs font-semibold text-fg">
+              {label}
+            </a>
+          ))}
+        </nav>
         <button
           type="button"
-          className="cache-btn mt-3 h-11 w-full rounded-full text-xs font-semibold text-fg"
+          className="cache-btn mt-3 h-12 w-full rounded-full text-xs font-semibold text-fg"
           onClick={() => {
             clearCache();
             window.setTimeout(() => setNotice(null), 1600);
