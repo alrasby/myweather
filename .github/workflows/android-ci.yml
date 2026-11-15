@@ -22,6 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check source and release identity
         run: node scripts/verify-import.mjs
+      - name: Validate Google Play build identity, API 36, and source-pilot isolation
+        run: node project/scripts/verify-play-candidate.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
