@@ -34,6 +34,66 @@ export function needsSatelliteUnderlay(
   return Number.isFinite(zoom) && zoom > nativeZoom;
 }
 
+
+/** Source-verified Esri parent handoff. The existing low-detail parents are
+ * REAL georeferenced Esri tiles, never a screenshot of an obsolete continent.
+ * Do not remove one parent merely because another GridLayer emitted `load`:
+ * that event does not certify every current screen pixel tile.
+ *
+ * During the pinch, retain mounted parents and pre-mount only small coarser
+ * grids that could safely cover the next zoom. After zoom settles, unmount
+ * redundant parents ONLY once actual screen coverage is source-certified.
+ * This holds at most the existing z2/z4 parents, never creates a third type
+ * of raster or changes weather pixels.
+ */
+export type SatelliteHandoffInput = Readonly<{
+  zoom: number;
+  zooming: boolean;
+  mountedUnderlay: boolean;
+  mountedWorld: boolean;
+  detailComplete: boolean;
+  underlayComplete: boolean;
+  worldComplete: boolean;
+}>;
+export type SatelliteHandoffDecision = Readonly<{
+  underlay: boolean;
+  worldParent: boolean;
+}>;
+export function satelliteHandoffDecision(
+  state: SatelliteHandoffInput,
+): SatelliteHandoffDecision {
+  if (!Number.isFinite(state.zoom) || state.zoom < 0) {
+    return {underlay: state.mountedUnderlay, worldParent: state.mountedWorld};
+  }
+  const z = state.zoom;
+  if (state.zooming) {
+    return {
+      // At least the z4 image grid may participate in a pinch starting from
+      // the world boundary; do not dismantle old georeferenced imagery.
+      underlay: state.mountedUnderlay || z >= 4,
+      worldParent: state.mountedWorld || z <= 6,
+    };
+  }
+  if (z <= 4) {
+    // z4 underlay is redundant at z3/4 but can temporarily protect the
+    // handoff from z5 while the z2 parent AND fine detail are both incomplete.
+    return {
+      worldParent: true,
+      underlay: state.mountedUnderlay &&
+        !state.worldComplete && !state.detailComplete,
+    };
+  }
+  // At z5+ the genuine z4 source imagery stays as the permanent parent.
+  // Keep (or at z5 initially start) z2 only until the z4 or detail grid
+  // truly covers the current screen, then remove it to bound GPU memory.
+  const needsProtection = !state.underlayComplete && !state.detailComplete;
+  return {
+    underlay: true,
+    worldParent: needsProtection &&
+      (state.mountedWorld || z <= 5),
+  };
+}
+
 /** Chromium on high-density Android devices can expose a 1 CSS-pixel
  * raster tile seam between individually GPU-composited Esri tile images.
  * Apply a small raster-only edge bleed; never stretch OM weather-model data.
