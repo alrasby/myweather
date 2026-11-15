@@ -271,8 +271,9 @@ test("loaded ECMWF tiles avoid a second rectangular alpha fade on top of frame-l
   assert.ok(!css.includes("transition: opacity 160ms ease-out"), "use only Leaflet and ECMWF frame-level fading");
   assert.ok(css.includes("@media (prefers-reduced-motion: reduce)"), "existing reduced-motion support remains");
   const model = read("project/src/weather/spatialTilePolicy.ts");
-  assert.ok(model.includes("updateWhenIdle: true") && model.includes("keepBuffer: compact ? 0 : 1"),
-    "world raster grid uses bounded visible tiles; normal ECMWF retains its buffered region");
+  assert.ok(model.includes("updateWhenIdle: true") &&
+    model.includes("keepBuffer: compact && !world ? 0 : 1"),
+    "compact world ECMWF retains one real-tile ring while 1024px mobile regions stay unbuffered");
 });
 
 test("rain regional fallback starts slightly sooner after release without changing source budgets", () => {
