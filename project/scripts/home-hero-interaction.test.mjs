@@ -157,7 +157,9 @@ test("rain/snow hero visuals remain conditional on real weather code and clipped
   const app = read("project/src/components/weather/WeatherApp.tsx");
   assert.ok(sky.includes('heroAtmosphere(code, cover, wind)'));
   assert.ok(sky.includes('plan.precipitation === "snow"'));
-  assert.ok(sky.includes('if (plan.precipitation !== "none")'));
+  assert.ok(sky.includes('if (plan.precipitation === "snow")') &&
+            sky.includes('} else if (plan.precipitation === "rain")'),
+            "rain/snow rendered by distinct WMO-gated paths");
   assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen'));
   assert.ok(css.includes('height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)'));
 });
