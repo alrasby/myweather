@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronUp, Plus, Star, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronUp, Plus, Search, Star, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { searchPlaces } from "@/weather/api";
 import { searchLocal } from "@/weather/places-index";
@@ -21,11 +21,12 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
   const [query, setQuery] = useState("");
   const [remote, setRemote] = useState<{query:string;hits:Place[];settled:boolean}>({query:"",hits:[],settled:false});
   const q=query.trim();
-  const local=useMemo(()=>parseCoordinatePlace(q)?[parseCoordinatePlace(q)!]:searchLocal(q),[q]);
+  const local=useMemo(()=>{const coords=parseCoordinatePlace(q);return coords?[coords]:searchLocal(q);},[q]);
   // Render the matching query only: React effects run after paint, so stale
   // rows from a just-completed old request must never flash under new input.
   const hits=remote.query===q?remote.hits:local;
   const settled=remote.query===q&&remote.settled;
+  const hasTerm=Array.from(q).length>=2;
   const kept = (hit: Place) =>
     places.some((p) => p.id === hit.id || (Math.abs(p.lat - hit.lat) < 0.02 && Math.abs(p.lon - hit.lon) < 0.02));
 
@@ -65,52 +66,73 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
         </button>
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{t(lang, "cities")}</h1>
       </header>
-      <label className="mt-4 block">
-        <span className="sr-only">{t(lang, "searchPh")}</span>
-        <input
-          type="search"
-          inputMode="search"
-          autoComplete="off"
-          aria-controls="wx-city-search-results"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t(lang, "searchPh")}
-          className="wx-search-field h-12 w-full rounded-full px-4 text-sm outline-none"
-        />
-      </label>
-      {Array.from(q).length >= 2 ? (
-        <section className="mt-3">
-          <p className="mb-1.5 px-2 text-[0.72rem] font-medium text-muted">{t(lang, "searchResults")}</p>
-          <ul id="wx-city-search-results" aria-busy={!settled && hits.length === 0} className="wx-card divide-y divide-line">
-          {settled && hits.length === 0 ? (
-            <li role="status" className="px-4 py-3 text-sm text-muted">{t(lang, "noResults")}</li>
-          ) : (
-            hits.map((hit) => {
-              const saved = kept(hit);
+      <div className="wx-city-search-wrap mt-2">
+        <Search aria-hidden="true" className="pointer-events-none absolute start-4 top-3.5 size-5 text-muted" />
+        <label className="block">
+          <span className="sr-only">{t(lang, "searchPh")}</span>
+          <input
+            type="search"
+            inputMode="search"
+            autoComplete="off"
+            aria-controls="wx-city-search-results"
+            aria-autocomplete="list"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t(lang, "searchPh")}
+            className="wx-search-field h-12 w-full rounded-2xl ps-12 pe-12 text-sm outline-none"
+          />
+        </label>
+        {query ? (
+          <button type="button" onClick={() => setQuery("")}
+            className="absolute end-0 top-0 grid h-12 w-12 place-items-center rounded-xl text-muted"
+            aria-label={t(lang, "clearCache") === "Clear cache" ? "Clear search" : lang === "ar" ? "مسح البحث" : "Clear search"}>
+            <X aria-hidden="true" className="size-4" />
+          </button>
+        ) : null}
+      </div>
+      {hasTerm ? (
+        <section className="mt-2.5" role="region" aria-label={t(lang, "searchResults")}>
+          <div className="mb-1.5 flex items-center justify-between gap-2 px-2">
+            <p className="text-[0.75rem] font-semibold text-on-sky">{t(lang, "searchResults")}</p>
+            <span className="text-[0.69rem] text-on-sky/80" aria-live="polite">
+              {hits.length > 0 ? (lang === "ar" ? `${hits.length} نتائج` : `${hits.length} results`) :
+                settled ? "" : lang === "ar" ? "جار البحث…" : "Searching…"}
+            </span>
+          </div>
+          <ul id="wx-city-search-results" aria-busy={!settled && hits.length === 0}
+            className="wx-card wx-city-results overflow-hidden">
+            {hits.length > 0 ? hits.map((hit) => {
+              const saved=kept(hit);
               return (
-              <li key={hit.id} className="wx-city-row flex items-center gap-3 px-3 py-2">
-                <button type="button" className="min-w-0 flex-1 py-2 text-start" onClick={() => { /* Preview only: saving requires the separate + button. */ viewPlace(hit); setQuery(""); onClose(); }}>
-                  <p className="truncate text-sm text-fg">{placeTitle(hit, lang)}</p>
-                  <p className="truncate text-xs text-muted">{[hit.admin, placeCountry(hit, lang)].filter(Boolean).join(" · ")}</p>
-                </button>
-                <button
-                  type="button"
-                  className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-accent disabled:opacity-80"
-                  aria-label={saved ? t(lang, "saved") : t(lang, "save")}
-                  disabled={saved}
-                  onClick={() => addPlace(hit, null, { activate: false })}
-                >
-                  {saved ? <Check className="size-4" /> : <Plus className="size-4" />}
-                </button>
-              </li>
+                <li key={hit.id} className="wx-city-result-row wx-city-row flex items-center gap-3 px-3 py-1.5">
+                  <button type="button" className="min-w-0 flex-1 py-2 text-start"
+                    onClick={() => { viewPlace(hit); setQuery(""); onClose(); }}>
+                    <p className="truncate text-sm font-semibold text-fg">{placeTitle(hit, lang)}</p>
+                    <p className="truncate text-xs text-muted">{[hit.admin, placeCountry(hit, lang)].filter(Boolean).join(" · ")}</p>
+                  </button>
+                  <button type="button"
+                    className="wx-city-action flex h-12 w-12 shrink-0 items-center justify-center text-accent disabled:opacity-75"
+                    aria-label={saved ? t(lang, "saved") : t(lang, "save")}
+                    disabled={saved} onClick={() => addPlace(hit, null, {activate:false})}>
+                    {saved ? <Check className="size-4"/> : <Plus className="size-4"/>}
+                  </button>
+                </li>
               );
-            })
-          )}
+            }) : (
+              <li role="status" className="px-4 py-4 text-center text-sm text-muted">
+                {settled ? t(lang, "noResults") : lang === "ar" ? "جار البحث عن المدينة…" : "Searching for the city…"}
+              </li>
+            )}
           </ul>
         </section>
+      ) : q ? (
+        <p className="px-2 py-2 text-xs text-on-sky/85" role="status">
+          {lang === "ar" ? "اكتب حرفًا إضافيًا لبدء البحث" : "Type one more letter to start"}
+        </p>
       ) : null}
-
-      <p className="mb-1.5 mt-4 px-2 text-[0.72rem] font-medium text-muted">{t(lang, "savedCities")}</p>
+      {!hasTerm ? (
+        <>
+          <p className="mb-1.5 mt-3 px-2 text-[0.72rem] font-medium text-on-sky/85">{t(lang, "savedCities")}</p>
       <ul className="space-y-2">
         {places.map((place, index) => {
           const on = place.id === activeId;
@@ -139,6 +161,8 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
           );
         })}
       </ul>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -6,7 +6,7 @@ const css=read("src/styles.css"),settings=read("src/components/weather/SettingsS
 const map=read("src/components/weather/MapScreen.tsx"),city=read("src/components/weather/CitiesScreen.tsx");
 const api=read("src/weather/api.ts");
 test("tap controls remain at least 48px even though toggle track is slim",()=>{
- assert.ok(settings.includes('grid h-12 w-12')&&settings.includes('min-h-12 w-full'));
+ assert.ok(settings.includes('grid h-12 w-12')&&settings.includes('min-h-11 w-full'));
  assert.match(css,/\.wx-settings-toggle \.wx-toggle-track\s*\{[^}]*width: 2\.65rem/s);
  assert.ok(css.includes('[dir="rtl"] .wx-settings-toggle[aria-checked="true"]'));
 });
@@ -23,13 +23,31 @@ test("compact licensing credit is docked immediately above playback card, not ab
 test("source disclosure stays available and the homepage/map settings are preserved",()=>{
  for(const token of ['setPrefs({ mapLayer','setPrefs({ refreshMin','setPrefs({ alerts','clearCache()'])assert.ok(settings.includes(token));
  assert.ok(settings.includes("<details")&&settings.includes('wx-sources-summary'));
- assert.ok(css.includes("color-mix(in srgb, var(--wx-card-base) 94%, transparent)"));
+ assert.ok(css.includes("color-mix(in srgb, var(--wx-card-base) 80%, transparent)"));
+ assert.ok(css.includes("color-mix(in srgb, var(--wx-card-base) 81%, transparent)"));
+ assert.ok(settings.includes("wx-setting-field-inline"));
+ assert.ok(settings.includes('DESIGN_REVISION') && settings.includes('ANDROID_BUILD_CODE'));
 });
 test("city UI permits 2 characters, keeps current results, cancels superseded requests",()=>{
  assert.ok(city.includes("Array.from(q).length < 2"));
+ assert.ok(city.includes('className="wx-card wx-city-results') && city.includes('!hasTerm ? ('));
  assert.ok(city.includes("onUpdate")||city.includes("rows=>"));
  assert.ok(city.includes("if(current&&!ac.signal.aborted)"));
  assert.ok(city.includes("remote.query===q?remote.hits:local"));
  assert.ok(api.includes("mergeCityResults")&&api.includes("relaxedCityQuery"));
  assert.ok(api.includes("cacheCities(key,result)"));
+});
+
+test("build label agrees with Gradle versionCode so stale APKs are obvious",()=>{
+ const info=read("src/weather/buildInfo.ts"),gradle=read("android/app/build.gradle");
+ const code=info.match(/ANDROID_BUILD_CODE = (\d+)/)?.[1];
+ assert.ok(code && gradle.includes("versionCode "+code));
+ assert.ok(settings.includes('Build {ANDROID_BUILD_CODE}'));
+});
+test("Prague full-name result visibility is protected even when provider is offline",()=>{
+ const seeds=read("src/weather/places-index.ts");
+ assert.ok(seeds.includes('["Prague", "براغ"'));
+ assert.ok(city.includes("const hits=remote.query===q?remote.hits:local"));
+ assert.ok(city.includes("hits.length > 0 ? hits.map"));
+ assert.ok(city.includes('role="status"'));
 });

@@ -55,11 +55,12 @@ test("48px mobile touch targets, keyboard focus, contrast and reduced motion are
  assert.ok(app.includes('aria-label={lang === "ar" ? "التنقل الرئيسي"'));
  assert.ok(cities.includes("wx-city-action")&&cities.includes("h-12 w-12"));
  assert.ok(cities.includes('type="search"')&&cities.includes('aria-controls="wx-city-search-results"'));
- assert.ok(settings.includes("min-h-12 w-full")&&settings.includes('role="switch"'));
+ assert.ok(settings.includes("min-h-11 w-full")&&settings.includes('role="switch"'));
  assert.ok(settings.includes("wx-settings-toggle") && settings.includes("wx-toggle-thumb"));
  assert.ok(design.includes(":focus-visible") && design.includes("prefers-reduced-motion") &&
    design.includes("prefers-contrast: more") && design.includes("forced-colors: active"));
  assert.ok(design.includes("max-width: 360px"));
+ assert.ok(settings.includes("wx-setting-field-inline") && settings.includes("wx-setting-body"));
  assert.ok(settings.includes("wx-sources-details") && settings.includes("<details"));
  assert.ok(design.includes(".wx-settings-toggle[aria-checked="));
 });

@@ -35,3 +35,12 @@ test("empty and invalid geocoding coordinates never appear or throw",()=>{
  assert.deepEqual(result.map(p=>p.name),["Doha"]);
  assert.deepEqual(mergeCityResults("abc",[],[]),[]);
 });
+
+test("device regression: typing براغ must return Prague before any network request",()=>{
+ for(const q of ["بر","برا","براغ","Pr","Prag","Prague"]){
+  const hits=searchLocal(q);
+  assert.ok(hits.some(p=>p.nameEn==="Prague"),q+" must have an offline candidate");
+ }
+ const results=mergeCityResults("براغ",searchLocal("براغ"),[]);
+ assert.equal(results[0]?.nameEn,"Prague");
+});

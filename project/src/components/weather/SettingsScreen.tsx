@@ -1,5 +1,6 @@
 import { t } from "@/weather/i18n";
 import { ChevronDown } from "lucide-react";
+import { ANDROID_BUILD_CODE, DESIGN_REVISION } from "@/weather/buildInfo";
 import { useWeather } from "@/weather/store";
 import type { Lang, MorningAt, Prefs, QuietHours, RefreshMin, ShadeKind } from "@/weather/types";
 import { useEffect, useState, type ReactNode } from "react";
@@ -19,7 +20,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
   return (
     <div className="wx-settings h-full overflow-y-auto px-3 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-2.5">
       <Card title={t(lang, "appearance")}>
-        <Field label={t(lang, "language")}>
+        <Field label={t(lang, "language")} inline>
           <Chips
             value={prefs.lang}
             options={[
@@ -32,10 +33,9 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
         <Field label={t(lang, "theme")}>
           <Chips
-            cols={2}
             value={prefs.theme}
             options={[
-              ["sun", t(lang, "themeSun")],
+              ["sun", lang === "ar" ? "شروق/غروب" : "Sun cycle", t(lang, "themeSun")],
               ["system", t(lang, "system")],
               ["light", t(lang, "light")],
               ["dark", t(lang, "dark")],
@@ -46,7 +46,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
       </Card>
 
       <Card title={t(lang, "units")}>
-        <Field label={t(lang, "temperature")}>
+        <Field label={t(lang, "temperature")} inline>
           <Chips
             value={prefs.temp}
             options={[
@@ -56,7 +56,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(temp) => setPrefs({ temp })}
           />
         </Field>
-        <Field label={t(lang, "wind")}>
+        <Field label={t(lang, "wind")} inline>
           <Chips
             value={prefs.wind}
             options={[
@@ -68,7 +68,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(wind) => setPrefs({ wind })}
           />
         </Field>
-        <Field label={t(lang, "pressure")}>
+        <Field label={t(lang, "pressure")} inline>
           <Chips
             value={prefs.pressure}
             options={[
@@ -119,7 +119,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         />
         <Toggle on={prefs.dataSaver} title={t(lang, "dataSaver")} hint={t(lang, "dataSaverHint")} onClick={() => setPrefs({ dataSaver: !prefs.dataSaver })} />
         <div className={prefs.alerts ? "" : "pointer-events-none opacity-45"}>
-        <Field label={t(lang, "rainFrom")}>
+        <Field label={t(lang, "rainFrom")} inline>
           <Chips
             disabled={!prefs.alerts}
             value={String(prefs.rainAlert)}
@@ -131,7 +131,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ rainAlert: Number(id) as Prefs["rainAlert"] })}
           />
         </Field>
-        <Field label={t(lang, "windFrom")}>
+        <Field label={t(lang, "windFrom")} inline>
           <Chips
             disabled={!prefs.alerts}
             value={String(prefs.windAlert)}
@@ -143,7 +143,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ windAlert: Number(id) as Prefs["windAlert"] })}
           />
         </Field>
-        <Field label={t(lang, "dustFrom")}>
+        <Field label={t(lang, "dustFrom")} inline>
           <Chips
             disabled={!prefs.alerts}
             value={String(prefs.dustAlert)}
@@ -156,7 +156,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
           />
         </Field>
         </div>
-        <Field label={t(lang, "morningSum")}>
+        <Field label={t(lang, "morningSum")} inline>
           <Chips
             value={prefs.morning}
             options={[
@@ -168,7 +168,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(morning) => setPrefs({ morning: morning as MorningAt })}
           />
         </Field>
-        <Field label={t(lang, "quietHours")}>
+        <Field label={t(lang, "quietHours")} inline>
           <Chips
             value={prefs.quiet}
             options={[
@@ -193,7 +193,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ mapLayer: Number(id) as ShadeKind })}
           />
         </Field>
-        <Field label={t(lang, "timeSpan")}>
+        <Field label={t(lang, "timeSpan")} inline>
           <Chips
             value={String(prefs.mapHours === 72 ? 48 : prefs.mapHours)}
             options={[
@@ -203,7 +203,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ mapHours: Number(id) as Prefs["mapHours"] })}
           />
         </Field>
-        <Field label={t(lang, "windMotion")}>
+        <Field label={t(lang, "windMotion")} inline>
           <Chips
             value={prefs.particles}
             disabled={prefs.dataSaver}
@@ -253,9 +253,14 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </div>
       </details>
       <div className="flex justify-center pb-1 pt-1">
-        <p dir="ltr" className="credit credit-glass inline-flex items-center gap-1 rounded-full px-3 py-1 text-[0.68rem] font-medium">
-          Made with <span className="text-danger">♥</span> By NabdhServ.Net
-        </p>
+        <div className="flex flex-col items-center gap-1">
+          <span dir="ltr" className="wx-build-id px-2.5 py-1" aria-label={`Android build ${ANDROID_BUILD_CODE}, design ${DESIGN_REVISION}`}>
+            MyWeather 1.0.0 · Build {ANDROID_BUILD_CODE} · {DESIGN_REVISION}
+          </span>
+          <p dir="ltr" className="credit credit-glass inline-flex items-center gap-1 rounded-full px-3 py-1 text-[0.68rem] font-medium">
+            Made with <span className="text-danger">♥</span> By NabdhServ.Net
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -263,18 +268,20 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="wx-card wx-settings-card mb-2.5 px-3.5 py-3">
+    <section className="wx-card wx-settings-card">
       <h2 className="flex items-center gap-2 text-[0.95rem] font-semibold tracking-tight text-fg"><span aria-hidden="true" className="wx-settings-dot" />{title}</h2>
-      <div className="mt-2.5 flex flex-col gap-2.5">{children}</div>
+      <div className="wx-setting-body">{children}</div>
     </section>
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, inline = false }: {
+  label: string; children: ReactNode; inline?: boolean;
+}) {
   return (
-    <div>
-      <p className="mb-1 text-[0.75rem] font-medium text-muted">{label}</p>
-      {children}
+    <div className={`wx-setting-field ${inline ? "wx-setting-field-inline" : ""}`}>
+      <p className="wx-setting-label">{label}</p>
+      <div className="wx-setting-control">{children}</div>
     </div>
   );
 }
@@ -287,7 +294,7 @@ function Chips<T extends string>({
   disabled,
 }: {
   value: T;
-  options: [T, string][];
+  options: [T, string, string?][];
   onChange: (value: T) => void;
   cols?: number;
   disabled?: boolean;
@@ -299,15 +306,16 @@ function Chips<T extends string>({
       className={`chip-track wx-settings-chips gap-0.5 p-0.5 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "opacity-45" : ""}`}
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
-      {options.map(([id, label]) => {
+      {options.map(([id, label, accessibleLabel]) => {
         const on = value === id;
         return (
           <button
             key={id}
             type="button"
             onClick={() => onChange(id)}
-            className={`flex min-h-12 w-full items-center justify-center rounded-full px-1.5 py-1 text-center text-[0.76rem] leading-snug ${on ? "chip-on font-semibold" : "text-fg/85"}`}
+            className={`flex min-h-11 w-full items-center justify-center rounded-full px-1 py-1 text-center text-[0.73rem] leading-snug ${on ? "chip-on font-semibold" : "text-fg/85"}`}
             aria-pressed={on}
+            aria-label={accessibleLabel ?? label}
             disabled={disabled}
           >
             {label}
