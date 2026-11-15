@@ -12,6 +12,7 @@ const map=read("src/components/weather/MapScreen.tsx");
 const i18n=read("src/weather/i18n.ts");
 const weather=read("src/weather/api.ts");
 const format=read("src/weather/format.ts");
+const units=read("src/weather/unitConversion.ts");
 const comparison=read("src/weather/forecastSourceComparison.ts");
 function role(name) {
   const match=[...design.matchAll(new RegExp("--"+name+":\\s*(#[0-9a-fA-F]{6})","g"))];
@@ -67,7 +68,8 @@ test("Arabic and English, city actions, forecast panels and stored settings reta
  for(const v of ["setPrefs({ temp","setPrefs({ wind","setPrefs({ theme","setPrefs({ mapLayer","clearCache()"])assert.ok(settings.includes(v));
 });
 test("units, model valid-time, calendar timezone and two distinct forecast sources are not conflated",()=>{
- for(const v of ["unit === \"f\"","kmh / 3.6","0.621371","33.8638866667","timeZone,","hourCycle: \"h23\""])assert.ok(format.includes(v),v);
+ for(const v of ["timeZone,","hourCycle: \"h23\"","convertPressure(hpa, unit)","convertDistance(meters, unit)"])assert.ok(format.includes(v),v);
+ for(const v of ['unit==="f"',"kmh/3.6","0.621371","33.8638866667"])assert.ok(units.includes(v),v);
  assert.ok(weather.includes('url.searchParams.set("models", "best_match")'));
  assert.ok(weather.includes('bundle.forecastSource = "open-meteo-best-match"'));
  assert.ok(weather.includes('forecastSource: "met-no"'));
