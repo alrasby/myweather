@@ -497,6 +497,9 @@ function tileUrl(variable: string, index: number, run: PinnedSpatialRun | null):
 export class ModelField {
   onLive: (() => void) | null = null;
   onMiss: (() => void) | null = null;
+  /** Signal UI only when a genuinely different ECMWF hour dominates. */
+  onClockFrameChanged: (() => void) | null = null;
+  private lastClockFrame: number | null = null;
 
   private map: LeafletMap | null = null;
   private adapter: Adapter | null = null;
@@ -1687,6 +1690,19 @@ export class ModelField {
       if (nextVisible) this.onLive?.();
       else this.onMiss?.();
     }
+    // The source may finish a new hourly raster between throttled 180ms
+    // React/DOM clock paints (or after playback stops). Notify exactly on
+    // a change in dominant, source-backed hour, never on every 20Hz blend.
+    const dominant = this.spatialVisible
+      ? [...this.frames.entries()]
+        .filter(([step, frame]) => frame.ready && frame.opacity > 0.01 &&
+          Number.isFinite(this.times[step]))
+        .sort((a, b) => b[1].opacity - a[1].opacity)[0]?.[0] ?? null
+      : null;
+    if (dominant !== this.lastClockFrame) {
+      this.lastClockFrame = dominant;
+      this.onClockFrameChanged?.();
+    }
   }
 
   /** Dispose all Leaflet image layers, timers and closures on map teardown.
@@ -1713,6 +1729,8 @@ export class ModelField {
     this.seq += 1; // invalidate asynchronous frame and metadata callbacks
     this.onLive = null;
     this.onMiss = null;
+    this.onClockFrameChanged = null;
+    this.lastClockFrame = null;
     this.clear();
     this.viewportRenderer?.dispose();
     this.viewportRenderer = null;
