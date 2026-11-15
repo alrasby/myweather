@@ -14,6 +14,7 @@
 import { currentBounds, getProtocolInstance, omProtocol } from "@openmeteo/weather-map-layer";
 import { SpatialAdmissionError, SpatialRenderAdmission } from "./spatialRenderAdmission.ts";
 import { SpatialDatasetKeys, captureSpatialWorkerData } from "./spatialDatasetKeys.ts";
+import { SpatialRangeFlights } from "./spatialRangeFlights.ts";
 import type { OmProtocolSettings, OmUrlState, RenderableColorScale } from "@openmeteo/weather-map-layer";
 
 type ReadKey = string;
@@ -69,6 +70,7 @@ export type ViewportFallbackReasons = Record<ViewportFallbackReason, number>;
 export type ViewportRendererStats = {
   mode: "worker-cache" | "legacy";
   workerTiles: number; fallbackTiles: number; datasetCopies: number; datasetReuses: number;
+  datasetReadJoins: number;
   datasetEvictions: number; workerSlots: number; capturedReadRecoveries: number;
   queued: number; peakWaiting: number; reasons: ViewportFallbackReasons;
   readP50Ms: number | null; readP95Ms: number | null; workerQueueP95Ms: number | null;
@@ -211,11 +213,21 @@ function paletteOf(settings: OmProtocolSettings, variable: string): Palette | nu
   return { breakpoints: scale.breakpoints, colors: scale.colors };
 }
 
+/** Cache keys must include exact source/run/hour and proven geography.
+ * The SAME variable can represent a completely different region after pan. */
+export function spatialDatasetFlightKey(
+  tileRequestKey:string,bounds:readonly number[]|null,
+):string {
+  return tileRequestKey+"|bounds="+(bounds?JSON.stringify(bounds):"global");
+}
+
 export class SpatialViewportRenderer {
   private slots: Slot[] = [];
   private jobs: TileJob[] = [];
   private serial = 0;
   private readonly datasetKeys = new SpatialDatasetKeys();
+  /** Share source dataset validation across simultaneous Leaflet raster tiles. */
+  private readonly datasetFlights = new SpatialRangeFlights<OmUrlState|null>();
   private samples: number[] = [];
   private readSamples: number[] = [];
   private workerQueueSamples: number[] = [];
@@ -260,7 +272,7 @@ export class SpatialViewportRenderer {
   snapshot(): ViewportRendererStats {
     return { mode: this.active ? "worker-cache" : "legacy", workerTiles: this.completed,
       fallbackTiles: this.fallbackCount, datasetCopies: this.copied,
-      datasetReuses: this.reused, datasetEvictions: this.evicted,
+      datasetReuses: this.reused, datasetReadJoins: this.datasetFlights.joined, datasetEvictions: this.evicted,
       workerSlots: this.slots.length, capturedReadRecoveries: this.recovered,
       queued: this.jobs.length + this.admission.waiting,
       peakWaiting: this.admission.peakWaiting, reasons: { ...this.reasons },
@@ -307,21 +319,9 @@ export class SpatialViewportRenderer {
 
   private async ensureDataset(parsed: NonNullable<ReturnType<typeof parseSpatialRasterTile>>,
     controller: AbortController, config: OmProtocolSettings): Promise<OmUrlState | null> {
-    // Upstream parseRequest() reads updateCurrentBounds(), then
-    // getOrCreateState() verifies boundsIncluded() and replaces a stale
-    // spatial data window. The earlier custom shortcut checked file/variable
-    // ONLY: it could paint old-area NaNs/transparent rectangles after a pan.
-    // Calling arrayBuffer with no vectors/contours never paints a redundant
-    // raster tile, and upstream ensureData() already deduplicates concurrent
-    // .om reads by state + AbortSignal. Do NOT re-implement that cache here.
-    let captured: OmUrlState | null = null;
-    // The snapshot belongs to THIS tile request. Concurrent panning can
-    // mutate the module-wide currentBounds before the read completes.
+    // Capture the actual tile-aligned source bounds at request time; never
+    // share a decoded field with an unrelated viewport or pinned model hour.
     const requestedBounds = currentBounds ? [...currentBounds] : null;
-    // Only a fully decoded state with EXPLICIT source bounds covering these
-    // aligned tiles may skip the official arrayBuffer validation. This check
-    // and pin are synchronous: panning cannot swap the shared bounds between
-    // inspection and retaining its immutable Float32Array reference.
     if (!controller.signal.aborted && parsed.frame === null) {
       const queryAt = parsed.key.indexOf("?");
       const deltaParam = queryAt < 0 ? null :
@@ -336,31 +336,50 @@ export class SpatialViewportRenderer {
         return resident;
       }
     }
-    const previousCallback = config.postReadCallback;
-    const recordRead: NonNullable<OmProtocolSettings["postReadCallback"]> = (reader, data, state) => {
-      previousCallback?.(reader, data, state);
-      if (state.omFileUrl === parsed.file && state.dataOptions.variable === parsed.variable &&
-          data.values) {
-        // Shallow snapshot only: no additional 25MiB Float32Array copy.
-        // The upstream LRU may null state.data after this precise read.
-        captured = { ...state, data };
+    // Tile URL coordinates are intentionally omitted from the key: the
+    // arrayBuffer operation verifies/loads the same .om variable+hour over
+    // the same source bounds. Each consumer keeps its own AbortSignal;
+    // cancellation only aborts the read when the LAST consumer leaves.
+    const key = spatialDatasetFlightKey(parsed.key, requestedBounds);
+    return this.datasetFlights.run(key, controller.signal, async (sharedSignal) => {
+      const sharedController = new AbortController();
+      const abort = () => sharedController.abort();
+      sharedSignal.addEventListener("abort", abort, { once: true });
+      if (sharedSignal.aborted) sharedController.abort();
+      let captured: OmUrlState | null = null;
+      const originalCallback = config.postReadCallback;
+      const recordRead: NonNullable<OmProtocolSettings["postReadCallback"]> =
+        (reader, data, state) => {
+          originalCallback?.(reader, data, state);
+          if (state.omFileUrl === parsed.file &&
+              state.dataOptions.variable === parsed.variable && data.values) {
+            // Only a shallow metadata snapshot; never copy ~26MB values here.
+            captured = { ...state, data };
+          }
+        };
+      try {
+        const requestSettings = { ...config, postReadCallback: recordRead };
+        return await resolveCurrentSpatialState(
+          () => omProtocol({
+            url: `${parsed.key}/${parsed.tile.z}/${parsed.tile.x}/${parsed.tile.y}`,
+            type: "arrayBuffer",
+          }, sharedController, requestSettings),
+          () => {
+            if (sharedSignal.aborted) return null;
+            const states = Array.from(getProtocolInstance(config).stateByKey.values());
+            const live = chooseLoadedSpatialState(null, states,
+              parsed.file, parsed.variable, requestedBounds);
+            const resolved = chooseLoadedSpatialState(captured, states,
+              parsed.file, parsed.variable, requestedBounds);
+            if (captured && resolved === captured && !live) this.recovered++;
+            return pinLoadedSpatialState(resolved);
+          },
+        );
+      } finally {
+        sharedSignal.removeEventListener("abort", abort);
+        captured = null;
       }
-    };
-    const requestSettings = { ...config, postReadCallback: recordRead };
-    return resolveCurrentSpatialState(
-      () => omProtocol(
-        { url: `${parsed.key}/${parsed.tile.z}/${parsed.tile.x}/${parsed.tile.y}`, type: "arrayBuffer" },
-        controller, requestSettings,
-      ),
-      () => {
-        if (controller.signal.aborted) return null;
-        const states = Array.from(getProtocolInstance(config).stateByKey.values());
-        const live = chooseLoadedSpatialState(null, states, parsed.file, parsed.variable, requestedBounds);
-        const resolved = chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable, requestedBounds);
-        if (captured && resolved === captured && !live) this.recovered++;
-        return pinLoadedSpatialState(resolved);
-      },
-    );
+    });
   }
 
   private async render(state: OmUrlState, palette: Palette, tile: RasterTask,
@@ -475,6 +494,7 @@ export class SpatialViewportRenderer {
   }
   private disable(reason: Error) {
     if (this.disabled) return;
+    this.datasetFlights.cancelAll();
     this.disabled = true;
     this.admission.close();
     for (const slot of this.slots) {
@@ -493,6 +513,13 @@ export class SpatialViewportRenderer {
     this.jobs = [];
   }
   clear() {
+    // The map has already removed old Leaflet layers. Drop callbacks and
+    // queued dataset requests for retired viewports, not just worker copies.
+    this.datasetFlights.cancelAll();
+    for (const job of this.jobs.splice(0)) {
+      job.signal.removeEventListener("abort", job.onAbort);
+      job.reject(new DOMException("Viewport retired", "AbortError"));
+    }
     for (const slot of this.slots) {
       slot.cache.clear();
       slot.bytes = 0;

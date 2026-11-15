@@ -66,3 +66,22 @@ test("failed native requests clear the flight so a retry can run", async () => {
   await assert.rejects(flights.run("x", undefined, async () => { throw new Error("native unavailable"); }), /native unavailable/);
   assert.equal(await flights.run("x", undefined, async () => "retried"), "retried");
 });
+
+test("retiring a viewport cancels grouped model-data reads and prevents new joins", async()=>{
+ const f=new SpatialRangeFlights<number>();
+ let oldSignal!:AbortSignal;
+ let resolveOld!:(value:number)=>void;
+ const first=f.run("bounds=old",undefined,async signal=>{
+   oldSignal=signal;
+   return await new Promise<number>(resolve=>{resolveOld=resolve;});
+ });
+ await Promise.resolve();
+ f.cancelAll();
+ assert.equal(oldSignal.aborted,true);
+ assert.equal(f.active,0);
+ const next=await f.run("bounds=old",undefined,async()=>5);
+ assert.equal(next,5);
+ resolveOld(2);
+ await first; // Old consumer may settle but is never reused for new viewport.
+ assert.equal(f.active,0);
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, spatialStateCoversBounds, pinLoadedSpatialState, certifiedResidentSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob } from "./spatialViewportRenderer.ts";
+import { classifyViewportFailure, parseSpatialRasterTile, shouldUseViewportWorker, SpatialViewportRenderer, MAX_WORKER_DATA, ECMWF_IFS_FULL_GRID_BYTES, resolveCurrentSpatialState, chooseLoadedSpatialState, spatialStateCoversBounds, pinLoadedSpatialState, certifiedResidentSpatialState, SPATIAL_WORKER_VARIABLES, MAX_ACTIVE_SPATIAL_WORKERS, nextSpatialWorkerJob, spatialDatasetFlightKey } from "./spatialViewportRenderer.ts";
 import { SpatialAdmissionError } from "./spatialRenderAdmission.ts";
 
 const base = "om://https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/2026/11/12/0000Z/2026-11-12T1200.om";
@@ -216,4 +216,16 @@ test("capture manifest or differently accumulated precipitation can never borrow
  assert.equal(certifiedResidentSpatialState([state] as never,
    "https://openmeteo.s3.amazonaws.com/data_spatial/ecmwf_ifs/latest.json",
    "precipitation",wanted,3),null,"latest.json valid_times_N may change underlying source hour");
+});
+
+test("ECMWF source read coalesces tiles only inside the same pinned run and aligned viewport",()=>{
+ const hour="om://https://example.org/2026-11-15T1200.om?variable=cloud_cover";
+ const a=[38,10,55,26],b=[39,10,56,26];
+ assert.equal(spatialDatasetFlightKey(hour,a),spatialDatasetFlightKey(hour,[...a]));
+ assert.notEqual(spatialDatasetFlightKey(hour,a),spatialDatasetFlightKey(hour,b));
+ assert.notEqual(spatialDatasetFlightKey(hour,a),
+   spatialDatasetFlightKey(hour.replace("1200","1300"),a));
+ assert.notEqual(spatialDatasetFlightKey(hour,a),
+   spatialDatasetFlightKey(hour.replace("cloud_cover","precipitation"),a));
+ assert.notEqual(spatialDatasetFlightKey(hour,a),spatialDatasetFlightKey(hour,null));
 });

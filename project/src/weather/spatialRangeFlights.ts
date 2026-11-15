@@ -17,6 +17,13 @@ export class SpatialRangeFlights<T> {
 
   get joined(): number { return this.joins; }
   get active(): number { return this.flights.size; }
+  /** Release abandoned source reads on map teardown or sampling-mode change.
+   * Signals are propagated even if a platform's underlying HTTP is not
+   * physically abortable. Late responses are never reused after this clear. */
+  cancelAll(): void {
+    for (const flight of this.flights.values()) flight.controller.abort();
+    this.flights.clear();
+  }
 
   run(key: string, callerSignal: AbortSignal | undefined, job: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (callerSignal?.aborted) return Promise.reject(new Error("spatial-request-aborted"));
