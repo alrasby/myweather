@@ -47,6 +47,50 @@ PY
   echo "$CYCLE,$START,$READS,$PSS,$ALIVE" >>"$OUT/samples.csv"
   test "$ALIVE" -eq 1
 done
+# Exercise two map moves after the real ready-frame startup. The
+# debug-only WebView probe records NEW viewport source, UTC time and true
+# cloud/rain/snow coverage at 0.75/6/16 seconds. Keep exact map center and
+# personal coordinates out of logcat. A startup frame cannot pass a later pan.
+adb logcat -c || true
+for LEG in 1 2; do
+  Y="$((HEIGHT*55/100))"
+  if [ "$LEG" -eq 1 ]; then
+    X1="$((WIDTH*78/100))"; X2="$((WIDTH*23/100))"
+  else
+    X1="$((WIDTH*23/100))"; X2="$((WIDTH*78/100))"
+  fi
+  adb shell input swipe "$X1" "$Y" "$X2" "$Y" 700
+  sleep 19
+  adb shell screencap -p /sdcard/myweather-viewport.png
+  adb pull /sdcard/myweather-viewport.png "$OUT/viewport-pan-$LEG.png" >/dev/null || true
+done
+adb logcat -d >"$OUT/viewport-pan.log"
+python3 - "$OUT/viewport-pan.log" "$OUT/viewport-pan-summary.json" <<'PY'
+import json,sys
+records=[]
+for line in open(sys.argv[1],encoding="utf-8",errors="replace"):
+    marker="MYWEATHER_ECMWF_VIEWPORT "
+    if marker not in line:continue
+    try: data=json.loads(line.split(marker,1)[1])
+    except json.JSONDecodeError:continue
+    records.append(data)
+with open(sys.argv[2],"w",encoding="utf-8") as out:
+    json.dump({"records":records,"verifiedNewViewport":any(
+        rec.get("afterMs")==16000 and rec.get("verifiedComplete") is True
+        for rec in records)},out,indent=2)
+if len({r.get("generation") for r in records}) < 2:
+    raise SystemExit("Viewport QA incomplete: no two distinct pan generations recorded")
+if not any(r.get("afterMs")==16000 and r.get("verifiedComplete") is True for r in records):
+    raise SystemExit("Viewport QA incomplete: no genuinely complete new viewport after pan; inspect artifact")
+for record in records:
+    if record.get("verifiedComplete") and (
+        record.get("source")!="spatial" or
+        record.get("displayedFrame") is None or
+        record.get("displayedValidTime")!=record.get("requestedValidTime")
+    ):
+        raise SystemExit("Viewport QA invalid: claims verified ECMWF while source or time is wrong")
+print("Viewport pan: source-backed frame confirmed for a new map viewport (emulator only)")
+PY
 for N in $(seq 1 10); do
   adb shell input keyevent KEYCODE_HOME
   sleep 1
