@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { searchPlaces } from "@/weather/api";
 import { searchLocal } from "@/weather/places-index";
 import { parseCoordinatePlace } from "@/weather/coordinateSearch";
+import { mergeCityResults } from "@/weather/placeSearchQuality";
 import { placeCountry, placeTitle } from "@/weather/format";
 import { t } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
@@ -24,7 +25,9 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
   const local=useMemo(()=>{const coords=parseCoordinatePlace(q);return coords?[coords]:searchLocal(q);},[q]);
   // Render the matching query only: React effects run after paint, so stale
   // rows from a just-completed old request must never flash under new input.
-  const hits=remote.query===q?remote.hits:local;
+  // The local bilingual index is authoritative for immediate results: an
+  // empty, slow or superseded network reply can NEVER replace those rows.
+  const hits=mergeCityResults(q,local,remote.query===q?remote.hits:[]);
   const settled=remote.query===q&&remote.settled;
   const hasTerm=Array.from(q).length>=2;
   const kept = (hit: Place) =>
@@ -85,7 +88,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
         {query ? (
           <button type="button" onClick={() => setQuery("")}
             className="absolute end-0 top-0 grid h-12 w-12 place-items-center rounded-xl text-muted"
-            aria-label={t(lang, "clearCache") === "Clear cache" ? "Clear search" : lang === "ar" ? "مسح البحث" : "Clear search"}>
+            aria-label={lang === "ar" ? "مسح البحث" : "Clear search"}>
             <X aria-hidden="true" className="size-4" />
           </button>
         ) : null}
@@ -120,7 +123,10 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               );
             }) : (
               <li role="status" className="px-4 py-4 text-center text-sm text-muted">
-                {settled ? t(lang, "noResults") : lang === "ar" ? "جار البحث عن المدينة…" : "Searching for the city…"}
+                {Array.from(q).length===2
+                  ? lang === "ar" ? "أضف حرفًا ثالثًا للبحث العالمي" : "Type a third letter for worldwide search"
+                  : settled ? t(lang, "noResults")
+                  : lang === "ar" ? "جار البحث عن المدينة…" : "Searching for the city…"}
               </li>
             )}
           </ul>

@@ -33,9 +33,11 @@ test("city UI permits 2 characters, keeps current results, cancels superseded re
  assert.ok(city.includes('className="wx-card wx-city-results') && city.includes('!hasTerm ? ('));
  assert.ok(city.includes("onUpdate")||city.includes("rows=>"));
  assert.ok(city.includes("if(current&&!ac.signal.aborted)"));
- assert.ok(city.includes("remote.query===q?remote.hits:local"));
+ assert.ok(city.includes("mergeCityResults(q,local,remote.query===q?remote.hits:[])"));
  assert.ok(api.includes("mergeCityResults")&&api.includes("relaxedCityQuery"));
  assert.ok(api.includes("cacheCities(key,result)"));
+ assert.ok(api.includes("if(Array.from(trimmed).length===2)return local"));
+ assert.ok(api.includes("exactAlias"));
 });
 
 test("build label agrees with Gradle versionCode so stale APKs are obvious",()=>{
@@ -47,7 +49,15 @@ test("build label agrees with Gradle versionCode so stale APKs are obvious",()=>
 test("Prague full-name result visibility is protected even when provider is offline",()=>{
  const seeds=read("src/weather/places-index.ts");
  assert.ok(seeds.includes('["Prague", "براغ"'));
- assert.ok(city.includes("const hits=remote.query===q?remote.hits:local"));
+ assert.ok(city.includes("mergeCityResults(q,local,remote.query===q?remote.hits:[])"));
  assert.ok(city.includes("hits.length > 0 ? hits.map"));
  assert.ok(city.includes('role="status"'));
+});
+
+test("map playback header uses one centered time row with a dedicated value",()=>{
+ const row=map.slice(map.indexOf('wx-map-playback-meta'));
+ assert.ok(row.includes('ref={timeRef}')&&row.includes('ref={valueRef}'));
+ assert.ok(row.indexOf('ref={timeRef}')<row.indexOf('ref={valueRef}'));
+ assert.ok(row.includes('grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'));
+ assert.ok(!row.includes('className="block text-[0.65rem] leading-tight text-muted"'));
 });

@@ -44,3 +44,19 @@ test("device regression: typing براغ must return Prague before any network r
  const results=mergeCityResults("براغ",searchLocal("براغ"),[]);
  assert.equal(results[0]?.nameEn,"Prague");
 });
+
+test("complete Damascus/Dublin/Prague queries never lose their real bundled city",()=>{
+ for(const [ar,en] of [["دمشق","Damascus"],["دبلن","Dublin"],["براغ","Prague"],["موسكو","Moscow"],["دبي","Dubai"]]){
+   const local=searchLocal(ar);
+   assert.ok(local.some(p=>p.nameEn===en),"no synchronous local match for "+ar);
+   for(const stale of [[],[mk("Unrelated",1,1)],searchLocal("Paris")]){
+     const all=mergeCityResults(ar,local,stale);
+     assert.ok(all.some(p=>p.nameEn===en),"remote must not hide "+ar);
+   }
+ }
+});
+test("two-letter city search gives local prefix but never fabricates a worldwide result",()=>{
+ assert.ok(searchLocal("دم").some(p=>p.nameEn==="Damascus"));
+ assert.ok(searchLocal("دب").some(p=>p.nameEn==="Dubai"||p.nameEn==="Dublin"));
+ assert.equal(mergeCityResults("zz",[],[]).length,0);
+});

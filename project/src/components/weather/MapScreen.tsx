@@ -13,6 +13,7 @@ import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/map
 import { satelliteHandoffDecision, snapshotSatelliteRasterCoverage, type SatelliteRasterCoverage, type SatelliteRasterLayerLike, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
+import { mapRainReading } from "@/weather/mapRainIndicator";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
 import { compassFrom } from "@/weather/heading";
@@ -237,18 +238,25 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }
       if (valueRef.current) {
         if (kindRef.current === 2) {
-          const center = mapRef.current?.getCenter();
-          const near = center
-            ? nearbyRain(placeRef.current, bundleRef.current, center.lat, center.lng, info.timeMs)
-            : null;
-          const gridMm = info.sample?.rain ?? 0;
-          if (near != null && (info.estimated || (gridMm < 0.05 && near >= 0.05))) {
-            valueRef.current.textContent = `${formatNumber(near, language, 1)} mm`;
-          } else if (info.estimated) {
-            valueRef.current.textContent = "—";
-          } else {
-            valueRef.current.textContent = info.sample ? sampleText(info.sample, 2, current, language) : "—";
-          }
+          const center=mapRef.current?.getCenter()??null;
+          const rain=mapRainReading({
+            sample:info.sample,estimated:info.estimated,
+            place:placeRef.current,point:bundleRef.current,center,
+            displayedTimeMs:visualClockRef.current?.timeMs ?? info.timeMs,
+          });
+          valueRef.current.textContent=rain.amountMm === null ? "—" :
+            `${formatNumber(rain.amountMm,language,1)} ${language==="ar"?"مم":"mm"}`;
+          // Colourized ECMWF raster images have no millimetre sample to read.
+          // Identify a separate *city point forecast* rather than pretending
+          // that it is a quantitative ECMWF raster measurement.
+          const title=rain.origin==="point-forecast"
+            ? language==="ar"?"توقع الهطول للمدينة القريبة (ليس قراءة ECMWF)": "Nearby city point forecast (not ECMWF raster)"
+            : rain.origin==="source-grid"
+              ? language==="ar"?"بيانات الهطول للشبكة المصدرية":"Source-backed precipitation grid"
+              : language==="ar"?"لا توجد قيمة كمية موثوقة لهذه النقطة والساعة":"No verified precipitation value for this point and hour";
+          valueRef.current.title=title;
+          valueRef.current.setAttribute("aria-label",
+            (rain.amountMm===null?"—":valueRef.current.textContent)+" · "+title);
         } else {
           valueRef.current.textContent = info.sample
             ? sampleText(info.sample, kindRef.current, current, language)
@@ -1566,7 +1574,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             <span aria-hidden="true"> · </span>
             <a href="https://open-meteo.com/en/license" target="_blank" rel="noopener noreferrer">ECMWF / Open-Meteo</a>
           </div>
-          <div className="wx-card map-bar pointer-events-auto px-2 py-1.5">
+          <div className="wx-card map-bar pointer-events-auto px-2 py-1">
             <div className="flex items-center gap-2" dir="ltr">
               <button
                 type="button"
@@ -1612,12 +1620,18 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 onInput={(e) => engineRef.current?.setHour(Number(e.currentTarget.value))}
               />
             </div>
-            <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
-              <span className="font-semibold text-fg">{t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
-              <span ref={valueRef} className="font-semibold text-accent">—</span>
+            <div dir={lang==="ar"?"rtl":"ltr"}
+              className="wx-map-playback-meta mt-0.5 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 text-xs">
+              <span className="min-w-0 truncate font-semibold leading-tight text-fg">
+                {t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}
+              </span>
+              <span ref={timeRef} className="whitespace-nowrap text-center text-[0.65rem] leading-tight text-muted">
+                {t(lang, "today")}
+              </span>
+              <span ref={valueRef} className="min-w-0 whitespace-nowrap text-end font-semibold leading-tight text-accent"
+                role="status">—</span>
             </div>
-            <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
-            <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
+            <div className="mt-0.5 h-1 rounded-full" style={{ background: gradient }} />
             <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
               {ticks.map((tick) => <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>)}
             </div>
@@ -1643,29 +1657,6 @@ function CycloneGlyph() {
       <circle cx="32" cy="32" r="1.15" fill="#1a100e" />
     </svg>
   );
-}
-
-function nearbyRain(
-  place: Place,
-  bundle: WeatherBundle | null,
-  lat: number,
-  lon: number,
-  timeMs: number,
-): number | null {
-  if (!bundle || bundle.placeId !== place.id || !bundle.hourly.length) return null;
-  const cos = Math.cos((place.lat * Math.PI) / 180);
-  if (Math.hypot(lat - place.lat, (lon - place.lon) * cos) > 2.2) return null;
-  let best = bundle.hourly[0]!;
-  let dist = Number.POSITIVE_INFINITY;
-  for (const hour of bundle.hourly) {
-    const gap = Math.abs(hour.t - timeMs);
-    if (gap < dist) {
-      dist = gap;
-      best = hour;
-    }
-  }
-  if (dist > 3 * 3_600_000) return null;
-  return best.precip;
 }
 
 function sampleText(

@@ -8,7 +8,7 @@ import { proxyFetch } from "@/weather/net";
 import { parseMarineSnapshot } from "@/weather/marineTides";
 import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
-import { mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
+import { cityKey, mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
 import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
@@ -670,12 +670,20 @@ export async function searchPlaces(
  const coordinate=parseCoordinatePlace(trimmed);
  if(coordinate)return [coordinate];
  const local=searchLocal(trimmed);
+ // The hosted geocoder deliberately matches 2 letters as complete names only;
+ // an instant local prefix list is more useful and saves an unnecessary call.
+ if(Array.from(trimmed).length===2)return local;
  const key=normalizePlaceQuery(trimmed).toLowerCase()+"|"+lang;
  const cached=citySearchCache.get(key);
  if(cached&&cached.expires>Date.now())return cached.rows;
  const incoming:Place[]=[];
- const first=/[\u0600-\u06ff]/.test(trimmed)?"ar":(lang==="ar"?"ar":"en");
- const languages=first==="ar"?["ar","en"]:["en","ar"];
+ const arabic=/[\u0600-\u06ff]/.test(trimmed);
+ const first=arabic?"ar":"en";
+ const alternate=arabic?"en":"ar";
+ // Arabic search terms are not reliably indexed by their romanization at
+ // GeoNames/Open-Meteo. Reuse the trusted bundled city's English alias where
+ // its actual Arabic name matches, without guessing a false transliteration.
+ const exactAlias=arabic?local.find(p=>p.nameEn&&cityKey(p.name)===cityKey(trimmed))?.nameEn:null;
  const publish=(rows:Place[])=>{
   if(signal?.aborted)return;
   incoming.push(...rows);
@@ -685,9 +693,13 @@ export async function searchPlaces(
   try{publish(await geocode(name,language,signal));}
   catch(e){if(signal?.aborted || (e instanceof Error&&e.name==="AbortError"))return;}
  };
- // Two provider language views are enough for responsive bilingual lookup.
- // Open-Meteo matches only exact names for 2 chars, prefix for 3+ (official API).
- await Promise.all(languages.map(language=>request(trimmed,language)));
+ // At most two parallel requests; the fast local result is already visible.
+ // One uses the actual typed query; the second resolves the known bilingual
+ // alias when possible, not an invented Arabic-to-Latin spelling.
+ await Promise.all([
+   request(trimmed,first),
+   request(exactAlias??trimmed,exactAlias?"en":alternate),
+ ]);
  if(signal?.aborted)return local;
  // The canonical form repairs Arabic hamza/diacritic mismatches.
  const canonical=normalizePlaceQuery(trimmed);
@@ -701,7 +713,9 @@ export async function searchPlaces(
   if(relaxed&&relaxed!==trimmed&&relaxed!==canonical)await request(relaxed,first);
  }
  const result=mergeCityResults(trimmed,local,incoming);
- if(!signal?.aborted)cacheCities(key,result);
+ // Do not cache failed remote lookups as negatives: weak connectivity must
+ // not make a valid full-name query look empty for three further minutes.
+ if(!signal?.aborted&&incoming.length>0)cacheCities(key,result);
  return result;
 }
 
