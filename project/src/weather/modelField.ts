@@ -16,6 +16,7 @@ import { spatialTileOptions, spatialPhysicalTileSize, useCompactSpatialTiles } f
 import { shouldReplanSpatialFrame, spatialCoverageChanged } from "@/weather/modelRenderPolicy";
 import { spatialTileAlignedBounds } from "@/weather/spatialViewportBounds";
 import { spatialZoomNeedsNewCoverage } from "@/weather/spatialZoomCoverage";
+import { readSpatialMetadata } from "@/weather/spatialMetadataWarmup";
 import { decideSpatialViewport, type SpatialViewportDecision } from "@/weather/spatialViewportBudget";
 import { spatialFrameTimedOut } from "@/weather/spatialWatchdog";
 import { spatialLayerTiming, type SpatialLayerTiming } from "@/weather/spatialLayerTelemetry";
@@ -771,8 +772,11 @@ export class ModelField {
     this.adapter.addProtocol("om", this.viewportRenderer?.handler ?? omProtocol, this.protocolSettings);
     this.lastError = null;
     this.pinnedRun = null;
-    this.ready = fetch(META, { signal: metadataAbort.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+    // Reuse a recent real-source metadata request prepared during Home idle.
+    // An individual map disposal only ignores its result; the one shared
+    // request has a strict internal timeout and short TTL. Model variables,
+    // pinned run and freshness are still validated below for every attach.
+    this.ready = readSpatialMetadata()
       .then((json: { reference_time?: string; valid_times?: string[]; variables?: string[] }) => {
         if (metadataAbort.signal.aborted || this.map !== map) return;
         this.metadataReadyMs = performance.now() - this.attachedAt;
