@@ -1457,6 +1457,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {" · worker tiles "}{weatherDiagnostics?.viewportRenderer.workerTiles ?? 0}
               {" · dataset copies "}{weatherDiagnostics?.viewportRenderer.datasetCopies ?? 0}
               {" · reuse "}{weatherDiagnostics?.viewportRenderer.datasetReuses ?? 0}
+              {" · shared source reads "}{weatherDiagnostics?.viewportRenderer.datasetReadJoins ?? 0}
               {" · evicted "}{weatherDiagnostics?.viewportRenderer.datasetEvictions ?? 0}
               {" · recovered "}{weatherDiagnostics?.viewportRenderer.capturedReadRecoveries ?? 0}
               {" · fallback tiles "}{weatherDiagnostics?.viewportRenderer.fallbackTiles ?? 0}
