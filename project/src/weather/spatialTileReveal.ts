@@ -64,29 +64,41 @@ export type SpatialRasterView = {
   west: number; east: number; south: number; north: number; zoom: number;
 };
 
-export function canStageSpatialRefresh(
+/** Measure ACTUAL overlapping geography, not historical DOM tile counts.
+ * Longitude wraps at the international date line but latitude never does.
+ * A 0 result means the old screen cannot justify retaining an ECMWF overlay.
+ */
+export function spatialViewportOverlap(
   previous: SpatialRasterView | null,
   next: SpatialRasterView,
-): boolean {
-  if (!previous) return false;
+): {latitude: number; longitude: number} | null {
+  if (!previous) return null;
   const nums = [previous.west, previous.east, previous.south, previous.north, previous.zoom,
     next.west, next.east, next.south, next.north, next.zoom];
   if (!nums.every(Number.isFinite) || Math.abs(next.zoom - previous.zoom) > 0.01 ||
       next.east <= next.west || next.north <= next.south ||
-      previous.east <= previous.west || previous.north <= previous.south) return false;
+      previous.east <= previous.west || previous.north <= previous.south) return null;
   const targetWidth = next.east - next.west;
   const targetHeight = next.north - next.south;
   const lat = Math.max(0, Math.min(next.north, previous.north) - Math.max(next.south, previous.south));
   let lon = 0;
-  // The Leaflet map is world-wrapped, so equivalent previous views may have
-  // longitudes ±360 apart. Preserve overlap at the international dateline.
+  // Leaflet's world-wrap can express the same tile as ±360° longitude.
   for (const turns of [-1, 0, 1]) {
     const offset = Math.round((next.west - previous.west) / 360) * 360 + turns * 360;
     lon = Math.max(lon, Math.max(0,
       Math.min(next.east, previous.east + offset) -
       Math.max(next.west, previous.west + offset)));
   }
-  return lat / targetHeight >= 0.78 && lon / targetWidth >= 0.78;
+  return {latitude: lat / targetHeight, longitude: lon / targetWidth};
+}
+export function canStageSpatialRefresh(
+  previous: SpatialRasterView | null,
+  next: SpatialRasterView,
+): boolean {
+  const overlap = spatialViewportOverlap(previous, next);
+  // Stage ALL incoming tiles only where most of the previous screen remains
+  // visible. Larger shifts must reveal their genuine source pixels promptly.
+  return !!overlap && overlap.latitude >= 0.78 && overlap.longitude >= 0.78;
 }
 
 
@@ -108,5 +120,13 @@ export function canHoldCertifiedSpatialViewport(
   return sourceOpacity > 0.1 && Number.isFinite(nowMs) &&
     beganAtMs > 0 && nowMs >= beganAtMs &&
     nowMs - beganAtMs < SPATIAL_VIEWPORT_HOLD_MAX_MS &&
-    canStageSpatialRefresh(previous, current);
+    // Holding old, GEOGRAPHICALLY CORRECT tiles is safe even if less than
+    // 78% overlaps; one-raster-cell movement otherwise switches the entire
+    // overlay off and produces the user's repeated clear/cloudy flicker.
+    // Require meaningful overlap in both dimensions and independently
+    // certified on-screen tiles (checked by ModelField before this call).
+    (() => {
+      const overlap = spatialViewportOverlap(previous, current);
+      return !!overlap && overlap.latitude >= 0.25 && overlap.longitude >= 0.25;
+    })();
 }
