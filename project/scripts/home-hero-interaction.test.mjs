@@ -100,11 +100,11 @@ test("15-day card receives subtle polish without changing its structure or basel
   assert.match(effectiveGlass, /\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s);
 });
 
-test("visible version stays 1.0.0 while upgrade-safe Android code advances to 64", () => {
+test("visible version stays 1.0.0 while upgrade-safe Android code advances to 65", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.ok(gradle.includes('versionCode 64') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='64' versionName='1.0.0'"));
+  assert.ok(gradle.includes('versionCode 65') && gradle.includes('versionName "1.0.0"'));
+  assert.ok(workflow.includes("versionCode='65' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
@@ -349,7 +349,7 @@ test("visible ECMWF viewport interrupts obsolete prefetch and stages nonblocking
   assert.ok(src.includes('this.map.off("movestart", this.moveStartListener)'));
   assert.ok(src.includes('if (frame?.snowStartTimer !== undefined) window.clearTimeout(frame.snowStartTimer)'));
   assert.ok(src.includes('if (index < 2) layer.addTo(map)'));
-  assert.ok(src.includes('frame.snowStartTimer = window.setTimeout(mountSnow, 650)'));
+  assert.ok(src.includes('frame.snowStartTimer = window.setTimeout(mountSnow, 1300)'));
   assert.ok(src.includes('made[0]!.on("tileload", mountSnow)'));
   assert.ok(scheduler.includes("visibleRefreshAgeMs < grace"));
   assert.ok(src.includes("const ready = spatialFrameReadyDuringRefresh("),

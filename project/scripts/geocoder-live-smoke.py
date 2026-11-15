@@ -18,7 +18,9 @@ def main():
     assert health.get("ready") and health.get("cities",0)>100_000,health
     print("health",{"ready":health["ready"],"cities":health["cities"],
        "aliases":health["aliases"],"ms":ms})
-    queries=[("دمشق","ar"),("دبلن","ar"),("مسقط","ar"),
+    queries=[("الكامل","ar"),("الكامل والوافي","ar"),
+      ("الكامل و الوافي","ar"),("Al Kamil Wal Wafi","en"),
+      ("دمشق","ar"),("دبلن","ar"),("مسقط","ar"),
       ("Москва","ru"),("東京","ja"),("Prague","en"),
       ("Muscat","en"),("Dubai","en")]
     ok=0;durations=[]
@@ -26,6 +28,8 @@ def main():
         reply,t=request("/api",{"q":q,"lang":lang,"limit":6,"layer":"city"})
         items=reply.get("features",[])
         assert items,(q,reply)
+        if q in ("الكامل","الكامل والوافي","الكامل و الوافي","Al Kamil Wal Wafi"):
+            assert items[0]["properties"]["geonames_id"]==11054689,(q,items[:2])
         assert all(item["properties"].get("geonames_id") and
           item["properties"].get("source")=="geonames" for item in items),q
         lat=items[0]["geometry"]["coordinates"][1];lon=items[0]["geometry"]["coordinates"][0]

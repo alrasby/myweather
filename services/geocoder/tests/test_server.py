@@ -41,7 +41,7 @@ class CityIndexTests(unittest.TestCase):
             self.assertEqual(server.search("zzunknown"),[])
             self.assertTrue(server.search("دم"))
     def test_schema_license_data(self):
-        self.assertEqual(self.stats[0],5)
+        self.assertEqual(self.stats[0],6) # GeoNames fixture + curated mapped wilayat
         self.assertGreater(self.stats[1],10)
         with patch.object(server,"DB",self.db):
             sample=server.search("Dublin")[0]
