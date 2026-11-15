@@ -391,19 +391,32 @@ test("one viewport generation publishes consistent model layers and retains sate
   assert.ok(src.includes("frame.renderGeneration.ready() && frame.loaded.every(Boolean)"));
   assert.ok(generation.includes("for (const index of inFlight) this.started.add(index)"));
   assert.ok(src.includes("layer.isLoading?.() !== false"), "only real settled Leaflet queues may be recovered");
-  assert.ok(map.includes("shouldKeepSatelliteParent(zoom, detailedReady)"));
-  assert.ok(map.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
-  assert.ok(map.includes("const keepUnderlay = shouldKeepSatelliteParent(zoom, detailedReady)"));
-  assert.ok(map.includes("else if (!keepUnderlay && map.hasLayer(underlay)) underlay.remove()"),
-    "unmount redundant z4 Esri layer below zoom5 rather than hiding it with opacity=0");
+  const handoff = read("project/src/weather/satelliteBasemap.ts");
+  assert.ok(map.includes("satelliteHandoffDecision({") &&
+    map.includes("detailComplete: detail.complete") &&
+    map.includes("underlayComplete: low.complete") &&
+    map.includes("worldComplete: world.complete"),
+    "parent removal requires real viewport coverage, not a drained tile queue");
+  assert.ok(handoff.includes("!state.worldComplete && !state.detailComplete") &&
+    handoff.includes("!state.underlayComplete && !state.detailComplete"),
+    "keep real Esri source protection until a replacement covers the screen");
+  assert.ok(map.includes("if (!decision.underlay && map.hasLayer(underlay)) underlay.remove()") &&
+    map.includes("if (!decision.worldParent && map.hasLayer(worldParent)) worldParent.remove()"),
+    "retire redundant native-z2/z4 grids without leaving opacity-hidden network requests");
+  assert.ok(map.includes('layer.on("tileload", syncUnderlay)') &&
+    map.includes('layer.on("load", syncUnderlay)'),
+    "recheck certification when actual images arrive, not only at zoomend");
   assert.ok(map.includes("satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null"),
     "provide opt-in basemap coverage separately from weather source readiness");
   assert.ok(map.includes("const pixels = map!.getPixelBounds()") &&
             map.includes("const size = layer.getTileSize()"),
     "Esri image coverage must audit EVERY visible map tile, not merely loaded buffered tiles");
-  assert.ok(map.includes('imagery.on("load", () => {'));
-  assert.ok(map.includes("detailedReady = !detailedErrors;"),
-    "a drained imagery queue with tile errors must not hide real satellite parent coverage");
+  assert.ok(map.includes('map.on("zoomstart", onSatelliteZoomStart)') &&
+    map.includes('map.on("zoomend", onSatelliteZoomEnd)') &&
+    map.includes('zooming = true;'),
+    "preserve georeferenced source parents while WebView pinch transforms settle");
+  assert.ok(!map.includes("detailedReady = !detailedErrors;"),
+    "queue-drain must not masquerade as complete visible satellite coverage");
 });
 
 test("ECMWF viewport renderer reuses decoded data, limits retained states and supports rollback", () => {
@@ -561,7 +574,9 @@ test("continent-scale map pans use actual world weather rather than crushing on-
    "quick flings must be checked at the final camera position, not sampled move only");
  assert.ok(model.includes("if (this.visible) this.pump();"),
    "new requested model hour must actually mount and load");
- assert.ok(screen.includes("shouldKeepWorldSatelliteParent(zoom, detailedReady)"));
+ assert.ok(screen.includes("satelliteHandoffDecision({") &&
+   screen.includes("map.on(\"zoomend\", onSatelliteZoomEnd)"),
+   "world-scale satellite source cannot disappear until correct replacement imagery loads");
  assert.ok(screen.includes("if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.()"));
 });
 
