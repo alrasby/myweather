@@ -1,0 +1,120 @@
+name: Keyless Global Tide — Real Coverage QA
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/ready-weather-tiles-smart-pipeline-20261113]
+    paths:
+      - '.github/workflows/openwaters-free-tide-coverage.yml'
+permissions:
+  contents: read
+jobs:
+  worldwide-stations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Probe open no-key tide stations and prediction coverage
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+          import json
+          base="https://api.openwaters.io/tides"
+          now=datetime.now(timezone.utc).replace(minute=0,second=0,microsecond=0)
+          until=now+timedelta(hours=24)
+          places={
+              "Muscat_Oman":(23.588,58.3829),
+              "Cape_Town":(-33.925,18.423),
+              "Rabat":(34.021,-6.841),
+              "New_York":(40.713,-74.006),
+              "Hammerfest":(70.663,23.682),
+          }
+          for city,(latitude,longitude) in places.items():
+              for endpoint,args in (
+                ("stations",dict(latitude=latitude,longitude=longitude,maxResults=3)),
+                ("extremes",dict(latitude=latitude,longitude=longitude,
+                                 start=now.isoformat(),end=until.isoformat(),units="meters")),
+                ("timeline",dict(latitude=latitude,longitude=longitude,
+                                 start=now.isoformat(),end=until.isoformat(),units="meters"))):
+                  url=f"{base}/{endpoint}?{urlencode(args)}"
+                  try:
+                      with urlopen(Request(url,headers={"Accept":"application/json",
+                            "User-Agent":"MyWeatherPro-GlobalTideQA/1.0"}),timeout=9) as response:
+                          data=json.load(response)
+                      if endpoint=="stations":
+                          print(city,"stations",json.dumps([{
+                             "id":s.get("id"),"name":s.get("name"),
+                             "distance_km":s.get("distance"),
+                             "license":s.get("license"),
+                             "attribution":s.get("attribution"),
+                             "predictions":s.get("predictions")
+                           } for s in (data if isinstance(data,list) else [])][:3]))
+                      else:
+                          station=data.get("station") or {}
+                          print(city,endpoint,json.dumps({
+                             "station":station.get("name"),"id":station.get("id"),
+                             "distance_km":data.get("distance"),
+                             "license":station.get("license"),
+                             "attribution":station.get("attribution"),
+                             "datum":data.get("datum"),"units":data.get("units"),
+                             "count":len(data.get(endpoint) or []),
+                             "first":(data.get(endpoint) or [None])[0]}))
+                  except HTTPError as exc:
+                      print(city,endpoint,"HTTP",exc.code)
+                  except (URLError,TimeoutError,ValueError) as exc:
+                      print(city,endpoint,"UNAVAILABLE",type(exc).__name__)
+          PY
+      - name: Verify Capacitor origin is allowed to fetch keyless predictions
+        run: |
+          python - <<'PY'
+          from urllib.request import Request,urlopen
+          from urllib.parse import urlencode
+          params=urlencode({"latitude":23.588,"longitude":58.3829,
+                            "units":"meters"})
+          for origin in ("http://localhost","capacitor://localhost"):
+              req=Request("https://api.openwaters.io/tides/extremes?"+params,
+                          headers={"Origin":origin,"Accept":"application/json"})
+              with urlopen(req,timeout=12) as r:
+                  allowed=r.headers.get("Access-Control-Allow-Origin","")
+                  print("OPEN_WATERS_CORS",origin,repr(allowed),r.status)
+                  assert allowed=="*" or allowed==origin, "browser fetch origin not permitted"
+          PY
+
+      - name: Actual Open Waters API must pass Android source validator
+        working-directory: project
+        run: |
+          node --experimental-strip-types --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import {parseOpenWatersTide} from "./src/weather/openWatersTideClient.ts";
+          const h=3600000, now=Date.now();
+          const qs=(lat,lon)=>new URLSearchParams({
+            latitude:String(lat),longitude:String(lon),
+            start:new Date(now-6*h).toISOString(),
+            end:new Date(now+42*h).toISOString(),units:"meters"
+          });
+          for(const [label,lat,lon,expected] of [
+            ["Muscat",23.588,58.3829,true],
+            ["CapeTown",-33.925,18.423,true],
+            ["Rabat",34.021,-6.841,false],
+            ["NewYork",40.713,-74.006,true],
+            ["Hammerfest",70.663,23.682,true]
+          ]){
+            const query=qs(lat,lon);
+            const urls=["timeline","extremes"].map(
+              path=>"https://api.openwaters.io/tides/"+path+"?"+query);
+            const bodies=await Promise.all(urls.map(async u=>{
+              const response=await fetch(u,{headers:{Accept:"application/json"}});
+              assert.equal(response.status,200,u);
+              return await response.json();
+            }));
+            const parsed=parseOpenWatersTide(bodies[0],bodies[1],now);
+            console.log(label,"VERIFIED_NEARBY_STATION",!!parsed,
+              parsed?.stationName ?? "none",parsed?.distanceKm ?? "far");
+            assert.equal(!!parsed,expected,label+" cannot lie about station proximity");
+          }
+          JS

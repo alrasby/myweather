@@ -1,5 +1,7 @@
 import { CapacitorHttp } from "@capacitor/core";
 import { proxyWeather } from "@/weather/proxy.functions";
+import { configuredPrivateGeocoder } from "@/weather/privateGeocoder";
+import { trackUnstoppableRequest } from "@/weather/nativeRequestLifetime";
 
 function nativeApp(): boolean {
   const cap = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
@@ -35,8 +37,13 @@ function htmlPage(body: string): boolean {
 
 /** ويب فيو أندرويد يعلّق الطلب إلى الأبد إن لم يُقطع، فيقف الجلب كله. */
 const MAX_IN_FLIGHT = 5;
+const MAX_NATIVE_IN_FLIGHT = 3; // leave two permits for browser fallback/recovery
 const MAX_WAITERS = 64;
 let inFlight = 0;
+let nativeInFlight = 0;
+// A stuck Capacitor plugin request cannot be physically interrupted by the
+// caller AbortSignal. Prevent repeated native retries until OS timeouts settle.
+let nativeTimeoutCooldownUntil = 0;
 type Waiter = { grant: () => void };
 const waiters: Waiter[] = [];
 
@@ -92,26 +99,51 @@ async function nativePluginFetch(
   hdrs: Record<string, string>,
 ): Promise<Response> {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+  if (Date.now() < nativeTimeoutCooldownUntil) throw new Error("native-transport-cooldown");
+  // A hung OS plugin must never exhaust the shared queue and prevent the
+  // fetch-based recovery lane. The independent cap is deliberately smaller
+  // than MAX_IN_FLIGHT and does not increase total connection concurrency.
+  if (nativeInFlight >= MAX_NATIVE_IN_FLIGHT) throw new Error("native-lane-busy");
   await takeSlot(signal);
+  if (nativeInFlight >= MAX_NATIVE_IN_FLIGHT) {
+    releaseSlot();
+    throw new Error("native-lane-busy");
+  }
+  nativeInFlight++;
+  let nativeStarted = false;
+  const releaseNative = () => {
+    nativeInFlight = Math.max(0, nativeInFlight - 1);
+    releaseSlot();
+  };
   try {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-    const result = await raceTimeout(
-      CapacitorHttp.request({
-        url,
-        method: "GET",
-        responseType: "text",
-        connectTimeout: ms,
-        readTimeout: ms,
-        headers: hdrs,
-      }),
-      ms + 800,
-      signal,
-    );
+    // CapacitorHttp has NO native AbortSignal. Previously the slot was
+    // released immediately when JS canceled, allowing dozens of still-running
+    // OS requests during rapid city typing and map gestures.
+    const nativeWork = trackUnstoppableRequest(CapacitorHttp.request({
+      url,
+      method: "GET",
+      responseType: "text",
+      connectTimeout: ms,
+      readTimeout: ms,
+      headers: hdrs,
+    }), releaseNative);
+    nativeStarted = true;
+    let result:Awaited<typeof nativeWork>;
+    try {
+      result = await raceTimeout(nativeWork, ms + 800, signal);
+    } catch (error) {
+      if (error instanceof Error && error.message === "proxy-timeout")
+        nativeTimeoutCooldownUntil = Date.now() + 30_000;
+      throw error;
+    }
     const data = result.data;
     const body = typeof data === "string" ? data : JSON.stringify(data ?? "");
-    return new Response(body, { status: result.status || 0 });
+    return new Response(body, { status: result.status || 502 });
   } finally {
-    releaseSlot();
+    // After the plugin starts, only its ACTUAL completion releases the slot,
+    // not the caller's timeout/abort. Before start we still release safely.
+    if (!nativeStarted) releaseNative();
   }
 }
 
@@ -143,10 +175,18 @@ async function timedFetch(
 export async function proxyFetch(url: string, signal?: AbortSignal, extra?: Record<string, string>): Promise<Response> {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
   const hdrs = extra ? { ...headers, ...extra } : headers;
+  // A private CORS-enabled geocoder is NOT a weather-proxy URL. Calling the
+  // public weather proxy first always fails its SSRF allowlist and doubles
+  // traffic/time. Use one bounded direct fetch in web; native uses the
+  // existing CapacitorHttp path with its transport budget.
+  const privateGeocoder = configuredPrivateGeocoder &&
+    url.startsWith(configuredPrivateGeocoder + "?");
+  if (privateGeocoder && !nativeApp()) return timedFetch(url, signal, 6000, hdrs);
+
   if (nativeApp()) {
     try {
       const res = await nativePluginFetch(url, signal, 18000, hdrs);
-      const soft = res.status === 403 || res.status >= 500;
+      const soft = res.status >= 500;
       if (!soft) return res;
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
@@ -157,7 +197,11 @@ export async function proxyFetch(url: string, signal?: AbortSignal, extra?: Reco
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       const body = result?.body ?? "";
       const status = result?.status ?? 0;
-      const unusable = status === 429 || status >= 500 || status === 0 || !body.trim() || htmlPage(body);
+      // An explicit quota/permission response is authoritative. Retrying it
+      // directly bypasses provider throttling and wastes the radio/battery.
+      if (status === 429 || status === 403)
+        return new Response(body, { status });
+      const unusable = status >= 500 || status === 0 || !body.trim() || htmlPage(body);
       if (!unusable) return new Response(body, { status });
     } catch (err) {
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;

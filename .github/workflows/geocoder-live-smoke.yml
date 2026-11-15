@@ -1,0 +1,22 @@
+name: Real hosted GeoNames city-search smoke
+on:
+  push:
+    branches: [feature/production-geocoder-ecmwf-startup-resource-safety-20261115]
+    paths:
+      - .github/workflows/geocoder-live-smoke.yml
+      - services/geocoder/**
+      - project/scripts/geocoder-live-smoke.py
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: geocoder-live-smoke
+  cancel-in-progress: true
+jobs:
+  production-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify real Railway index and live city responses (no mocks)
+        run: python3 project/scripts/geocoder-live-smoke.py

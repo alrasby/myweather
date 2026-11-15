@@ -2,10 +2,18 @@
  * protocol may cancel a frame while native HTTP is already running, but
  * CapacitorHttp.request has no AbortSignal API. Pending requests therefore
  * must be skipped before they enter native transport. */
+/** A bounded urgent lane for currently visible ECMWF clouds/precipitation.
+ * Do not prioritize arbitrary URLs or metadata requests. */
+export function spatialNativePriority(url: string): 0 | 1 {
+  return /(?:^|[/?=&])(?:cloud_cover|precipitation)(?:[/.=&]|$)/i.test(url) ? 1 : 0;
+}
+
 export class SpatialNativeQueue {
   private active = 0;
+  private urgentStreak = 0;
   private waiters: Array<{
     signal: AbortSignal | undefined;
+    priority: 0 | 1;
     releaseAbort: () => void;
     resolve: () => void;
     reject: (reason: Error) => void;
@@ -21,7 +29,14 @@ export class SpatialNativeQueue {
     return new Error("spatial-request-aborted");
   }
 
-  async run<T>(signal: AbortSignal | undefined, job: () => Promise<T>): Promise<T> {
+  /** A started native HTTP range cannot actually be aborted by Capacitor.
+   * Allow its fully received result through ONLY for source-verified cache
+   * warming. The caller has already been rejected by SpatialRangeFlights;
+   * queued (not-yet-started) tasks remain cancellable. */
+  async run<T>(
+    signal: AbortSignal | undefined, job: () => Promise<T>,
+    priority: 0 | 1 = 0, retainCompletedAfterAbort = false,
+  ): Promise<T> {
     if (signal?.aborted) throw this.abortError();
     if (this.active < this.limit && this.waiters.length === 0) {
       this.active++;
@@ -29,6 +44,7 @@ export class SpatialNativeQueue {
       await new Promise<void>((resolve, reject) => {
         const waiter = {
           signal,
+          priority,
           releaseAbort: () => {},
           resolve: () => resolve(),
           reject: (reason: Error) => reject(reason),
@@ -47,18 +63,26 @@ export class SpatialNativeQueue {
     try {
       if (signal?.aborted) throw this.abortError();
       const result = await job();
-      if (signal?.aborted) throw this.abortError();
+      if (signal?.aborted && !retainCompletedAfterAbort) throw this.abortError();
       return result;
     } finally {
       this.active--;
       while (this.waiters.length) {
-        const waiter = this.waiters.shift()!;
+        // Cloud/rain data can jump ahead of queued snowfall, but serve one
+        // normal read at least every four turns to avoid starvation.
+        const firstNormal = this.waiters.findIndex((w) => w.priority === 0);
+        const firstUrgent = this.waiters.findIndex((w) => w.priority === 1);
+        const index = this.urgentStreak >= 3 && firstNormal >= 0 ? firstNormal
+          : firstUrgent >= 0 ? firstUrgent : 0;
+        const [waiter] = this.waiters.splice(index, 1);
+        if (!waiter) break;
         waiter.releaseAbort();
         if (waiter.signal?.aborted) {
           waiter.reject(this.abortError());
           continue;
         }
         this.active++;
+        this.urgentStreak = waiter.priority === 1 ? this.urgentStreak + 1 : 0;
         waiter.resolve();
         break;
       }

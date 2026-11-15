@@ -1,10 +1,9 @@
 import { t, type CopyKey } from "@/weather/i18n";
+import { dayKey } from "@/weather/calendarDayKey";
+import { convertTemp, convertWind, convertPressure, convertDistance } from "@/weather/unitConversion";
+export { dayKey, convertTemp, convertWind };
 import { localeFor, textBase } from "@/weather/locale";
 import type { DistanceUnit, Lang, PressureUnit, TempUnit, WindUnit } from "@/weather/types";
-
-export function convertTemp(c: number, unit: TempUnit): number {
-  return unit === "f" ? (c * 9) / 5 + 32 : c;
-}
 
 export function formatTemp(c: number, unit: TempUnit, lang: Lang): string {
   if (!Number.isFinite(c)) return "—";
@@ -12,13 +11,6 @@ export function formatTemp(c: number, unit: TempUnit, lang: Lang): string {
     Math.round(convertTemp(c, unit)),
   );
   return `${n}°`;
-}
-
-export function convertWind(kmh: number, unit: WindUnit): number {
-  if (unit === "ms") return kmh / 3.6;
-  if (unit === "mph") return kmh * 0.621371;
-  if (unit === "kn") return kmh * 0.539957;
-  return kmh;
 }
 
 export function formatWind(kmh: number, unit: WindUnit, lang: Lang): string {
@@ -33,7 +25,7 @@ export function formatWind(kmh: number, unit: WindUnit, lang: Lang): string {
 
 export function formatPressure(hpa: number, unit: PressureUnit, lang: Lang): string {
   if (!Number.isFinite(hpa)) return "—";
-  const v = unit === "inhg" ? hpa / 33.8638866667 : hpa;
+  const v = convertPressure(hpa, unit);
   const digits = unit === "inhg" ? 2 : 1;
   const n = new Intl.NumberFormat(localeFor(lang), {
     maximumFractionDigits: digits,
@@ -44,8 +36,7 @@ export function formatPressure(hpa: number, unit: PressureUnit, lang: Lang): str
 
 export function formatDistance(meters: number, unit: DistanceUnit, lang: Lang): string {
   if (!Number.isFinite(meters)) return "—";
-  const km = meters / 1000;
-  const v = unit === "mi" ? km * 0.621371 : km;
+  const v = convertDistance(meters, unit);
   const n = new Intl.NumberFormat(localeFor(lang), { maximumFractionDigits: 1 }).format(v);
   return `${n} ${t(lang, unit === "mi" ? "mi" : "km")}`;
 }
@@ -63,19 +54,6 @@ export function formatPercent(n: number, lang: Lang): string {
   return `${formatNumber(Math.round(n), lang)}%`;
 }
 
-export function dayKey(ms: number, timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(ms));
-  } catch {
-    return new Date(ms).toISOString().slice(0, 10);
-  }
-}
-
 function shiftKey(key: string, days: number): string {
   const utc = new Date(`${key}T12:00:00Z`);
   utc.setUTCDate(utc.getUTCDate() + days);
@@ -85,6 +63,7 @@ function shiftKey(key: string, days: number): string {
 export function formatDayLabel(ms: number, timeZone: string, lang: Lang, now = Date.now()): string {
   const key = dayKey(ms, timeZone);
   const today = dayKey(now, timeZone);
+  if (!key || !today) return "—";
   if (key === today) return t(lang, "today");
   if (key === shiftKey(today, 1)) return t(lang, "tomorrow");
   try {

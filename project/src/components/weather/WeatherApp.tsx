@@ -13,8 +13,10 @@ import { activePlace, useWeather } from "@/weather/store";
 import { widgetPayload } from "@/weather/widget";
 import type { TabId, WeatherBundle } from "@/weather/types";
 import { loadWeather } from "@/weather/api";
+import { warmSpatialMetadata } from "@/weather/spatialMetadataWarmup";
 
-const MapScreen = lazy(() => import("@/components/weather/MapScreen").then((m) => ({ default: m.MapScreen })));
+const loadMapScreen = () => import("@/components/weather/MapScreen");
+const MapScreen = lazy(() => loadMapScreen().then((m) => ({ default: m.MapScreen })));
 
 export function WeatherApp() {
   const hydrate = useWeather((s) => s.hydrate);
@@ -161,6 +163,21 @@ export function WeatherApp() {
     if (tab !== "home") setPlacesOpen(false);
   }, [tab]);
 
+  // Weather forecasts on Home retain first network priority. Only after a
+  // genuine Home forecast is loaded, and only off data-saver, preload the
+  // existing map JS chunk + one short-lived ECMWF metadata request.
+  // No raster tiles or stale screenshots are prefetched or mislabelled.
+  useEffect(() => {
+    if (!hydrated || !bundle || bundle.placeId !== place.id || tab !== "home" || prefs.dataSaver || document.hidden ||
+      (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
+    const id = window.setTimeout(() => {
+      if (document.hidden) return;
+      void loadMapScreen().catch(() => undefined);
+      warmSpatialMetadata();
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [hydrated, bundle?.placeId, place.id, tab, prefs.dataSaver]);
+
   const showMap = tab === "map";
   const code = bundle?.placeId === place.id ? bundle.current.code : 1;
 
@@ -191,8 +208,8 @@ export function WeatherApp() {
           ) : null}
         </section>
       </div>
-      <nav className="safe-bottom pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center">
-        <div className="glass-bar pointer-events-auto mb-1.5 flex w-[min(76%,19.5rem)] rounded-full px-0.5 py-0.5">
+      <nav aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"} className="safe-bottom pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center">
+        <div className="glass-bar wx-bottom-nav pointer-events-auto mb-1.5 flex rounded-full">
           {(
             [
               ["home", House, "home"],
@@ -203,11 +220,19 @@ export function WeatherApp() {
             <button
               key={id}
               type="button"
-              onClick={() => setTab(id)}
+              onClick={() => {
+                if (id === "map") {
+                  // Start the small metadata request before lazy React mount.
+                  // Later attach joins the same request; no duplicate reads.
+                  warmSpatialMetadata();
+                  void loadMapScreen().catch(() => undefined);
+                }
+                setTab(id);
+              }}
               aria-current={tab === id ? "page" : undefined}
-              className={`flex min-h-10 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[0.62rem] leading-none ${tab === id ? "nav-on" : "text-on-sky/90"}`}
+              className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[0.71rem] leading-none ${tab === id ? "nav-on" : "text-on-sky/90"}`}
             >
-              <Icon className="size-4" />
+              <Icon className="size-[1.12rem]" aria-hidden="true" />
               <span className="nav-label max-w-full px-1 text-center">{t(lang, key)}</span>
             </button>
           ))}

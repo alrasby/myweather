@@ -4,14 +4,17 @@ import type { LayerGroup, Map as LeafletMap, TileLayer } from "leaflet";
 import { WeatherIcon } from "@/components/weather/WeatherIcon";
 import { loadWeather, placeFromCoords } from "@/weather/api";
 import { FieldEngine, type FrameInfo } from "@/weather/glField";
-import { weatherLoadingPhase } from "@/weather/weatherPlayback";
 import { covers, fetchGrid } from "@/weather/grid";
 import { ModelField, type WeatherDiagnosticMode, type WeatherModelDiagnostics } from "@/weather/modelField";
+import { ReadyTileModel } from "@/weather/readyTileModel";
+import { readReadyTilePilotOrigin } from "@/weather/readyTilePilotConfig";
 import { inspectMapTilerCatalog, type MapTilerPilotCatalog } from "@/weather/maptilerPilot";
 
-import { needsSatelliteUnderlay } from "@/weather/satelliteBasemap";
+import { satelliteHandoffDecision, snapshotSatelliteRasterCoverage, type SatelliteRasterCoverage, type SatelliteRasterLayerLike, SATELLITE_UNDERLAY_NATIVE_ZOOM, SATELLITE_WORLD_PARENT_NATIVE_ZOOM } from "@/weather/satelliteBasemap";
 import { manageRasterZoomLabels } from "@/weather/rasterZoomLabels";
 import { estimateGrid } from "@/weather/estimate";
+import { mapRainReading } from "@/weather/mapRainIndicator";
+import { viewportQaSnapshot } from "@/weather/viewportQa";
 import { formatClock, formatHour24, formatNumber, formatTemp, formatWind } from "@/weather/format";
 import { convertWind } from "@/weather/format";
 import { compassFrom } from "@/weather/heading";
@@ -23,6 +26,7 @@ import { loadLiveCyclones, type LiveCyclone } from "@/weather/cyclones";
 import { loadStormsOnce } from "@/weather/storms";
 import { stormGradeKey, type PaintedSystem } from "@/weather/synoptic";
 import { activePlace, useWeather } from "@/weather/store";
+import { comparePointWithSpatial } from "@/weather/forecastSourceComparison";
 import type { FieldSample, GridField, Lang, Place, ShadeKind, WeatherBundle } from "@/weather/types";
 import "leaflet/dist/leaflet.css";
 
@@ -96,11 +100,20 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const place = activePlace({ places, activeId, peek });
   const hostRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
+  const satelliteDiagnosticsRef = useRef<(() => {
+    detail: SatelliteRasterCoverage; underlay: SatelliteRasterCoverage; worldParent: SatelliteRasterCoverage;
+    handoff: { protectedActivations: number; releasedAfterCoverage: number; zooming: boolean };
+  }) | null>(null);
   const modelRef = useRef<ModelField | null>(null);
   const rainFallbackRefreshRef = useRef<(() => void) | null>(null);
   const rainPlaybackQuickRef = useRef<(() => void) | null>(null);
   const rainFallbackSuspendRef = useRef<(() => void) | null>(null);
-  if (!modelRef.current) modelRef.current = new ModelField();
+  if (!modelRef.current) {
+    // Explicit diagnostic opt-in only; all normal installs retain the original
+    // source-backed ModelField and can never contact an undeployed tile host.
+    const pilotOrigin = readReadyTilePilotOrigin(typeof localStorage !== "undefined" ? localStorage : null);
+    modelRef.current = pilotOrigin ? new ReadyTileModel(pilotOrigin,prefs.dataSaver) : new ModelField();
+  }
   const engineRef = useRef<FieldEngine | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<LeafletNs | null>(null);
@@ -114,6 +127,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const detailRef = useRef<GridField | null>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
+  const timelineUtcRef = useRef<number | null>(null);
+  const visualClockRef = useRef<{timeMs:number;status:string;gapMinutes:number|null}|null>(null);
   const valueRef = useRef<HTMLSpanElement>(null);
   const clickTimer = useRef(0);
   const popupAbort = useRef<AbortController | null>(null);
@@ -159,8 +174,6 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   diagnosticsOpenRef.current = weatherDiagnosticsOpen;
   const [kind, setKind] = useState<ShadeKind>(prefs.mapLayer);
   const [playing, setPlaying] = useState(false);
-  const [weatherLoadPhase, setWeatherLoadPhase] = useState<0 | 1 | 2>(0);
-  const weatherLoadPhaseRef = useRef<0 | 1 | 2>(0);
   const [progress, setProgress] = useState(0);
   const [pins, setPins] = useState<Array<LiveCyclone & { x: number; y: number }>>([]);
   const [cycloneMsg, setCycloneMsg] = useState<string | null>(null);
@@ -185,7 +198,22 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     engine.canAdvanceRainTime = (timeMs) => modelRef.current?.canAdvanceTo(timeMs) ?? true;
     engineRef.current = engine;
     let lastRainLabelAt = 0;
+    const refreshSourceClock = () => {
+      const timeline = timelineUtcRef.current;
+      if (dead || timeline === null || kindRef.current !== 2) return;
+      const clock = modelRef.current?.getMapClock(timeline) ?? null;
+      visualClockRef.current = clock;
+      if (timeRef.current)
+        timeRef.current.textContent = formatClock(clock?.timeMs ?? timeline, tzRef.current, langRef.current);
+    };
+
+    // PERF PROBE: embedded ONLY in dedicated debug QA builds. Production
+    // Vite bundles constant-fold this condition out of the shipped app.
+    let probeReported = false;
     const paint = (info: FrameInfo) => {
+      timelineUtcRef.current = Number.isFinite(info.timeMs) ? info.timeMs : null;
+      visualClockRef.current = kindRef.current === 2
+        ? modelRef.current?.getMapClock(info.timeMs) ?? null : null;
       // Keep ECMWF prefetch, temporal blending and requested valid time
       // independent of the much slower text/DOM presentation workload.
       if (kindRef.current === 2) {
@@ -206,45 +234,87 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (engine.playing && info.playbackWaitingMs >= 1800) rainPlaybackQuickRef.current?.();
       }
       const now = performance.now();
-      if (diagnosticsOpenRef.current && now - diagnosticsTickRef.current > 1000) {
-        diagnosticsTickRef.current = now;
-        setWeatherDiagnostics(modelRef.current?.diagnostics() ?? null);
-      }
       // Avoid formatting the clock, searching nearby forecast points and
       // rewriting slider labels 60 times/second while large ECMWF raster
       // tiles are decoding on mobile. The model itself still updates above.
       if (kindRef.current === 2 && now - lastRainLabelAt < 180) return;
       lastRainLabelAt = now;
-      // State changes only when the message phase changes, never at 60fps.
-      // Skip brief cached-tile refreshes to keep the controls visually stable.
-      const phase = kindRef.current === 2 ? weatherLoadingPhase(info.playbackWaitingMs) : 0;
-      if (phase !== weatherLoadPhaseRef.current) {
-        weatherLoadPhaseRef.current = phase;
-        setWeatherLoadPhase(phase);
+      // Clock correction is DOM/UI work, not model work: keep it behind
+      // the 180ms presentation throttle, never on every animation frame.
+      if(kindRef.current===2){
+        // ModelField.sync commits its latest interpolation in a resolved-promise
+        // microtask. The first clock read above happened before that commit and
+        // could label 12:00Z while fully visible ECMWF tiles were 13:00Z.
+        // Read the *committed* source state after its microtask and ignore stale
+        // frame callbacks when the user scrubs rapidly.
+        queueMicrotask(()=>{
+          if(kindRef.current!==2||timelineUtcRef.current!==info.timeMs)return;
+          refreshSourceClock();
+          const at=performance.now();
+          if(diagnosticsOpenRef.current&&at-diagnosticsTickRef.current>1000){
+            diagnosticsTickRef.current=at;
+            setWeatherDiagnostics(modelRef.current?.diagnostics()??null);
+          }
+        });
       }
       const current = prefsRef.current;
       const language = langRef.current;
       if (timeRef.current) {
-        timeRef.current.textContent = formatClock(info.timeMs, tzRef.current, language);
+        timeRef.current.textContent = formatClock(
+          visualClockRef.current?.timeMs ?? info.timeMs, tzRef.current, language);
       }
       if (valueRef.current) {
         if (kindRef.current === 2) {
-          const center = mapRef.current?.getCenter();
-          const near = center
-            ? nearbyRain(placeRef.current, bundleRef.current, center.lat, center.lng, info.timeMs)
-            : null;
-          const gridMm = info.sample?.rain ?? 0;
-          if (near != null && (info.estimated || (gridMm < 0.05 && near >= 0.05))) {
-            valueRef.current.textContent = `${formatNumber(near, language, 1)} mm`;
-          } else if (info.estimated) {
-            valueRef.current.textContent = "—";
-          } else {
-            valueRef.current.textContent = info.sample ? sampleText(info.sample, 2, current, language) : "—";
-          }
+          const center=mapRef.current?.getCenter()??null;
+          const rain=mapRainReading({
+            sample:info.sample,estimated:info.estimated,
+            place:placeRef.current,point:bundleRef.current,center,
+            displayedTimeMs:visualClockRef.current?.timeMs ?? info.timeMs,
+          });
+          valueRef.current.textContent=rain.amountMm === null ? "—" :
+            `${formatNumber(rain.amountMm,language,1)} ${language==="ar"?"مم":"mm"}`;
+          // Colourized ECMWF raster images have no millimetre sample to read.
+          // Identify a separate *city point forecast* rather than pretending
+          // that it is a quantitative ECMWF raster measurement.
+          const title=rain.origin==="point-forecast"
+            ? language==="ar"?"توقع الهطول للمدينة القريبة (ليس قراءة ECMWF)": "Nearby city point forecast (not ECMWF raster)"
+            : rain.origin==="source-grid"
+              ? language==="ar"?"بيانات الهطول للشبكة المصدرية":"Source-backed precipitation grid"
+              : language==="ar"?"لا توجد قيمة كمية موثوقة لهذه النقطة والساعة":"No verified precipitation value for this point and hour";
+          valueRef.current.title=title;
+          valueRef.current.setAttribute("aria-label",
+            (rain.amountMm===null?"—":valueRef.current.textContent)+" · "+title);
         } else {
+          // The same DOM node displays temperature/wind: never leave rain-only
+          // provenance metadata behind when users switch map layers.
+          valueRef.current.removeAttribute("title");
+          valueRef.current.removeAttribute("aria-label");
           valueRef.current.textContent = info.sample
             ? sampleText(info.sample, kindRef.current, current, language)
             : "—";
+        }
+      }
+      if(import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1" &&
+         !probeReported && kindRef.current===2){
+        const snapshot=modelRef.current?.diagnostics();
+        const firstComplete=snapshot?.startupMs.firstCompleteReady;
+        if(firstComplete!=null&&Number.isFinite(firstComplete)&&
+           snapshot?.visibleOpacity != null && snapshot.visibleOpacity>0.6){
+          probeReported=true;
+          console.info("MYWEATHER_ECMWF_PERF "+JSON.stringify({
+            capturedAt:new Date().toISOString(),
+            startupMs:snapshot.startupMs,
+            source:snapshot.source,
+            frame:snapshot.frame,
+            displayedFrame:snapshot.displayedFrame,
+            sourceReadP95Ms:snapshot.viewportRenderer.readP95Ms,
+            renderP95Ms:snapshot.viewportRenderer.renderP95Ms,
+            sharedDatasetReads:snapshot.viewportRenderer.datasetReadJoins,
+            nativeQueueP95Ms:snapshot.performance.nativeQueue.p95Ms,
+            heapMb:snapshot.performance.runtime.heapUsedMb,
+            modelRunPinned:snapshot.modelRunPinned,
+            visibleOpacity:snapshot.visibleOpacity
+          }));
         }
       }
       const grid = engine.activeGrid();
@@ -254,7 +324,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }
     };
     engine.onFrame = paint;
-    const onVis = () => engine.setPaused(document.hidden || !el.offsetParent);
+    const onVis = () => {
+      const hidden = document.hidden || !el.offsetParent;
+      engine.setPaused(hidden);
+      // A paused animation alone kept expensive ECMWF readers/worker tile
+      // tasks running in the background. Release raster frames and memory,
+      // while retaining the small bounded verified range cache for re-entry.
+      modelRef.current?.setVisible(!hidden && kindRef.current === 2);
+    };
     document.addEventListener("visibilitychange", onVis);
     void (async () => {
       try {
@@ -262,7 +339,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         if (dead) return;
         leafletRef.current = L;
         map = L.map(el, {
-          zoomControl: false,
+          // Only debug QA APKs expose Leaflet's accessible zoom controls,
+          // so emulator source-coverage tests can traverse 3↔6 without
+          // altering the production map or gesture behaviour.
+          zoomControl: import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1",
           attributionControl: false,
           minZoom: minZoomFor(el),
           maxZoom: 16,
@@ -288,29 +368,42 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         const here = placeRef.current;
         map.setView([here.lat, here.lon], 5);
         const imageryUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+        // Source-backed, very low-resolution ESRI imagery gives quick, real
+        // global coverage during fast long-distance pans. At z3 the former
+        // z4 underlay requested IDENTICAL images as the detail layer, so
+        // both went blank together and exposed the #101820 map host.
+        // The native-z2 parent covers four times as many pixels per axis
+        // with each genuine Esri tile. Keeping this tiny grid mounted through
+        // z6 lets a rapid NEXT pan reuse real geo-anchored imagery, instead
+        // of re-mounting it only after a dark screen is already visible.
+        const worldParent = L.tileLayer(imageryUrl, {
+          maxNativeZoom: SATELLITE_WORLD_PARENT_NATIVE_ZOOM,
+          maxZoom: 16, zIndex: -1,
+          // A z2 source grid is cheap. Keep it geographically synchronized
+          // during pinch zoom so the old map cannot shrink into a black box.
+          updateWhenIdle: false, updateWhenZooming: true,
+          updateInterval: 300, keepBuffer: 3,
+        }).addTo(map);
+        const worldParentTileErrors = new WeakSet<object>();
+        worldParent.on("tileerror", (event) => worldParentTileErrors.add(event.tile));
         // Keep a cheap, lower-resolution satellite backdrop while detailed tiles
         // are fetched after fast pans. Both layers use the same imagery provider.
-        // At world zoom (<=5) the underlay and detailed imagery requested the
-        // *same* Esri raster tiles and composited two full-size tile grids.
-        // Avoid that duplicate GPU surface and its possible horizontal seams.
-        // At closer zoom, the low-resolution underlay is useful while high-res
-        // images arrive after a pan. Mount it only in that case.
+        // The prior z5 underlay was removed at the initial z5 map view,
+        // exposing dark areas while the first satellite tiles arrived.
+        // Keep a coarser z4 parent behind z5+ imagery (distinct Esri URLs,
+        // not two copies of the same z5 tiles), without affecting ECMWF.
         const underlay = L.tileLayer(imageryUrl, {
-          maxNativeZoom: 5,
+          maxNativeZoom: SATELLITE_UNDERLAY_NATIVE_ZOOM,
           maxZoom: 16,
           zIndex: 0,
           updateWhenIdle: false,
           updateInterval: 200,
-          keepBuffer: 2,
-        });
-        const syncUnderlay = () => {
-          if (!map) return;
-          const need = needsSatelliteUnderlay(map.getZoom());
-          if (need && !map.hasLayer(underlay)) underlay.addTo(map);
-          else if (!need && map.hasLayer(underlay)) underlay.remove();
-        };
-        map.on("zoomend", syncUnderlay);
-        syncUnderlay();
+          keepBuffer: 3,
+        }).addTo(map);
+        const underlayTileErrors = new WeakSet<object>();
+        // The z4 underlay remains source-correct at the zoom boundary. The
+        // low-resolution z2 parent is never stretched into fake data: Leaflet
+        // keeps both parent grids anchored to real Esri coordinates.
         const imagery = L.tileLayer(imageryUrl, {
           maxZoom: 16,
           zIndex: 1,
@@ -319,6 +412,105 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           keepBuffer: 3,
         }).addTo(map);
         imageryRef.current = imagery;
+        const detailTileErrors = new WeakSet<object>();
+        const tileCoverage = (layer: TileLayer, failed: WeakSet<object>) => {
+          const pixels = map!.getPixelBounds();
+          const size = layer.getTileSize();
+          return snapshotSatelliteRasterCoverage(
+            map!.hasLayer(layer) ? layer as unknown as SatelliteRasterLayerLike : null,
+            map!.getZoom(), failed, {
+              minX: pixels.min?.x ?? NaN, maxX: pixels.max?.x ?? NaN,
+              minY: pixels.min?.y ?? NaN, maxY: pixels.max?.y ?? NaN,
+              tileWidth: size.x, tileHeight: size.y,
+            },
+          );
+        };
+        let protectedActivations = 0;
+        let releasedAfterCoverage = 0;
+        let wasProtecting = false;
+        satelliteDiagnosticsRef.current = () => ({
+          detail: tileCoverage(imagery, detailTileErrors),
+          underlay: tileCoverage(underlay, underlayTileErrors),
+          worldParent: tileCoverage(worldParent, worldParentTileErrors),
+          handoff: {protectedActivations, releasedAfterCoverage, zooming},
+        });
+
+        // Never tear down a georeferenced parent on a mere Leaflet 'load'
+        // event. That event can complete while another part of the viewport
+        // has no created tile (or while the map's zoom CSS is transforming).
+        let zooming = false;
+        let syncingSatellite = false;
+        const syncUnderlay = () => {
+          if (!map || syncingSatellite) return;
+          syncingSatellite = true;
+          try {
+            const detail = tileCoverage(imagery, detailTileErrors);
+            const low = tileCoverage(underlay, underlayTileErrors);
+            const world = tileCoverage(worldParent, worldParentTileErrors);
+            const decision = satelliteHandoffDecision({
+              zoom: map.getZoom(), zooming,
+              mountedUnderlay: map.hasLayer(underlay),
+              mountedWorld: map.hasLayer(worldParent),
+              detailComplete: detail.complete,
+              underlayComplete: low.complete,
+              worldComplete: world.complete,
+            });
+            // Count only distinct source-protection episodes, not every
+            // individual tileload event. The optional copied report can then
+            // prove whether the basemap parent truly survived missing detail.
+            const protection = !zooming && map.getZoom() > 4 &&
+              decision.worldParent && !detail.complete && !low.complete;
+            if (protection && !wasProtecting) protectedActivations++;
+            wasProtecting = protection;
+            // Mount protection BEFORE removing anything else. A replacement
+            // that has not filled the real screen cannot authorize removal.
+            if (decision.underlay && !map.hasLayer(underlay)) underlay.addTo(map);
+            if (decision.worldParent && !map.hasLayer(worldParent)) worldParent.addTo(map);
+            if (!decision.underlay && map.hasLayer(underlay)) underlay.remove();
+            if (!decision.worldParent && map.hasLayer(worldParent)) {
+              if (!zooming && (low.complete || detail.complete))
+                releasedAfterCoverage++;
+              worldParent.remove();
+            }
+          } finally {
+            syncingSatellite = false;
+          }
+        };
+        const onSatelliteZoomStart = () => {
+          zooming = true;
+          // Keep the existing real parent canvases throughout pinch animation.
+          // For an approaching low-zoom view, begin warming the tiny z2 grid
+          // before zoomend; no additional image provider or tile type.
+          syncUnderlay();
+        };
+        const onSatelliteZoomEnd = () => {
+          zooming = false;
+          syncUnderlay();
+        };
+        map.on("zoomstart", onSatelliteZoomStart);
+        map.on("zoomend", onSatelliteZoomEnd);
+        map.on("moveend", syncUnderlay);
+        for (const [layer, errors] of [
+          [imagery, detailTileErrors],
+          [underlay, underlayTileErrors],
+          [worldParent, worldParentTileErrors],
+        ] as const) {
+          layer.on("loading", syncUnderlay);
+          layer.on("tileload", syncUnderlay);
+          layer.on("load", syncUnderlay);
+          layer.on("tileerror", (event) => {
+            errors.add(event.tile);
+            syncUnderlay();
+          });
+        }
+        // Release coverage checks on map disposal; layers are disposed by
+        // Leaflet and no per-frame poll, timer or new canvas is introduced.
+        map.once("unload", () => {
+          map?.off("zoomstart", onSatelliteZoomStart);
+          map?.off("zoomend", onSatelliteZoomEnd);
+          map?.off("moveend", syncUnderlay);
+        });
+        syncUnderlay();
         const labels = map.createPane("wx-labels");
         labels.style.zIndex = "420";
         labels.style.pointerEvents = "none";
@@ -357,7 +549,55 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           imagery.off("tileload", mountLabels);
         });
         modelRef.current?.attach(L, map);
+        // Debug-emulator ONLY. The production bundle removes this branch.
+        // Record genuine per-viewport ECMWF coverage after every settled
+        // pan/zoom, without logging center coordinates or user place names.
+        if (import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1") {
+          const probeMap = map;
+          let viewportGeneration = 0;
+          const pendingProbes: number[] = [];
+          const onProbeViewportSettled = () => {
+            const generation = ++viewportGeneration;
+            for (const timer of pendingProbes.splice(0)) window.clearTimeout(timer);
+            for (const afterMs of [750, 6000, 16000]) {
+              pendingProbes.push(window.setTimeout(() => {
+                if (dead || generation !== viewportGeneration || kindRef.current !== 2) return;
+                const bounds = probeMap.getBounds();
+                const result = viewportQaSnapshot(
+                  modelRef.current?.diagnostics() ?? null,
+                  probeMap.getZoom(),
+                  {
+                    latitude: bounds.getNorth() - bounds.getSouth(),
+                    longitude: bounds.getEast() - bounds.getWest(),
+                  },
+                );
+                // Compare the *rendered DOM time label*, not only the
+                // model's internal clock. This catches the real 17Z text /
+                // 18Z dominant raster regression on an actual WebView.
+                const timeline = timelineUtcRef.current;
+                const clock = timeline === null ? null : modelRef.current?.getMapClock(timeline) ?? null;
+                const expectedText = clock
+                  ? formatClock(clock.timeMs, tzRef.current, langRef.current) : null;
+                const renderedText = timeRef.current?.textContent ?? null;
+                console.info("MYWEATHER_ECMWF_VIEWPORT " + JSON.stringify({
+                  generation, afterMs, ...result,
+                  sourceClockTextMatches: expectedText !== null &&
+                    renderedText !== null && expectedText === renderedText,
+                }));
+              }, afterMs));
+            }
+          };
+          probeMap.on("moveend", onProbeViewportSettled);
+          probeMap.once("unload", () => {
+            probeMap.off("moveend", onProbeViewportSettled);
+            for (const timer of pendingProbes.splice(0)) window.clearTimeout(timer);
+          });
+        }
+
         if (modelRef.current) {
+          // Source hour changes may occur after a tile finishes, outside the
+          // 180ms text throttle; correct the label at the exact visual swap.
+          modelRef.current.onClockFrameChanged = refreshSourceClock;
           // Show one coherent model at a time. The earlier permanent overlap
           // doubled precipitation colours and allowed coarse 72x36 fallback
           // cells to remain visible as rectangles over real ECMWF spatial tiles.
@@ -369,6 +609,12 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           };
           modelRef.current.onMiss = () => {
             engine.setModelCover(false);
+            // A zoom-out invalidates the previous ECMWF raster coverage.
+            // Prepare one REAL, source-backed small global precipitation
+            // grid immediately at broad scales, rather than exposing the
+            // obsolete half-painted tiles for 4.5 seconds. The quick-world
+            // loader is deduplicated by its existing pending/ready flags.
+            if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.();
             rainFallbackRefreshRef.current?.();
           };
         }
@@ -387,6 +633,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
         engine.attach(map);
         engine.setKind(kindRef.current);
         setReady(true);
+        if (import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1")
+          console.info("MYWEATHER_QA_MAP_MOUNT");
       } catch {
         if (!dead) setReady(false);
       }
@@ -399,6 +647,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       // Weather model also owns Leaflet tile layers, metadata requests and
       // per-frame retry timers; release it before map and GL contexts.
       modelRef.current?.dispose();
+      satelliteDiagnosticsRef.current = null;
       engine.destroy();
       map?.remove();
       engineRef.current = null;
@@ -412,15 +661,19 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const map = mapRef.current;
     const engine = engineRef.current;
     if (!map || !engine || !ready) return;
-    if (!active) {
+    if (!active || document.hidden) {
+      modelRef.current?.setVisible(false);
       engine.setPaused(true);
       return;
     }
-    engine.setPaused(document.hidden);
+    modelRef.current?.setVisible(kind === 2);
+    engine.setPaused(false);
+    if (import.meta.env.VITE_MYWEATHER_PERF_PROBE === "1" && kind === 2)
+      console.info("MYWEATHER_QA_RAIN_ACTIVE");
     // Refresh the container without an implicit pan/jump after tab activation.
     map.invalidateSize({ pan: false, debounceMoveend: true });
     engine.resize();
-  }, [active, ready]);
+  }, [active, ready, kind]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -435,7 +688,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     engineRef.current?.setKind(kind);
     imageryRef.current?.setOpacity(1);
-    modelRef.current?.setVisible(kind === 2);
+    // Visibility is now managed together with tab/background state above.
     if (kind !== 2) engineRef.current?.setModelCover(false);
   }, [kind, ready]);
 
@@ -444,6 +697,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   }, [prefs.mapLayer]);
 
   useEffect(() => {
+    if (modelRef.current instanceof ReadyTileModel) modelRef.current.setDataSaver(prefs.dataSaver);
     const engine = engineRef.current;
     if (!engine || !ready) return;
     const n = prefs.dataSaver ? 0 : prefs.particles === "high" ? 360 : prefs.particles === "med" ? 300 : 240;
@@ -794,7 +1048,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       fallbackTimer = window.setTimeout(() => {
         fallbackTimer = 0;
         enableDetailedFallback();
-      }, 4500);
+      }, map.getZoom() <= 5 ? 1600 : 4500);
     };
     const suspendDetailedFallback = () => {
       if (!detailAllowed && !fallbackTimer && !viewAc && !fineWorldAc) return;
@@ -1022,6 +1276,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   };
   openSystemRef.current = openSystem;
 
+  const cityForecastComparison = weatherDiagnosticsOpen && bundle?.placeId === place.id
+    ? comparePointWithSpatial(bundle, weatherDiagnostics?.source === "spatial"
+      ? weatherDiagnostics.displayedValidTime : null)
+    : null;
   const layer = layerByKind(kind);
   const ticks = legendTicks(layer);
   const gradient = `linear-gradient(to right, ${layer.stops
@@ -1139,22 +1397,77 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             ))}
           </div>
           <p>{lang === "ar" ? "المصدر المعروض" : "Displayed source"}: {weatherDiagnostics?.source === "spatial" ? "ECMWF spatial" : "Open-Meteo fallback"}</p>
+          {cityForecastComparison ? (
+            <p>
+              {lang === "ar" ? "توقع المدينة" : "City point"}:
+              {" "}{cityForecastComparison.pointProvider}
+              {" · WMO "}{cityForecastComparison.pointWmoCode ?? "—"}
+              {" · "}{lang === "ar" ? "الغيوم" : "cloud cover"}{" "}{cityForecastComparison.pointCloudCoverPct ?? "—"}%
+              {" · UTC "}{cityForecastComparison.pointValidTime ?? "—"}
+              {" · ECMWF "}{cityForecastComparison.mapEcmwfValidTime ?? "—"}
+              {" · "}{cityForecastComparison.comparisonScope}
+            </p>
+          ) : null}
+          {weatherDiagnostics?.spatialViewportPolicy ? <p>
+            {lang === "ar" ? "خطة فك البيانات" : "Decode plan"}: {
+              weatherDiagnostics.spatialViewportPolicy.allow
+                ? `ECMWF ${weatherDiagnostics.spatialViewportPolicy.reason} · ${weatherDiagnostics.spatialViewportPolicy.rasterSize}px`
+                : `genuine fallback (invalid viewport)`
+            }
+          </p> : null}
+          <p>{lang === "ar" ? "محرك الرسم" : "Raster engine"}: {weatherDiagnostics?.backend ?? "om-on-device"}
+            {weatherDiagnostics?.tinyModelObservations ? ` · AI samples ${weatherDiagnostics.tinyModelObservations}` : ""}
+          </p>
+          {weatherDiagnostics?.pilotFailure ? <p className="text-amber-200">Pilot fallback: {weatherDiagnostics.pilotFailure}</p> : null}
           <p>{lang === "ar" ? "بيانات النموذج" : "Model metadata"}: {weatherDiagnostics?.metadataAvailable ? "OK" : "unavailable"}</p>
           <p>{lang === "ar" ? "إصدار ECMWF الثابت" : "Pinned ECMWF model run"}: {weatherDiagnostics?.modelRunPinned ? "OK" : "capture fallback"}
             {weatherDiagnostics?.modelRunReferenceTime ? ` · ${weatherDiagnostics.modelRunReferenceTime}` : ""}
           </p>
           <button type="button" className="my-1 rounded border border-white/35 px-2 py-1"
             onClick={() => {
+              // Recompute clock against the SAME live model state sampled
+              // for this diagnostic, not an older throttled React ref.
               const report = modelRef.current?.diagnostics();
+              const timeline = timelineUtcRef.current;
+              const liveClock = timeline !== null ? modelRef.current?.getMapClock(timeline) ?? null : null;
+              if (liveClock && kindRef.current === 2) {
+                visualClockRef.current = liveClock;
+                if (timeRef.current)
+                  timeRef.current.textContent = formatClock(liveClock.timeMs, tzRef.current, langRef.current);
+              }
               if (!report || !navigator.clipboard?.writeText) {
                 setCopyStatus(lang === "ar" ? "النسخ غير متاح" : "Clipboard unavailable");
                 return;
               }
+              // Include zoom and viewport SPAN (not private map-center
+              // coordinates) to distinguish a world decode from a local pan
+              // in the user's opt-in diagnostic. Never log precise location.
+              const bounds = mapRef.current?.getBounds();
+              const currentZoom = mapRef.current?.getZoom();
+              const viewportSpanDegrees = bounds ? {
+                longitude: Number((bounds.getEast() - bounds.getWest()).toFixed(1)),
+                latitude: Number((bounds.getNorth() - bounds.getSouth()).toFixed(1)),
+              } : null;
               void navigator.clipboard.writeText(JSON.stringify({
                 capturedAt: new Date().toISOString(),
                 layer: "ECMWF rain/cloud/snow",
                 dataSaver: prefs.dataSaver,
+                mapZoom: currentZoom ?? null,
+                viewportSpanDegrees,
+                mapTimelineUtc: timelineUtcRef.current === null ? null : new Date(timelineUtcRef.current).toISOString(),
+                mapLabelUtc: liveClock && Number.isFinite(liveClock.timeMs)
+                  ? new Date(liveClock.timeMs).toISOString() : null,
+                mapClockStatus: liveClock?.status ?? null,
+                mapClockGapMinutes: liveClock?.gapMinutes ?? null,
+                satelliteRaster: satelliteDiagnosticsRef.current?.() ?? null,
                 ...report,
+                // Local point forecast vs global ECMWF can legitimately differ.
+                // Record both genuine source times without copying precise
+                // coordinates or claiming a winner from raster colour alone.
+                cityForecastComparison: bundleRef.current?.placeId === placeRef.current.id
+                  ? comparePointWithSpatial(bundleRef.current,
+                    report.source === "spatial" ? report.displayedValidTime : null)
+                  : null,
               }, null, 2)).then(
                 () => setCopyStatus(lang === "ar" ? "تم نسخ القياسات" : "Metrics copied"),
                 () => setCopyStatus(lang === "ar" ? "تعذر النسخ" : "Copy failed"),
@@ -1176,12 +1489,28 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             {" · "}{lang === "ar" ? "حُفظت" : "stored"}: {weatherDiagnostics?.cacheStored ?? 0}
             {" · "}{lang === "ar" ? "غير قابلة للتخزين" : "rejected"}: {weatherDiagnostics?.cacheRejected ?? 0}
           </p>
+          {weatherDiagnostics?.currentTileCoverage ? <p>
+            {lang === "ar" ? "تغطية البلاطات الحالية (غيوم/مطر/ثلج)" : "Current viewport coverage (cloud/rain/snow)"}: {
+              weatherDiagnostics.currentTileCoverage.map(c => `${c.delivered}/${c.required}`).join(" · ")
+            } · {lang === "ar" ? "المخفية" : "hidden"}: {
+              weatherDiagnostics.currentTileCoverage.reduce((sum,c) => sum + c.hidden, 0)
+            } · {lang === "ar" ? "المعلقة" : "staged"}: {weatherDiagnostics.stagedTileCount ?? 0}
+          </p> : null}
           <p>{lang === "ar" ? "الإطار المطلوب" : "Requested frame"}: {weatherDiagnostics?.requestedFrame ?? "—"}</p>
           <p>{lang === "ar" ? "الإطار المعروض فعليًا" : "Displayed frame"}: {weatherDiagnostics?.displayedFrame ?? "—"}
             {weatherDiagnostics?.holdingPreviousFrame ? (lang === "ar" ? " · الاحتفاظ بالإطار السابق" : " · holding previous frame") : ""}
           </p>
+          <p>{lang === "ar" ? "وقت شريط الخريطة (UTC)" : "Map timeline clock (UTC)"}: {timelineUtcRef.current === null ? "—" : new Date(timelineUtcRef.current).toISOString()}</p>
+          <p>{lang === "ar" ? "الوقت المكتوب على الصورة (UTC)" : "Visible map label UTC"}: {visualClockRef.current ? new Date(visualClockRef.current.timeMs).toISOString() : "—"}
+            {" · "}{visualClockRef.current?.status ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المطلوب" : "Requested model time"}: {weatherDiagnostics?.requestedValidTime ?? "—"}</p>
           <p>{lang === "ar" ? "وقت النموذج المعروض" : "Displayed model time"}: {weatherDiagnostics?.displayedValidTime ?? "—"}</p>
+          {(weatherDiagnostics?.compositedFrames?.length ?? 0) > 1 ? (
+            <p>{lang === "ar" ? "مزج ساعتين حقيقيتين" : "Source-backed hour blend"}: {
+              weatherDiagnostics?.compositedFrames?.map((entry) =>
+                `${entry.frame}: ${Math.round(entry.opacity * 100)}%`).join(" · ")
+            }</p>
+          ) : null}
           {weatherDiagnostics?.error ? (
             <p className="my-1 break-words text-amber-200" role="status">
               {lang === "ar" ? "الخطأ" : "Error"}: {weatherDiagnostics.error}
@@ -1221,13 +1550,41 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               {" · tile errors "}{weatherDiagnostics?.performance.tileFailures.join("/") ?? "—"}
               {" · transfer MB "}{((weatherDiagnostics?.performance.nativeBytes ?? 0) / 1048576).toFixed(1)}
             </p>
+            <p>{"ECMWF renderer: "}{weatherDiagnostics?.viewportRenderer.mode ?? "legacy"}
+              {" · worker tiles "}{weatherDiagnostics?.viewportRenderer.workerTiles ?? 0}
+              {" · dataset copies "}{weatherDiagnostics?.viewportRenderer.datasetCopies ?? 0}
+              {" · reuse "}{weatherDiagnostics?.viewportRenderer.datasetReuses ?? 0}
+              {" · shared source reads "}{weatherDiagnostics?.viewportRenderer.datasetReadJoins ?? 0}
+              {" · evicted "}{weatherDiagnostics?.viewportRenderer.datasetEvictions ?? 0}
+              {" · recovered "}{weatherDiagnostics?.viewportRenderer.capturedReadRecoveries ?? 0}
+              {" · fallback tiles "}{weatherDiagnostics?.viewportRenderer.fallbackTiles ?? 0}
+              {" · queued "}{weatherDiagnostics?.viewportRenderer.queued ?? 0}
+              {" · peak waiters "}{weatherDiagnostics?.viewportRenderer.peakWaiting ?? 0}
+            </p>
+            <p>{"Raster fallback reasons: "}
+              {weatherDiagnostics?.viewportRenderer.reasons ?
+                Object.entries(weatherDiagnostics.viewportRenderer.reasons)
+                  .filter(([, count]) => count > 0)
+                  .map(([reason, count]) => `${reason}:${count}`).join(" · ") || "none" : "—"}
+            </p>
+            <p>{"ECMWF model read p50/p95: "}
+              {weatherDiagnostics?.viewportRenderer.readP50Ms ?? "—"}{" / "}
+              {weatherDiagnostics?.viewportRenderer.readP95Ms ?? "—"}{" ms"}
+            </p>
+            <p>{"Worker queue p95: "}
+              {weatherDiagnostics?.viewportRenderer.workerQueueP95Ms ?? "—"}{" ms"}
+            </p>
+            <p>{"Raster worker p50/p95: "}
+              {weatherDiagnostics?.viewportRenderer.renderP50Ms ?? "—"}{" / "}
+              {weatherDiagnostics?.viewportRenderer.renderP95Ms ?? "—"}{" ms"}
+            </p>
             <p>{"SharedArrayBuffer: "}{weatherDiagnostics?.performance.runtime.crossOriginIsolated ? "available" : "unavailable"}
               {" · JS heap: "}{weatherDiagnostics?.performance.runtime.heapUsedMb == null
                 ? "N/A" : `${weatherDiagnostics.performance.runtime.heapUsedMb} MB`}
             </p>
             <p className="text-white/60">{lang === "ar"
-                ? "زمن البلاطة يشمل فك البيانات ورسمها ونقلها؛ لا يمكن فصلهما دون أدوات داخل عامل OM."
-                : "Tile time includes decoding, rendering and delivery; worker-level breakdown is not exposed."}</p>
+                ? "زمن البلاطة الكامل يشمل الجلب وفك البيانات والرسم. زمن عامل الرسم الجديد مقاس منفصل؛ المحرك الاحتياطي لا يتيح هذا الفصل."
+                : "Full tile time includes fetch, decode and paint. Viewport worker timing measures raster painting only; the legacy engine has no separate worker timing."}</p>
           </div>
           <p>{lang === "ar" ? "الإطارات الجاري تجهيزها" : "Decoding forecast frames"}: {weatherDiagnostics?.loadingFrames.join(", ") || "—"}</p>
           {(["cloud", "rain", "snow"] as const).map((name, index) => (
@@ -1337,13 +1694,26 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               </button>
             </div>
           ) : null}
-          <div className="wx-card map-bar pointer-events-auto px-2 py-1.5">
+          {/* Real provider credit remains visible, compact and attached to the
+              playback card so phone height/RTL never creates floating gaps. */}
+          <div className="wx-map-source-credit pointer-events-auto" dir="ltr"
+            aria-label={lang === "ar" ? "مصادر بيانات الخريطة" : "Map data attribution"}>
+            <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">© Esri</a>
+            <span aria-hidden="true"> · </span>
+            <a href="https://open-meteo.com/en/license" target="_blank" rel="noopener noreferrer">ECMWF / Open-Meteo</a>
+          </div>
+          <div className="wx-card map-bar pointer-events-auto px-2 py-1">
             <div className="flex items-center gap-2" dir="ltr">
               <button
                 type="button"
                 className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink"
                 onClick={() => {
                   const next = !playing;
+                  // A deliberate playback start can prepare one genuine global
+                  // rain/snow fallback ahead of the first hourly boundary.
+                  // The current ECMWF renderer remains primary and no fake
+                  // forecast pixels are introduced.
+                  if (next && kind === 2) rainPlaybackQuickRef.current?.();
                   setPlaying(next);
                   engineRef.current?.setPlaying(next);
                 }}
@@ -1378,27 +1748,18 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
                 onInput={(e) => engineRef.current?.setHour(Number(e.currentTarget.value))}
               />
             </div>
-            {kind === 2 && playing && weatherLoadPhase > 0 ? (
-              <div
-                className="mt-1 flex items-center gap-1.5 rounded-md bg-accent/10 px-2 py-1 text-[0.67rem] leading-tight text-fg"
-                dir={lang === "ar" ? "rtl" : "ltr"}
-                role="status"
-                aria-live="polite"
-              >
-                <svg className="size-3 shrink-0 animate-spin text-accent" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 3a9 9 0 1 1-9 9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-                <span>{weatherLoadPhase === 2
-                  ? (lang === "ar" ? "تحميل التوقعات أبطأ من المعتاد — يمكنك اختيار ساعة أخرى" : "Forecast loading is slow — you can select another hour")
-                  : (lang === "ar" ? "جاري تجهيز التوقع التالي…" : "Preparing next forecast…")}</span>
-              </div>
-            ) : null}
-            <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
-              <span className="font-semibold text-fg">{t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}</span>
-              <span ref={valueRef} className="font-semibold text-accent">—</span>
+            <div dir={lang==="ar"?"rtl":"ltr"}
+              className="wx-map-playback-meta mt-0.5 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 text-xs">
+              <span className="min-w-0 truncate font-semibold leading-tight text-fg">
+                {t(lang, kind === 0 ? "windLayer" : kind === 2 ? "rainLayer" : "tempLayer")}
+              </span>
+              <span ref={timeRef} className="whitespace-nowrap text-center text-[0.65rem] leading-tight text-muted">
+                {t(lang, "today")}
+              </span>
+              <span ref={valueRef} className="min-w-0 whitespace-nowrap text-end font-semibold leading-tight text-accent"
+                role="status">—</span>
             </div>
-            <span ref={timeRef} className="block text-[0.65rem] leading-tight text-muted">{t(lang, "today")}</span>
-            <div className="mt-1 h-1 rounded-full" style={{ background: gradient }} />
+            <div className="mt-0.5 h-1 rounded-full" style={{ background: gradient }} />
             <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
               {ticks.map((tick) => <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>)}
             </div>
@@ -1424,29 +1785,6 @@ function CycloneGlyph() {
       <circle cx="32" cy="32" r="1.15" fill="#1a100e" />
     </svg>
   );
-}
-
-function nearbyRain(
-  place: Place,
-  bundle: WeatherBundle | null,
-  lat: number,
-  lon: number,
-  timeMs: number,
-): number | null {
-  if (!bundle || bundle.placeId !== place.id || !bundle.hourly.length) return null;
-  const cos = Math.cos((place.lat * Math.PI) / 180);
-  if (Math.hypot(lat - place.lat, (lon - place.lon) * cos) > 2.2) return null;
-  let best = bundle.hourly[0]!;
-  let dist = Number.POSITIVE_INFINITY;
-  for (const hour of bundle.hourly) {
-    const gap = Math.abs(hour.t - timeMs);
-    if (gap < dist) {
-      dist = gap;
-      best = hour;
-    }
-  }
-  if (dist > 3 * 3_600_000) return null;
-  return best.precip;
 }
 
 function sampleText(

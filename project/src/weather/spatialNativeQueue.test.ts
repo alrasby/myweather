@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SpatialNativeQueue } from "./spatialNativeQueue.ts";
+import { SpatialNativeQueue, spatialNativePriority } from "./spatialNativeQueue.ts";
 
 test("native spatial HTTP cannot exceed its concurrency limit", async () => {
   const queue = new SpatialNativeQueue(2);
@@ -46,4 +46,50 @@ test("cancelling during native HTTP discards its late response", async () => {
   abort.abort();
   finish("obsolete");
   await assert.rejects(job, /spatial-request-aborted/);
+});
+
+test("only actual ECMWF cloud and rain files receive native queue priority", () => {
+  assert.equal(spatialNativePriority("https://s3.example/data/cloud_cover/2026.om"), 1);
+  assert.equal(spatialNativePriority("https://s3.example/data/precipitation/2026.om"), 1);
+  assert.equal(spatialNativePriority("om://example/model.om?variable=cloud_cover"), 1);
+  assert.equal(spatialNativePriority("https://s3.example/data/snowfall_water_equivalent/2026.om"), 0);
+  assert.equal(spatialNativePriority("https://s3.example/data/latest.json"), 0);
+});
+
+test("visible cloud/rain queued reads lead, but snow reads cannot starve", async () => {
+  const queue = new SpatialNativeQueue(1);
+  let unblock!: () => void;
+  const first = queue.run(undefined, () => new Promise<void>((resolve) => { unblock = resolve; }));
+  const observed: string[] = [];
+  const pending: Array<[string, 0 | 1]> = [
+    ["snow-a", 0], ["snow-b", 0],
+    ["cloud-a", 1], ["rain-a", 1], ["cloud-b", 1], ["rain-b", 1],
+  ];
+  const jobs = pending.map(([name, priority]) =>
+    queue.run(undefined, async () => { observed.push(name); }, priority));
+  unblock();
+  await Promise.all([first, ...jobs]);
+  assert.deepEqual(observed.slice(0, 4), ["cloud-a", "rain-a", "cloud-b", "snow-a"]);
+  assert.deepEqual(observed.slice(4), ["rain-b", "snow-b"]);
+});
+
+test("an already-running canceled native request may complete for verified cache only",async()=>{
+ const queue=new SpatialNativeQueue(1),abort=new AbortController();
+ let finish!: (value:string)=>void;
+ const work=queue.run(abort.signal,()=>new Promise<string>(resolve=>{finish=resolve;}),1,true);
+ abort.abort();
+ finish("verified-206-range");
+ assert.equal(await work,"verified-206-range");
+});
+test("cache warming never starts a canceled native task still waiting in the queue",async()=>{
+ const queue=new SpatialNativeQueue(1);
+ let release!:()=>void;
+ const first=queue.run(undefined,()=>new Promise<void>(resolve=>{release=resolve;}));
+ let entered=false;
+ const abort=new AbortController();
+ const second=queue.run(abort.signal,async()=>{entered=true;return "no";},1,true);
+ abort.abort();
+ await assert.rejects(second,/spatial-request-aborted/);
+ release();await first;
+ assert.equal(entered,false);
 });

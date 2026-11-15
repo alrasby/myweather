@@ -5,7 +5,14 @@ import { metRainRate, isRecentObservation, validDailyTemperatures } from "@/weat
 import { dayKey } from "@/weather/format";
 import { isQuotaBlocked, markQuota } from "@/weather/grid";
 import { proxyFetch } from "@/weather/net";
+import { parseMarineSnapshot } from "@/weather/marineTides";
+import { coastalDistanceKm } from "@/weather/coastline";
 import { normalizePlaceQuery, searchLocal } from "@/weather/places-index";
+import { cityKey, mergeCityResults, relaxedCityQuery } from "@/weather/placeSearchQuality";
+import { queryLanguage } from "@/weather/searchScript";
+import { photonCities } from "@/weather/photonCity";
+import { configuredPrivateGeocoder, privateGeocoderUrl } from "@/weather/privateGeocoder";
+import { parseCoordinatePlace } from "@/weather/coordinateSearch";
 import { CACHE_KEY, CACHE_TTL_MS, MAX_CACHED_PLACES, type Place, type WeatherBundle } from "@/weather/types";
 
 type CacheEntry = { at: number; bundle: WeatherBundle };
@@ -161,6 +168,7 @@ function buildBundle(
     daily: dayRows.filter((row) => Number.isFinite(row.t) && validDailyTemperatures(row.tmax, row.tmin)),
     air,
     marine,
+    marineVersion: 3,
   };
   if (!Number.isFinite(bundle.current.temp)) {
     const now = Date.now();
@@ -224,32 +232,18 @@ async function fetchMarine(place: Place, signal?: AbortSignal): Promise<WeatherB
   const url = new URL("https://marine-api.open-meteo.com/v1/marine");
   url.searchParams.set("latitude", String(place.lat));
   url.searchParams.set("longitude", String(place.lon));
+  // One real marine request supplies both the wave and the sea-level curve.
   url.searchParams.set("current", "wave_height");
-  url.searchParams.set("forecast_days", "1");
-  url.searchParams.set("timezone", "auto");
-  // Do not accidentally select inland cells for coastal towns.
+  url.searchParams.set("hourly", "sea_level_height_msl");
+  url.searchParams.set("forecast_days", "3");
+  url.searchParams.set("past_days", "1");
+  url.searchParams.set("timeformat", "unixtime");
+  url.searchParams.set("timezone", "UTC");
   url.searchParams.set("cell_selection", "sea");
   const res = await proxyFetch(url.toString(), signal);
-  // Network/API failures are not evidence that a formerly coastal town is inland.
   if (!res.ok) return null;
-  const json = (await res.json()) as { latitude?: number; longitude?: number; current?: { wave_height?: number } };
-  const wave = json.current?.wave_height;
-  // A successful sea-grid response can identify the coast even when wave height
-  // is missing. Bound the distance to avoid marking far-inland towns as coastal.
-  const gridLat = json.latitude;
-  const gridLon = json.longitude;
-  if (!(typeof gridLat === "number" && Number.isFinite(gridLat) &&
-        typeof gridLon === "number" && Number.isFinite(gridLon))) return null;
-  let nearSea = false;
-  {
-    const dLat = (gridLat - place.lat) * Math.PI / 180;
-    const dLon = (gridLon - place.lon) * Math.PI / 180;
-    const lat1 = place.lat * Math.PI / 180;
-    const lat2 = gridLat * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-    nearSea = 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(a))) <= 30;
-  }
-  return { coastal: nearSea, wave: nearSea && typeof wave === "number" && Number.isFinite(wave) ? wave : null };
+  const [raw,shoreKm]=await Promise.all([res.json(),coastalDistanceKm(place.lat,place.lon)]);
+  return parseMarineSnapshot(raw,place.lat,place.lon,Date.now(),shoreKm);
 }
 
 async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<WeatherBundle> {
@@ -304,10 +298,11 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
       bundle.daily.length < 3 || !isRecentObservation(bundle.current.t, Date.now())) {
     throw new Error("incomplete-or-stale-open-meteo-forecast");
   }
+  bundle.forecastSource = "open-meteo-best-match";
   return bundle;
 }
 
-const MET_UA = "MyWeather/1.0 (net.nabdhserv.myweather)";
+const MET_UA = "MyWeather/1.0 (https://nabdhserv.net; net.nabdhserv.myweather)";
 
 type MetDetails = {
   air_pressure_at_sea_level?: number;
@@ -492,6 +487,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
   const nearest = hourly.reduce((best, row) => (Math.abs(row.t - now) < Math.abs(best.t - now) ? row : best));
   const instant = series[0]?.data?.instant?.details ?? {};
   return {
+    forecastSource: "met-no",
     placeId: place.id,
     timezone,
     offset,
@@ -515,6 +511,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
     daily,
     air: null,
     marine: null,
+    marineVersion: 3,
   };
 }
 
@@ -529,7 +526,14 @@ async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Weathe
     }
   }
   try {
-    return await fetchMet(place, signal);
+    // Marine availability is independent of the weather provider: if the
+    // primary forecast fails, do not silently lose tide eligibility/data.
+    const [bundle, marine] = await Promise.all([
+      fetchMet(place, signal),
+      fetchMarine(place, signal).catch(() => null),
+    ]);
+    bundle.marine = marine;
+    return bundle;
   } catch (err) {
     if (aborted(err, signal)) throw err;
     throw primary instanceof Error ? primary : err;
@@ -567,7 +571,8 @@ export function loadWeather(
   }
   const job = (async () => {
     const cached = readCacheFile().entries[place.id];
-    const fresh = !!cached && Date.now() - cached.at < CACHE_TTL_MS;
+    const fresh = !!cached && cached.bundle.marineVersion === 3 &&
+      Date.now() - cached.at < CACHE_TTL_MS;
     if (cached && fresh && !opts?.force) return { bundle: cached.bundle, stale: false, estimated: false };
     let last: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -576,8 +581,12 @@ export function loadWeather(
         const bundle = await fetchForecast(place, opts?.signal);
         // Preserve known coastal eligibility if the secondary forecast provider
         // does not include marine data or the separate marine API is offline.
-        if (bundle.marine == null && cached?.bundle.marine?.coastal) {
-          bundle.marine = { coastal: true, wave: null };
+        if (bundle.marine == null && cached?.bundle.marineVersion === 3 && cached.bundle.marine?.coastal) {
+          // A brief Marine outage must not reclassify a known coastal city as
+          // inland. Reuse only still-relevant ACTUAL sea-level samples.
+          const oldTide = cached.bundle.marine.tide;
+          bundle.marine = { coastal: true, wave: null,
+            tide: oldTide && Date.now() - oldTide.fetchedAt < 6 * 3600000 ? oldTide : null };
         }
         rememberBundle(place.id, bundle);
         return { bundle, stale: false, estimated: false };
@@ -606,13 +615,6 @@ export function loadWeather(
   return job;
 }
 
-function searchLangs(query: string, lang: string): string[] {
-  const arabic = /[\u0600-\u06FF]/.test(query);
-  const first = arabic ? "ar" : lang || "en";
-  const second = arabic ? "en" : "ar";
-  return first === second ? [first] : [first, second];
-}
-
 async function geocode(name: string, language: string, signal?: AbortSignal): Promise<Place[]> {
   const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
   url.searchParams.set("name", name);
@@ -630,7 +632,11 @@ async function geocode(name: string, language: string, signal?: AbortSignal): Pr
       return [];
     }
   }
-  return (json.results ?? []).map((row) => {
+  if (!json || typeof json !== "object" || !Array.isArray(json.results)) return [];
+  return json.results.filter((row) => {
+    const lat = Number(row.latitude), lon = Number(row.longitude);
+    return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat)<=90 && Math.abs(lon)<=180 && typeof row.name==="string" && row.name.trim().length>0;
+  }).map((row) => {
     const lat = Number(row.latitude);
     const lon = Number(row.longitude);
     return {
@@ -647,40 +653,125 @@ async function geocode(name: string, language: string, signal?: AbortSignal): Pr
   });
 }
 
-function mergePlaces(local: Place[], remote: Place[]): Place[] {
-  const out: Place[] = [];
-  const seen = new Set<string>();
-  const key = (place: Place) => `${place.lat.toFixed(2)},${place.lon.toFixed(2)}`;
-  for (const place of [...local, ...remote]) {
-    const id = key(place);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(place);
-    if (out.length >= 12) break;
-  }
-  return out;
+// Small bounded in-memory cache: returning to an exact query is immediate.
+const citySearchCache = new Map<string,{ expires:number; rows:Place[] }>();
+const CITY_CACHE_TTL=3*60_000;
+function cacheCities(key:string,rows:Place[]):void {
+ citySearchCache.delete(key);
+ citySearchCache.set(key,{expires:Date.now()+CITY_CACHE_TTL,rows});
+ if(citySearchCache.size>36)citySearchCache.delete(citySearchCache.keys().next().value!);
 }
 
-export async function searchPlaces(query: string, lang: string, signal?: AbortSignal): Promise<Place[]> {
-  const trimmed = query.trim();
-  if (trimmed.length < 2) return [];
-  const local = searchLocal(trimmed);
-  const forms = [trimmed];
-  const folded = normalizePlaceQuery(trimmed);
-  if (folded && folded !== trimmed) forms.push(folded);
-  const jobs: Promise<Place[]>[] = [];
-  for (const form of forms) {
-    for (const language of searchLangs(form, lang)) {
-      jobs.push(
-        geocode(form, language, signal).catch((err) => {
-          if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
-          return [];
-        }),
-      );
-    }
-  }
-  const remote = (await Promise.all(jobs)).flat();
-  return mergePlaces(local, remote);
+/** Local matches are shown immediately by CitiesScreen. Each genuine remote
+ * reply progressively updates that view without waiting for slower providers;
+ * all updates are guarded by the active AbortSignal. */
+// Configured private/contracted geocoder. The public Photon DEMO is NEVER
+// called by shipping builds; six fallback lookups/min/device prevent abuse.
+const photonIssued:number[]=[];
+let photonNextAt=0;
+async function requestPhoton(query:string,language:string,signal:AbortSignal|undefined,
+ publish:(places:Place[])=>void):Promise<void>{
+ const now=Date.now();
+ while(photonIssued.length&&now-photonIssued[0]!>60_000)photonIssued.shift();
+ if(!configuredPrivateGeocoder||photonIssued.length>=20||signal?.aborted)return;
+ const delay=Math.max(0,photonNextAt-now);
+ if(delay>0){
+  await new Promise<void>((resolve)=>{
+   const onAbort=()=>{clearTimeout(timer);resolve();};
+   const timer=setTimeout(()=>{signal?.removeEventListener("abort",onAbort);resolve();},delay);
+   signal?.addEventListener("abort",onAbort,{once:true});
+   if(signal?.aborted)onAbort();
+  });
+ }
+ if(signal?.aborted)return;
+ const at=Date.now();
+ while(photonIssued.length&&at-photonIssued[0]!>60_000)photonIssued.shift();
+ if(photonIssued.length>=20||at<photonNextAt)return;
+ photonIssued.push(at);
+ photonNextAt=at+350;
+ try{
+  const url=privateGeocoderUrl(configuredPrivateGeocoder!,query,language);
+  // CapacitorHttp supports native HTTPS without browser CORS; for the web
+  // deploy the trusted endpoint with CORS limited to the application origin.
+  const res=await proxyFetch(url,signal);
+  if(!res.ok||signal?.aborted)return;
+  publish(photonCities(await res.json()));
+ }catch{
+  // Demo throttling/offline errors must not erase other geocoder results.
+ }
+}
+
+export async function searchPlaces(
+ query:string,lang:string,signal?:AbortSignal,onUpdate?:(rows:Place[])=>void,
+):Promise<Place[]> {
+ const trimmed=query.trim();
+ if(Array.from(trimmed).length<2)return [];
+ const coordinate=parseCoordinatePlace(trimmed);
+ if(coordinate)return [coordinate];
+ const local=searchLocal(trimmed);
+ // The hosted geocoder deliberately matches 2 letters as complete names only;
+ // an instant local prefix list is more useful and saves an unnecessary call.
+ if(Array.from(trimmed).length===2&&local.length>0)return local;
+ const key=normalizePlaceQuery(trimmed).toLowerCase()+"|"+lang;
+ const cached=citySearchCache.get(key);
+ if(cached&&cached.expires>Date.now())return cached.rows;
+ const incoming:Place[]=[];
+ const arabic=/[\u0600-\u06ff]/.test(trimmed);
+ const first=queryLanguage(trimmed,lang);
+ const hanOnly=/\p{Script=Han}/u.test(trimmed) &&
+   !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(trimmed);
+ const alternate=hanOnly?(first==="ja"?"zh":"ja"):first==="en"?"ar":"en";
+ // Arabic search terms are not reliably indexed by their romanization at
+ // GeoNames/Open-Meteo. Reuse the trusted bundled city's English alias where
+ // its actual Arabic name matches, without guessing a false transliteration.
+ const exactAlias=arabic?local.find(p=>p.nameEn&&
+   cityKey(p.name).startsWith(cityKey(trimmed)))?.nameEn:null;
+ const publish=(rows:Place[])=>{
+  if(signal?.aborted)return;
+  incoming.push(...rows);
+  if(rows.length)onUpdate?.(mergeCityResults(trimmed,local,incoming));
+ };
+ const request=async (name:string,language:string)=>{
+  try{publish(await geocode(name,language,signal));}
+  catch(e){if(signal?.aborted || (e instanceof Error&&e.name==="AbortError"))return;}
+ };
+ // At most two parallel requests; the fast local result is already visible.
+ // One uses the actual typed query; the second resolves the known bilingual
+ // alias when possible, not an invented Arabic-to-Latin spelling.
+ // Open-Meteo handles two letters as full names only. The private GeoNames
+ // index handles real Unicode prefixes, including 東京 and Arabic pairs.
+ if(Array.from(trimmed).length===2) {
+   if(configuredPrivateGeocoder)await requestPhoton(trimmed,first,signal,publish);
+   return mergeCityResults(trimmed,local,incoming);
+ }
+ const requests=[
+   request(trimmed,first),
+   ...(exactAlias||alternate!==first
+     ? [request(exactAlias??trimmed,exactAlias?"en":alternate)] : []),
+ ];
+ // GeoNames indexing misses some native-script names. Search the bounded
+ // OSM city-only fallback only for non-Latin names outside the local index.
+ if(configuredPrivateGeocoder&&local.length===0&&
+    Array.from(trimmed).length>=3)
+   requests.push(requestPhoton(trimmed,first,signal,publish));
+ await Promise.all(requests);
+ if(signal?.aborted)return local;
+ // The canonical form repairs Arabic hamza/diacritic mismatches.
+ const canonical=normalizePlaceQuery(trimmed);
+ if(!incoming.length&&canonical!==trimmed){
+  await request(canonical,first);
+ }
+ // A full name that fails by its final character can still return its true
+ // location via Open-Meteo's prefix index; never expand a 2-letter query.
+ if(!incoming.length){
+  const relaxed=relaxedCityQuery(trimmed);
+  if(relaxed&&relaxed!==trimmed&&relaxed!==canonical)await request(relaxed,first);
+ }
+ const result=mergeCityResults(trimmed,local,incoming);
+ // Do not cache failed remote lookups as negatives: weak connectivity must
+ // not make a valid full-name query look empty for three further minutes.
+ if(!signal?.aborted&&incoming.length>0)cacheCities(key,result);
+ return result;
 }
 
 export function placeFromCoords(lat: number, lon: number, name: string, country = "", admin = ""): Place {

@@ -27,21 +27,42 @@ export function modelVariablesReady(variables?: readonly string[]): boolean {
   );
 }
 
-/** Keep an already-painted spatial frame on screen while Leaflet fetches tiles
- * for a new viewport. Its previous tiles remain buffered by Leaflet; clearing
- * the entire frame at the first loading event exposes the coarse 72x36 global
- * fallback on every pan, producing the observed gelatinous rain/cloud shapes.
+/** Only a COMPLETE current geographic tile set may replace the real fallback.
+ * A previous frame.ready=true plus historical tileCounts cannot prove that
+ * Leaflet's new viewport is covered. On mobile with keepBuffer=0, Leaflet
+ * drops old tiles and progressively inserts fresh ones, which otherwise
+ * exposes half-screen seams while reporting ECMWF "spatial/ready".
  *
- * For a first-ever frame all three queues must complete, and after a refresh
- * fully settles we accept only a complete error-free set. */
+ * The current-coverage proof checks genuine, previously tileload-certified
+ * canvases at the actual Leaflet tile zoom, including cached canvases that
+ * are reused without firing new load events. No fake weather is accepted.
+ */
 export function spatialFrameReadyDuringRefresh(
   wasReady: boolean,
   loaded: readonly boolean[],
   errored: ReadonlySet<number>,
   deliveredTiles: readonly number[],
+  currentCoverageCertified: boolean,
 ): boolean {
-  if (wasReady && loaded.some((isLoaded) => !isLoaded)) return true;
+  if (!currentCoverageCertified || errored.size > 0) return false;
+  if (wasReady && loaded.some((isLoaded) => !isLoaded)) {
+    // This can retain the previous image ONLY when every currently visible
+    // tile is independently certified, not merely when old counters are >0.
+    return true;
+  }
   return modelTileFrameReady(loaded, errored, deliveredTiles);
+}
+
+/** A partial same-zoom visual hold needs at least one real source-certified
+ * on-screen tile in EACH of the three fields. This does NOT claim full
+ * viewport readiness: existing complete-coverage rules remain unchanged. */
+export function canVisuallyHoldSpatialTiles(
+  layers: readonly {required:number;delivered:number}[],
+): boolean {
+  return layers.length===SPATIAL_LAYER_COUNT && layers.every(item=>
+    Number.isInteger(item.required) && item.required>0 &&
+    Number.isInteger(item.delivered) && item.delivered>0 &&
+    item.delivered<=item.required);
 }
 
 /** Show a real ECMWF cloud layer as soon as its complete viewport arrives,

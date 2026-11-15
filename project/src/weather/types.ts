@@ -18,12 +18,16 @@ export type Place = {
   id: string;
   name: string;
   nameEn?: string;
+  /** Known alternative names for offline multilingual city matching. */
+  aliases?: string[];
   country: string;
   countryEn?: string;
   admin: string;
   lat: number;
   lon: number;
   primary: boolean;
+  /** Optional attribution for results from the bounded OSM fallback. */
+  source?: "osm-photon" | "geonames";
 };
 
 export type Prefs = {
@@ -104,6 +108,8 @@ export type AirQuality = {
 export type MarineSnap = {
   coastal: boolean;
   wave: number | null;
+  /** Actual Open-Meteo sea_level_height_msl samples; MSL, not chart datum. */
+  tide?: { fetchedAt: number; points: { t: number; level: number }[] } | null;
 };
 
 export type WeatherBundle = {
@@ -111,11 +117,15 @@ export type WeatherBundle = {
   timezone: string;
   offset: number;
   fetchedAt: number;
+  /** Actual point-forecast provider; old cache entries may have no provenance. */
+  forecastSource?: "open-meteo-best-match" | "met-no";
   current: CurrentWeather;
   hourly: HourPoint[];
   daily: DayPoint[];
   air: AirQuality | null;
   marine: MarineSnap | null;
+  /** Cache migration marker: legacy bundles did not request tide series. */
+  marineVersion?: 1 | 2 | 3;
 };
 
 /** شبكة Open-Meteo: كل مصفوفة بطول hours*rows*cols، الصف 0 = الجنوب. */

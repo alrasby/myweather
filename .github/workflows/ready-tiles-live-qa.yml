@@ -1,0 +1,45 @@
+name: ECMWF Ready Tiles — Live Chromium QA
+on:
+  push:
+    branches:
+      - feature/ready-weather-tiles-smart-pipeline-20261113
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ecmwf-live-raster-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  live-ecmwf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify offline raster contracts before real network activity
+        run: |
+          node --test forecast-tiles/gateway.test.mjs forecast-tiles/pngIntegrity.test.mjs forecast-tiles/metatiles.test.mjs
+          node --experimental-strip-types --test src/weather/readyTileClient.test.ts src/weather/tinyTileDemandModel.test.ts src/weather/readyTilePlan.test.ts
+      - name: Build real Chromium ECMWF renderer
+        run: npx vite build --config forecast-tiles/vite.config.ts
+      - name: Install Chromium with system libraries
+        run: npx playwright install --with-deps chromium
+      - name: Render three real ECMWF variables at the same pinned valid hour
+        run: node forecast-tiles/live-smoke.mjs
+      - name: Upload real PNG samples and model-hour benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ready-tiles-real-source-qa
+          path: project/forecast-tiles/qa-raster-samples/
+          if-no-files-found: ignore
+          retention-days: 3

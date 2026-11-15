@@ -11,17 +11,50 @@
  * zoom 12. Beyond that we re-use native tiles rather than asking for false
  * additional forecast detail or unnecessarily decoding more tiles.
  */
-export function spatialTileOptions(pane: "wx-clouds" | "wx-model") {
+/** Non-isolated Android WebView clones the full model variable for EACH
+ * worker tile. One 1024px tile replaces up to four 512px worker jobs.
+ * The URL explicitly requests 1024 model raster pixels: no image stretching.
+ * A shared-memory browser retains the original 512px behavior. */
+export const COMPACT_SPATIAL_TILE_SIZE = 1024;
+export function useCompactSpatialTiles(native: boolean, isolated: boolean): boolean {
+  return native && !isolated;
+}
+
+/** World views need smaller REAL tile footprints, not merely smaller
+ * bitmap samples. A 1024px tile spans 90° at map zoom 4; after a pan its
+ * cached canvas contains a huge formerly invisible region. A 512px tile
+ * spans 45°, allowing a much smaller aligned .om source read and worker
+ * cache. This changes no weather values, just the geographic tile grid. */
+export function spatialPhysicalTileSize(compact: boolean, mapZoom: number): 512 | 1024 {
+  return compact && mapZoom > 5 ? COMPACT_SPATIAL_TILE_SIZE : 512;
+}
+
+export function spatialTileOptions(
+  pane: "wx-clouds" | "wx-model", compact = false, world = false,
+) {
+  const pixels = compact && !world ? COMPACT_SPATIAL_TILE_SIZE : 512;
   return {
     pane,
+    tileSize: pixels,
+    zoomOffset: pixels === 1024 ? -2 : -1,
     opacity: 0,
     updateWhenIdle: true,
     updateWhenZooming: false,
     updateInterval: 400,
     // A single surrounding ring covers normal short drags without
     // scheduling two extra rings of expensive OM decoding for every hour.
-    keepBuffer: 1,
-    maxNativeZoom: 12,
+    // At low zoom the physical source crop covers the visible tile grid
+    // exactly. Do not pre-decode offscreen rings of entire continents.
+    // The aligned .om read covers current physical raster tiles only.
+    // On compact WORLD views a single Leaflet retention ring prevents
+    // previously decoded, georeferenced ECMWF tiles from being removed at
+    // every short pan. This does NOT prefetch a new world ring: Leaflet's
+    // keepBuffer retains already rendered tiles, while updateWhenIdle still
+    // defers new network work until movement settles. Bounded to one ring
+    // at 512px only: regional 1024px Android tiles stay at zero buffer to
+    // avoid excessive WebView memory and previously partial raster reuse.
+    keepBuffer: compact && !world ? 0 : 1,
+    maxNativeZoom: compact && !world ? 13 : 12,
     maxZoom: 16,
   };
 }

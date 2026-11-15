@@ -1,4 +1,6 @@
 import { t } from "@/weather/i18n";
+import { ChevronDown } from "lucide-react";
+import { ANDROID_BUILD_CODE, DESIGN_REVISION } from "@/weather/buildInfo";
 import { useWeather } from "@/weather/store";
 import type { Lang, MorningAt, Prefs, QuietHours, RefreshMin, ShadeKind } from "@/weather/types";
 import { useEffect, useState, type ReactNode } from "react";
@@ -16,9 +18,9 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
   }, []);
 
   return (
-    <div className="wx-settings h-full overflow-y-auto px-3.5 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-3">
+    <div className="wx-settings h-full overflow-y-auto px-3 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-2.5">
       <Card title={t(lang, "appearance")}>
-        <Field label={t(lang, "language")}>
+        <Field label={t(lang, "language")} inline>
           <Chips
             value={prefs.lang}
             options={[
@@ -31,10 +33,9 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
         <Field label={t(lang, "theme")}>
           <Chips
-            cols={2}
             value={prefs.theme}
             options={[
-              ["sun", t(lang, "themeSun")],
+              ["sun", lang === "ar" ? "شروق/غروب" : "Sun cycle", t(lang, "themeSun")],
               ["system", t(lang, "system")],
               ["light", t(lang, "light")],
               ["dark", t(lang, "dark")],
@@ -45,7 +46,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
       </Card>
 
       <Card title={t(lang, "units")}>
-        <Field label={t(lang, "temperature")}>
+        <Field label={t(lang, "temperature")} inline>
           <Chips
             value={prefs.temp}
             options={[
@@ -55,7 +56,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(temp) => setPrefs({ temp })}
           />
         </Field>
-        <Field label={t(lang, "wind")}>
+        <Field label={t(lang, "wind")} inline>
           <Chips
             value={prefs.wind}
             options={[
@@ -67,7 +68,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(wind) => setPrefs({ wind })}
           />
         </Field>
-        <Field label={t(lang, "pressure")}>
+        <Field label={t(lang, "pressure")} inline>
           <Chips
             value={prefs.pressure}
             options={[
@@ -99,7 +100,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         {widgetReady ? (
           <button
             type="button"
-            className="wx-settings-action rounded-2xl border border-line px-3 py-3 text-start"
+            className="wx-settings-action min-h-12 rounded-xl border border-line px-3 py-2.5 text-start"
             onClick={() => {
               const bridge = (window as unknown as { AndroidWidget?: { openSettings?: () => void } }).AndroidWidget;
               bridge?.openSettings?.();
@@ -118,7 +119,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         />
         <Toggle on={prefs.dataSaver} title={t(lang, "dataSaver")} hint={t(lang, "dataSaverHint")} onClick={() => setPrefs({ dataSaver: !prefs.dataSaver })} />
         <div className={prefs.alerts ? "" : "pointer-events-none opacity-45"}>
-        <Field label={t(lang, "rainFrom")}>
+        <Field label={t(lang, "rainFrom")} inline>
           <Chips
             disabled={!prefs.alerts}
             value={String(prefs.rainAlert)}
@@ -130,7 +131,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ rainAlert: Number(id) as Prefs["rainAlert"] })}
           />
         </Field>
-        <Field label={t(lang, "windFrom")}>
+        <Field label={t(lang, "windFrom")} inline>
           <Chips
             disabled={!prefs.alerts}
             value={String(prefs.windAlert)}
@@ -142,7 +143,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ windAlert: Number(id) as Prefs["windAlert"] })}
           />
         </Field>
-        <Field label={t(lang, "dustFrom")}>
+        <Field label={t(lang, "dustFrom")} inline>
           <Chips
             disabled={!prefs.alerts}
             value={String(prefs.dustAlert)}
@@ -155,7 +156,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
           />
         </Field>
         </div>
-        <Field label={t(lang, "morningSum")}>
+        <Field label={t(lang, "morningSum")} inline>
           <Chips
             value={prefs.morning}
             options={[
@@ -167,7 +168,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(morning) => setPrefs({ morning: morning as MorningAt })}
           />
         </Field>
-        <Field label={t(lang, "quietHours")}>
+        <Field label={t(lang, "quietHours")} inline>
           <Chips
             value={prefs.quiet}
             options={[
@@ -192,7 +193,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ mapLayer: Number(id) as ShadeKind })}
           />
         </Field>
-        <Field label={t(lang, "timeSpan")}>
+        <Field label={t(lang, "timeSpan")} inline>
           <Chips
             value={String(prefs.mapHours === 72 ? 48 : prefs.mapHours)}
             options={[
@@ -202,7 +203,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ mapHours: Number(id) as Prefs["mapHours"] })}
           />
         </Field>
-        <Field label={t(lang, "windMotion")}>
+        <Field label={t(lang, "windMotion")} inline>
           <Chips
             value={prefs.particles}
             disabled={prefs.dataSaver}
@@ -217,12 +218,33 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         <Toggle on={prefs.storms} title={t(lang, "storms")} hint={t(lang, "stormsHint")} onClick={() => setPrefs({ storms: !prefs.storms })} />
       </Card>
 
-      <section className="wx-card wx-settings-card mb-3 px-4 py-4">
-        <h2 className="text-[0.95rem] font-semibold text-fg">{t(lang, "sources")}</h2>
-        <p className="mt-1.5 text-[0.72rem] leading-relaxed text-muted">{t(lang, "sourcesBody")}</p>
+      <details className="wx-card wx-settings-card wx-sources-details mb-2.5 px-3.5 py-3">
+        <summary className="wx-sources-summary flex min-h-12 cursor-pointer items-center justify-between gap-2 text-[0.9rem] font-semibold text-fg">
+          {t(lang, "sources")}
+          <ChevronDown aria-hidden="true" className="wx-sources-chevron size-4 shrink-0" />
+        </summary>
+        <div className="wx-sources-content">
+        <p className="mt-1.5 text-[0.75rem] leading-relaxed text-muted">{t(lang, "sourcesBody")}</p>
+        <nav aria-label={lang === "ar" ? "روابط المصادر والتراخيص" : "Sources and licenses"}
+          className="wx-source-links mt-3 flex flex-wrap gap-2">
+          {([
+            ["Open-Meteo", "https://open-meteo.com/en/license"],
+            ["MET Norway", "https://docs.api.met.no/doc/License.html"],
+            ["ECMWF", "https://www.ecmwf.int/"],
+            ["Esri", "https://www.esri.com/"],
+            ["OpenStreetMap contributors", "https://www.openstreetmap.org/copyright"],
+            ["GeoNames cities (CC BY 4.0)", "https://www.geonames.org/"],
+            ["CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"],
+          ] as const).map(([label, href]) => (
+            <a key={href} href={href} target="_blank" rel="noopener noreferrer" dir="ltr"
+              className="inline-flex min-h-12 items-center rounded-full border border-line px-3 py-2 text-xs font-semibold text-fg">
+              {label}
+            </a>
+          ))}
+        </nav>
         <button
           type="button"
-          className="cache-btn mt-3 h-11 w-full rounded-full text-xs font-semibold text-fg"
+          className="cache-btn mt-3 h-12 w-full rounded-full text-xs font-semibold text-fg"
           onClick={() => {
             clearCache();
             window.setTimeout(() => setNotice(null), 1600);
@@ -230,11 +252,17 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         >
           {notice === "cleared" ? t(lang, "cleared") : t(lang, "clearCache")}
         </button>
-      </section>
+        </div>
+      </details>
       <div className="flex justify-center pb-1 pt-1">
-        <p dir="ltr" className="credit credit-glass inline-flex items-center gap-1 rounded-full px-3 py-1 text-[0.68rem] font-medium">
-          Made with <span className="text-danger">♥</span> By NabdhServ.Net
-        </p>
+        <div className="flex flex-col items-center gap-1">
+          <span dir="ltr" className="wx-build-id px-2.5 py-1" aria-label={`Android build ${ANDROID_BUILD_CODE}, design ${DESIGN_REVISION}`}>
+            MyWeather 1.0.0 · Build {ANDROID_BUILD_CODE} · {DESIGN_REVISION}
+          </span>
+          <p dir="ltr" className="credit credit-glass inline-flex items-center gap-1 rounded-full px-3 py-1 text-[0.68rem] font-medium">
+            Made with <span className="text-danger">♥</span> By NabdhServ.Net
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -242,18 +270,20 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="wx-card wx-settings-card mb-3 px-4 py-4">
+    <section className="wx-card wx-settings-card">
       <h2 className="flex items-center gap-2 text-[0.95rem] font-semibold tracking-tight text-fg"><span aria-hidden="true" className="wx-settings-dot" />{title}</h2>
-      <div className="mt-3.5 flex flex-col gap-4">{children}</div>
+      <div className="wx-setting-body">{children}</div>
     </section>
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, inline = false }: {
+  label: string; children: ReactNode; inline?: boolean;
+}) {
   return (
-    <div>
-      <p className="mb-2 text-[0.75rem] font-medium text-muted">{label}</p>
-      {children}
+    <div className={`wx-setting-field ${inline ? "wx-setting-field-inline" : ""}`}>
+      <p className="wx-setting-label">{label}</p>
+      <div className="wx-setting-control">{children}</div>
     </div>
   );
 }
@@ -266,7 +296,7 @@ function Chips<T extends string>({
   disabled,
 }: {
   value: T;
-  options: [T, string][];
+  options: [T, string, string?][];
   onChange: (value: T) => void;
   cols?: number;
   disabled?: boolean;
@@ -275,18 +305,19 @@ function Chips<T extends string>({
   const grid = Boolean(cols && options.length > cols);
   return (
     <div
-      className={`chip-track wx-settings-chips gap-1 p-1 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "opacity-45" : ""}`}
+      className={`chip-track wx-settings-chips gap-0.5 p-0.5 ${grid ? "chip-grid grid" : "grid"} ${disabled ? "opacity-45" : ""}`}
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
-      {options.map(([id, label]) => {
+      {options.map(([id, label, accessibleLabel]) => {
         const on = value === id;
         return (
           <button
             key={id}
             type="button"
             onClick={() => onChange(id)}
-            className={`flex min-h-11 w-full items-center justify-center rounded-full px-2 py-1.5 text-center text-[0.78rem] leading-tight ${on ? "chip-on font-semibold" : "text-fg/85"}`}
+            className={`flex min-h-11 w-full items-center justify-center rounded-full px-1 py-1 text-center text-[0.73rem] leading-snug ${on ? "chip-on font-semibold" : "text-fg/85"}`}
             aria-pressed={on}
+            aria-label={accessibleLabel ?? label}
             disabled={disabled}
           >
             {label}
@@ -299,10 +330,10 @@ function Chips<T extends string>({
 
 function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: string; hint?: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <div className={`flex items-center gap-3 border-t border-line pt-3.5 ${disabled ? "opacity-45" : ""}`}>
+    <div className={`wx-settings-toggle-row flex items-center gap-2.5 border-t border-line pt-2 ${disabled ? "opacity-45" : ""}`}>
       <div className="min-w-0 flex-1">
         <p className="text-[0.8rem] font-semibold leading-snug text-fg">{title}</p>
-        {hint ? <p className="mt-0.5 text-[0.72rem] leading-relaxed text-muted">{hint}</p> : null}
+        {hint ? <p className="mt-0.5 text-[0.72rem] leading-snug text-muted">{hint}</p> : null}
       </div>
       <button
         type="button"
@@ -311,9 +342,9 @@ function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: st
         aria-checked={on}
         disabled={disabled}
         onClick={onClick}
-        className={`flex h-8 w-14 shrink-0 items-center rounded-full p-1 ${on ? "bg-chip" : "bg-line"}`}
+        className="wx-settings-toggle grid h-12 w-12 shrink-0 place-items-center rounded-xl"
       >
-        <span className={`size-6 rounded-full bg-on-sky shadow-sm transition-transform ${on ? "translate-x-6 rtl:-translate-x-6" : ""}`} />
+        <span className="wx-toggle-track" aria-hidden="true"><span className="wx-toggle-thumb" /></span>
       </button>
     </div>
   );
