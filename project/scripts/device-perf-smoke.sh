@@ -88,13 +88,53 @@ try:
 except (ET.ParseError,OSError):pass
 PY
 )
-  if [ -z "$POSITION" ]; then
-    echo "Viewport QA incomplete: Leaflet debug Zoom $MODE unavailable in WebView accessibility tree" | tee "$OUT/zoom-verdict.txt"
-    break
+  if [ -z "$POSITION" ] && [ "$WIDTH" -eq 320 ] && [ "$HEIGHT" -eq 640 ]; then
+    # Android emulator uiautomator returns ONLY the parent WebView, even
+    # though the Leaflet QA +/- controls are visible. The 320x640 emulator
+    # screenshot proves their actual top-left tap centers (28,24)/(28,55).
+    # This fallback is NEVER used on an unknown screen size or a real phone,
+    # and a true recorded zoom delta is mandatory after every tap.
+    if [ "$MODE" = out ]; then POSITION="28 55"; else POSITION="28 24"; fi
+    echo "WebView accessibility unavailable: screenshot-verified debug zoom $MODE at $POSITION" >>"$OUT/zoom-verdict.txt"
   fi
+  if [ -z "$POSITION" ]; then
+    echo "Viewport QA incomplete: Leaflet debug Zoom $MODE cannot be located safely" | tee -a "$OUT/zoom-verdict.txt"
+    exit 1
+  fi
+  PRE_ZOOM=$(adb logcat -d | python3 -c '
+import sys,json
+z=None
+for line in sys.stdin:
+  marker="MYWEATHER_ECMWF_VIEWPORT "
+  if marker not in line:continue
+  try: z=json.loads(line.split(marker,1)[1]).get("mapZoom",z)
+  except (json.JSONDecodeError,ValueError):pass
+if isinstance(z,(int,float)): print(z)
+')
   read -r ZX ZY <<<"$POSITION"
   adb shell input tap "$ZX" "$ZY"
   sleep 19
+  POST_ZOOM=$(adb logcat -d | python3 -c '
+import sys,json
+z=None
+for line in sys.stdin:
+  marker="MYWEATHER_ECMWF_VIEWPORT "
+  if marker not in line:continue
+  try: z=json.loads(line.split(marker,1)[1]).get("mapZoom",z)
+  except (json.JSONDecodeError,ValueError):pass
+if isinstance(z,(int,float)): print(z)
+')
+  python3 - "$PRE_ZOOM" "$POST_ZOOM" "$MODE" <<'PYZOOM'
+import sys
+try:
+ before,after=float(sys.argv[1]),float(sys.argv[2])
+except ValueError:
+ raise SystemExit("Viewport QA incomplete: no real zoom telemetry from Android map")
+expected=before+(-1 if sys.argv[3]=="out" else 1)
+if abs(after-expected)>0.02:
+ raise SystemExit(f"Viewport QA incomplete: actual zoom {before} -> {after}, expected {expected}")
+print(f"Real Leaflet zoom gesture: {before} -> {after}")
+PYZOOM
   adb shell screencap -p /sdcard/myweather-zoom.png
   adb pull /sdcard/myweather-zoom.png "$OUT/viewport-zoom-$MODE-$(date +%s).png" >/dev/null || true
 done
