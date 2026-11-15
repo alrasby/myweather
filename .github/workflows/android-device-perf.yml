@@ -5,6 +5,10 @@ on:
     paths:
       - .github/workflows/android-device-perf.yml
       - project/scripts/device-perf-smoke.sh
+      - project/src/weather/modelField.ts
+      - project/src/weather/spatialViewportRenderer.ts
+      - project/src/weather/places-index.ts
+      - project/src/weather/placeSearchQuality.ts
   workflow_dispatch:
 permissions:
   contents: read

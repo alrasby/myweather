@@ -65,3 +65,20 @@ adb shell dumpsys batterystats --charged "$PACKAGE" >"$OUT/emulator-batterystats
 adb logcat -d >"$OUT/logcat-final.log" || true
 echo "Emulator performance evidence (blank ECMWF means NOT MEASURED):"
 cat "$OUT/samples.csv"
+# Missing a source-verified ECMWF frame is an INCOMPLETE QA result, never
+# a performance success. Validate all three model reads and memory samples.
+python3 - "$OUT/samples.csv" <<'PY'
+import csv,sys,statistics
+with open(sys.argv[1],newline="") as handle:
+    items=list(csv.DictReader(handle))
+if len(items)!=3:raise SystemExit("QA incomplete: expected 3 map sessions")
+for i,row in enumerate(items,1):
+    if row["process_alive"]!="1":
+        raise SystemExit(f"QA failed: app process terminated in cycle {i}")
+    for name in ("ecmwf_first_complete_ms","source_read_p95_ms","pss_total_kb"):
+        try: value=float(row[name])
+        except (ValueError,TypeError):raise SystemExit(f"QA incomplete: {name} absent in cycle {i}")
+        if value<=0:raise SystemExit(f"QA invalid: {name} in cycle {i}")
+times=[float(x["ecmwf_first_complete_ms"]) for x in items]
+print(f"ECMWF ready-frame samples: {times}; median={statistics.median(times):.1f}ms")
+PY
