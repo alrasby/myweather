@@ -100,11 +100,11 @@ test("15-day card receives subtle polish without changing its structure or basel
   assert.match(effectiveGlass, /\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s);
 });
 
-test("visible version stays 1.0.0 while upgrade-safe Android code advances to 62", () => {
+test("visible version stays 1.0.0 while upgrade-safe Android code advances to 63", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.ok(gradle.includes('versionCode 62') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='62' versionName='1.0.0'"));
+  assert.ok(gradle.includes('versionCode 63') && gradle.includes('versionName "1.0.0"'));
+  assert.ok(workflow.includes("versionCode='63' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {

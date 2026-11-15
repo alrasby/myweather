@@ -84,3 +84,14 @@ Visible attributions must not replace service permission. Log owner sign-off in 
 The **same review** requires: (1) exact-head CI all green, (2) screenshot/TalkBack/touch evidence, (3) both device tiers measured and evidence validator passing, (4) actual weather/time/source samples, (5) source/license owner approval, (6) a unique upgrade-safe Android version code and correct signing identity, (7) no user-visible regression. A CI pass alone only changes automated tests from *pending* to *passed*; remaining gates stay blocked.
 
 **As of this source review:** new tests and design corrections are committed on an isolated branch; **physical test evidence, independent forecast accuracy observations, and final commercial API sign-off are absent**. Do not merge into `main` or proclaim WCAG/WMO certification.
+
+
+### Build 63 / PR #93 — release-blocking resource audit
+
+- Exact-head CI must pass TypeScript, source contracts, native request lifetime, ECMWF dataset flight cancellation, scoped provider URL validation, Gradle, Android Lint and original APK signing.
+
+- Recheck on two physical Android tiers: measured cold-start first **complete** ECMWF layer, readP95, native queue P95, worker data copies/joins, heap + native PSS after 20 city/map/tab cycles, idle battery drain and background/foreground. A synthetic test or simulated Android frame does not constitute evidence.
+
+- The hosted geocoder URL is opt-in at build time. Shipping without provisioned service leaves Open-Meteo and offline local search working; never use the shared public Photon instance as a hidden production fallback.
+
+- No unrelated source-module removal from a staged React/Capacitor application without an import/behavior/CI proof. The legacy backup branches and tests are preserved for compatibility; clean the hot paths first, not user-approved app features.
