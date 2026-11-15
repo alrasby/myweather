@@ -8,7 +8,7 @@ from urllib.parse import parse_qs,urlsplit
 
 ROOT=Path(os.environ.get("GEOCODER_DATA_DIR","/data"))
 DB=ROOT/"cities.sqlite3"
-URL="https://download.geonames.org/export/dump/cities500.zip"
+URL="https://download.geonames.org/export/dump/cities1000.zip"
 STATE={"ready":False,"cities":0,"aliases":0,"version":None,"error":None}
 LOCK=threading.Lock()
 CALLS=defaultdict(deque)
@@ -38,7 +38,7 @@ def make_index(archive,path):
         """)
         count=alias_count=0
         with zipfile.ZipFile(archive) as z:
-            member=next((n for n in z.namelist() if n.endswith("cities500.txt")),None)
+            member=next((n for n in z.namelist() if n.endswith("cities1000.txt")),None)
             if not member: raise ValueError("invalid geonames archive")
             with z.open(member) as f:
                 for line in io.TextIOWrapper(f,encoding="utf8",errors="replace"):

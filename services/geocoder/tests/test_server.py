@@ -20,7 +20,7 @@ class CityIndexTests(unittest.TestCase):
           row(4,"Moscow","Москва,موسكو",55.75,37.62,"RU",12000000),
           row(5,"Tokyo","東京,طوكيو",35.68,139.69,"JP",13000000),
         ]
-        with zipfile.ZipFile(arc,"w") as z:z.writestr("cities500.txt","\n".join(entries))
+        with zipfile.ZipFile(arc,"w") as z:z.writestr("cities1000.txt","\n".join(entries))
         self.stats=server.make_index(arc,self.db)
     def test_normalization(self):
         self.assertEqual(server.canonical("دَمَشْق"),"دمشق")

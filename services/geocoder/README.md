@@ -1,6 +1,6 @@
 # MyWeather private world city geocoder
 
-Data source: [GeoNames](https://www.geonames.org/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)). Imports official `cities500.zip` with populated cities and administrative seats, including the alternate names in many scripts. It is **not** an address-level or every-village search engine, and does not guarantee every local spelling. No connection to the public Photon demo.
+Data source: [GeoNames](https://www.geonames.org/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)). Imports official `cities1000.zip` with populated cities and administrative seats, including the alternate names in many scripts. It is **not** an address-level or every-village search engine, and does not guarantee every local spelling. No connection to the public Photon demo.
 
 Service is independent from MyWeather Tide Engine. Railway root directory: `/services/geocoder`, persistent /data volume >=1GB. Runtime has no third-party dependencies. On first boot it downloads the official GeoNames archive once, builds a SQLite prefix index atomically, then reports ready. Every 30 days it refreshes the index without corrupting the prior data if an import fails.
 
