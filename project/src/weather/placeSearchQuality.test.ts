@@ -31,7 +31,7 @@ test("merge prefers exact city and deduplicates geocoder/local coordinates",()=>
  assert.ok(result.some(p=>p.lat===22));
 });
 test("empty and invalid geocoding coordinates never appear or throw",()=>{
- const result=mergeCityResults("Do",[mk("Doha",25,51),mk("Invalid",Number.NaN,56)]);
+ const result=mergeCityResults("Do",[mk("Doha",25,51),mk("Invalid",Number.NaN,56)],[]);
  assert.deepEqual(result.map(p=>p.name),["Doha"]);
  assert.deepEqual(mergeCityResults("abc",[],[]),[]);
 });
