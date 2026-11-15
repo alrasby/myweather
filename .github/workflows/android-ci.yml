@@ -78,6 +78,9 @@ jobs:
       - name: Build Capacitor web assets and sync Android
         working-directory: project
         run: npm run build:android
+      - name: Verify packaged WebView UI and city search (no stale assets)
+        working-directory: project
+        run: node scripts/verify-android-bundle.mjs
       - name: Prepare Gradle wrapper
         run: chmod +x project/android/gradlew
       - name: Gradle unit tests
