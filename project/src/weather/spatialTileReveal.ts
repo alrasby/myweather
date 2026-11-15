@@ -12,6 +12,18 @@ export type SpatialTileNode = {
     options?: KeyframeAnimationOptions) => Animation;
 };
 
+/** A first-time tile may be gently revealed only after the pan settles.
+ * No transition for reused DOM canvases, active gestures, startup previews,
+ * or staged batches: those already have their own atomic appearance policy.
+ */
+export function shouldPolishSpatialArrival(
+  firstDelivery: boolean, moving: boolean, frameReady: boolean,
+  frameOpacity: number, batching: boolean,
+): boolean {
+  return firstDelivery && !moving && frameReady &&
+    Number.isFinite(frameOpacity) && frameOpacity > 0.15 && !batching;
+}
+
 /** Soften the appearance of an independently decoded real tile. This is
  * strictly a short compositor-opacity animation, not a weather-data filter.
  * Never defer the tile request or hold a whole viewport on slow Android. */
