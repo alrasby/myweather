@@ -146,6 +146,13 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
               </a>
             </p>
           ) : null}
+          {hits.some(hit=>hit.source==="geonames") ? (
+            <p className="mt-1 px-2 text-[0.67rem] text-on-sky/80">
+              {lang==="ar"?"بيانات المدن: ":"City data: "}
+              <a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer"
+                className="underline underline-offset-2">© GeoNames (CC BY 4.0)</a>
+            </p>
+          ) : null}
         </section>
       ) : q ? (
         <p className="px-2 py-2 text-xs text-on-sky/85" role="status">

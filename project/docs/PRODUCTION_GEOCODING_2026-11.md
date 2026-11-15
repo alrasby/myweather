@@ -34,3 +34,12 @@ Photon upstream: https://github.com/komoot/photon
 `node --experimental-strip-types --test src/weather/privateGeocoder.test.ts src/weather/photonCity.test.ts src/weather/searchScript.test.ts`
 
 Physical Android acceptance is required: input two letters (local), native-script obscure town absent from local index, full Arabic name, no response/429, offline/online, copy/paste/rapid erase, search suggestions and provider attribution. Test forced low-memory/background/foreground. Record real p50/p95 for provider latency and memory. CI passing without a deployed endpoint verifies the **adapter**, not external reliability.
+
+
+## 15 Nov 2026 — actual self-hosted alternative
+
+The user's Railway workspace limited persistent volumes to **500MB**, so a separate project `MyWeather Global City Search` is deployed using GeoNames `cities1000.zip` rather than the global Photon planet index. Its own Python/SQLite service lives in `services/geocoder/`; it must not alter `MyWeather Tide Engine`. TLS endpoint: `https://myweather-city-search-production.up.railway.app/api`, health `/health`. App Build 64 injects this public URL at Android WebView compile time and verifies the exact host is present in packaged assets.
+
+The service returns city GeoJSON with correct `geonames_id` and `source=geonames`; client displays © GeoNames (CC BY 4.0) separately from legacy OSM attribution. Its data include named populated places >=1,000 residents and administrative centers, with alternate aliases in many scripts. This is an independently hosted, open-data city service, **not** the complete address-level Photon planet dataset and not a paid third-party uptime SLA. Insecure credential embedding is prohibited.
+
+Do not mark operational acceptance complete until Railway deploy is healthy, actual Arabic/Latin/non-Latin queries return correct coordinates, and network performance is tested under loss/429 and load. A signed APK and app battery tests are separate gates.

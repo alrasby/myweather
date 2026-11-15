@@ -25,7 +25,7 @@ export type Place = {
   lon: number;
   primary: boolean;
   /** Optional attribution for results from the bounded OSM fallback. */
-  source?: "osm-photon";
+  source?: "osm-photon" | "geonames";
 };
 
 export type Prefs = {

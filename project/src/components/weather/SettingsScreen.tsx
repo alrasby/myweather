@@ -233,6 +233,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             ["ECMWF", "https://www.ecmwf.int/"],
             ["Esri", "https://www.esri.com/"],
             ["OpenStreetMap contributors", "https://www.openstreetmap.org/copyright"],
+            ["GeoNames cities (CC BY 4.0)", "https://www.geonames.org/"],
             ["CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"],
           ] as const).map(([label, href]) => (
             <a key={href} href={href} target="_blank" rel="noopener noreferrer" dir="ltr"

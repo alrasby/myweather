@@ -17,3 +17,16 @@ test("malformed provider replies cannot create false places",()=>{
  assert.deepEqual(photonCities(null),[]);
  assert.deepEqual(photonCities({features:"bad"}),[]);
 });
+
+test("GeoNames service results preserve real GeoNames IDs, coordinates and attribution",()=>{
+ const out=photonCities({type:"FeatureCollection",features:[{
+   type:"Feature",geometry:{type:"Point",coordinates:[36.3,33.5]},
+   properties:{name:"دمشق",name_en:"Damascus",geonames_id:170654,osm_value:"city",source:"geonames",country:"SY"}
+ }]});
+ assert.equal(out[0]?.id,"geonames:170654");
+ assert.equal(out[0]?.source,"geonames");
+ assert.equal(out[0]?.name,"دمشق");
+ assert.equal(out[0]?.nameEn,"Damascus");
+ assert.equal(out[0]?.lon,36.3);
+ assert.notEqual(out[0]?.source,"osm-photon");
+});

@@ -23,7 +23,8 @@ for(const path of files){
  assert.equal(sum(other),sum(path),"stale native WebView resource: "+path);
 }
 const compiled=files.filter(p=>p.endsWith(".js")).map(p=>readFileSync(p,"utf8")).join("\n");
-for(const symbol of ["Glass 3","wx-city-results","wx-setting-field-inline","Prague"]){
+for(const symbol of ["Glass 3","wx-city-results","wx-setting-field-inline","Prague",
+ "myweather-city-search-production.up.railway.app"]){
  assert.ok(compiled.includes(symbol),"expected build-60 UI/search marker not present in packaged JavaScript: "+symbol);
 }
 console.log("WebView assets match latest Vite build ("+files.length+" matching HTML/JS/CSS files); Glass 3 and live local-search code included.");
