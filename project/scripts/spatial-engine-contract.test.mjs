@@ -48,7 +48,9 @@ test("performance details stay inside existing hidden diagnostics and preserve m
 test("ECMWF viewport cannot reuse data from a different pan/zoom window", () => {
   const src = read("project/src/weather/spatialViewportRenderer.ts");
   assert.ok(src.includes("resolveCurrentSpatialState("));
-  assert.ok(src.includes("getOrCreateState() verifies boundsIncluded()"));
+  assert.ok(src.includes("const requestedBounds = currentBounds ? [...currentBounds] : null;"));
+  assert.ok(src.includes("spatialDatasetFlightKey(parsed.key, requestedBounds)"),
+    "coalescing is bound to this exact tile-aligned source viewport");
   assert.ok(!src.includes("if (loaded) return loaded;"),
     "cached model data cannot bypass updated viewport boundaries");
   assert.ok(!src.includes("this.pendingData.get(parsed.key)"),
@@ -78,7 +80,8 @@ test("worker cache keeps ECMWF variables resident without increasing active rast
 test("raster model state resolution and bounded cache locality are protected", () => {
   const src = read("project/src/weather/spatialViewportRenderer.ts");
   assert.ok(src.includes("postReadCallback: recordRead"));
-  assert.ok(src.includes("chooseLoadedSpatialState(captured, states, parsed.file, parsed.variable, requestedBounds)"));
+  assert.match(src, /chooseLoadedSpatialState\(captured,\s*states,\s*parsed\.file,\s*parsed\.variable,\s*requestedBounds\)/,
+    "captured state must be verified against the same aligned viewport");
   assert.ok(src.includes("spatialStateCoversBounds(s.dataOptions.bounds, wantedBounds)"),
     "reject cached arrays from another continent before painting a tile");
   assert.ok(src.includes("nowMs - oldest.queuedAt >= 550"));
