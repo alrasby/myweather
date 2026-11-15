@@ -1,6 +1,6 @@
 # MyWeather Pro / طقسي — Unified adaptive design + scientific + release quality gate
 
-**Review:** 2026-11-15 · **Scope:** candidate branch stacked on `feature/material3-calm-glass-quality-audit-20261115` · **Production verdict:** **BLOCKED until measured device evidence and license approval**.
+**Review:** 2026-11-15 · **Signed device-QA candidate:** 1.0.0 (versionCode 58; signing must be proven by exact-head CI) · **Scope:** candidate branch stacked on `feature/material3-calm-glass-quality-audit-20261115` · **Production verdict:** **BLOCKED until measured device evidence and license approval**.
 
 This is one engineering acceptance record, not a WMO/WCAG certification or a claim that the app has passed Google Play review. Keep the existing brand, Readex Pro, data and weather behavior. The design is **Material 3-inspired React/WebView**, not native Jetpack Compose.
 
