@@ -40,11 +40,18 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
       setRemote({query:q,hits:[],settled:false});
       return;
     }
+    // Two characters are handled exclusively by the synchronous city index.
+    // Do not allocate a timer, controller or Android network work for them.
+    if (Array.from(q).length === 2) {
+      setRemote({query:q,hits:local,settled:true});
+      return;
+    }
     const ac = new AbortController();
     let current = true;
     setRemote({query:q,hits:local,settled:false});
-    // Local results are synchronous; a short throttle protects the provider
-    // while retaining responsive 2-character search on every keypress.
+    // Local results are synchronous. Debounce network queries long enough
+    // that normal typing does not launch a request for every intermediate
+    // character; rapid 2-letter matches remain immediate.
     const delay=window.setTimeout(()=>{
       const timeout=window.setTimeout(()=>{
         ac.abort();
@@ -57,7 +64,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
       }).catch(()=>{
         if(current)setRemote(v=>v.query===q?{...v,settled:true}:v);
       }).finally(()=>window.clearTimeout(timeout));
-    },90);
+    },165);
     return ()=>{current=false;window.clearTimeout(delay);ac.abort();};
   },[q,base,local]);
 

@@ -79,3 +79,16 @@ test("production lookup never hardcodes the public Photon demo host",()=>{
  assert.ok(!api.includes('new URL("https://photon.komoot.io/api/")'));
  assert.ok(api.includes("configuredPrivateGeocoder&&local.length===0"));
 });
+
+test("map and ECMWF workers turn off with tab/background, without disabling saved weather",()=>{
+ const s=map;
+ assert.ok(s.includes("modelRef.current?.setVisible(false)"));
+ assert.ok(s.includes("modelRef.current?.setVisible(kind === 2)"));
+ assert.ok(s.includes("modelRef.current?.setVisible(!hidden && kindRef.current === 2)"));
+ assert.ok(s.includes("}, [active, ready, kind]);"));
+});
+test("two-character local search starts no timer or remote provider work",()=>{
+ assert.ok(city.includes('if (Array.from(q).length === 2)'));
+ assert.ok(city.includes('setRemote({query:q,hits:local,settled:true})'));
+ assert.ok(city.includes('},165);'));
+});

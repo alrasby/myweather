@@ -291,7 +291,14 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }
     };
     engine.onFrame = paint;
-    const onVis = () => engine.setPaused(document.hidden || !el.offsetParent);
+    const onVis = () => {
+      const hidden = document.hidden || !el.offsetParent;
+      engine.setPaused(hidden);
+      // A paused animation alone kept expensive ECMWF readers/worker tile
+      // tasks running in the background. Release raster frames and memory,
+      // while retaining the small bounded verified range cache for re-entry.
+      modelRef.current?.setVisible(!hidden && kindRef.current === 2);
+    };
     document.addEventListener("visibilitychange", onVis);
     void (async () => {
       try {
@@ -568,15 +575,17 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
     const map = mapRef.current;
     const engine = engineRef.current;
     if (!map || !engine || !ready) return;
-    if (!active) {
+    if (!active || document.hidden) {
+      modelRef.current?.setVisible(false);
       engine.setPaused(true);
       return;
     }
-    engine.setPaused(document.hidden);
+    modelRef.current?.setVisible(kind === 2);
+    engine.setPaused(false);
     // Refresh the container without an implicit pan/jump after tab activation.
     map.invalidateSize({ pan: false, debounceMoveend: true });
     engine.resize();
-  }, [active, ready]);
+  }, [active, ready, kind]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -591,7 +600,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   useEffect(() => {
     engineRef.current?.setKind(kind);
     imageryRef.current?.setOpacity(1);
-    modelRef.current?.setVisible(kind === 2);
+    // Visibility is now managed together with tab/background state above.
     if (kind !== 2) engineRef.current?.setModelCover(false);
   }, [kind, ready]);
 
