@@ -60,8 +60,6 @@ export type WeatherModelDiagnostics = {
   viewportHeld?: boolean;
   /** Number of truly overlapping source holds in this renderer session. */
   viewportHoldActivations?: number;
-  /** True only while source-certified overlapping DOM tiles are retained during a same-zoom refresh. */
-  viewportHeld?: boolean;
   /** Same-zoom pans that avoided unconditional opacity-zero reset. */
   sameZoomPanPreserved?: number;
   loaded: boolean[];
@@ -935,7 +933,6 @@ export class ModelField {
       holdingPreviousFrame: this.holdingPreviousFrame,
       viewportHeld: frame?.viewportHeld ?? false,
       viewportHoldActivations: this.viewportHoldActivations,
-      viewportHeld: !!frame?.viewportHeld,
       sameZoomPanPreserved: this.sameZoomPanPreserved,
       loaded: frame?.loaded.slice() ?? [false, false, false],
       tileCounts: frame?.tileCounts.slice() ?? [0, 0, 0],
