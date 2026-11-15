@@ -298,7 +298,7 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
   return bundle;
 }
 
-const MET_UA = "MyWeather/1.0 (net.nabdhserv.myweather)";
+const MET_UA = "MyWeather/1.0 (https://nabdhserv.net; net.nabdhserv.myweather)";
 
 type MetDetails = {
   air_pressure_at_sea_level?: number;
