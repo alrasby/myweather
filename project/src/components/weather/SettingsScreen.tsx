@@ -285,7 +285,7 @@ function Chips<T extends string>({
             key={id}
             type="button"
             onClick={() => onChange(id)}
-            className={`flex min-h-11 w-full items-center justify-center rounded-full px-2 py-1.5 text-center text-[0.78rem] leading-tight ${on ? "chip-on font-semibold" : "text-fg/85"}`}
+            className={`flex min-h-12 w-full items-center justify-center rounded-full px-2 py-1.5 text-center text-[0.78rem] leading-tight ${on ? "chip-on font-semibold" : "text-fg/85"}`}
             aria-pressed={on}
             disabled={disabled}
           >
@@ -311,9 +311,9 @@ function Toggle({ on, title, hint, onClick, disabled }: { on: boolean; title: st
         aria-checked={on}
         disabled={disabled}
         onClick={onClick}
-        className={`flex h-8 w-14 shrink-0 items-center rounded-full p-1 ${on ? "bg-chip" : "bg-line"}`}
+        className={`flex h-12 w-16 shrink-0 items-center rounded-full p-1 ${on ? "bg-chip" : "bg-line"}`}
       >
-        <span className={`size-6 rounded-full bg-on-sky shadow-sm transition-transform ${on ? "translate-x-6 rtl:-translate-x-6" : ""}`} />
+        <span className={`size-7 rounded-full bg-on-sky shadow-sm transition-transform ${on ? "translate-x-7 rtl:-translate-x-7" : ""}`} />
       </button>
     </div>
   );
