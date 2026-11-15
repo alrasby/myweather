@@ -84,13 +84,15 @@ export function satelliteHandoffDecision(
     };
   }
   // At z5+ the genuine z4 source imagery stays as the permanent parent.
-  // Keep (or at z5 initially start) z2 only until the z4 or detail grid
-  // truly covers the current screen, then remove it to bound GPU memory.
+  // At z5/z6 an uncovered screen may temporarily add the tiny native-z2
+  // source grid, rather than exposing a black rectangle during a long pan.
+  // Above z6 only retain an ALREADY mounted z2 parent until replacement is
+  // complete; do not initiate third-layer requests at high magnification.
   const needsProtection = !state.underlayComplete && !state.detailComplete;
   return {
     underlay: true,
     worldParent: needsProtection &&
-      (state.mountedWorld || z <= 5),
+      (state.mountedWorld || z <= 6),
   };
 }
 
