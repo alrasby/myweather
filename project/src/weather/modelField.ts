@@ -733,7 +733,12 @@ export class ModelField {
         this.spatialVisible = false;
         this.holdingPreviousFrame = false;
         this.onMiss?.();
-        if (this.visible) this.pump();
+        // Zoom retired every old GridLayer. Start the requested viewport
+        // immediately instead of waiting to reuse tile queues that are gone.
+        if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
+        this.viewportSettleTimer = null;
+        this.viewportSettleUntil = 0;
+        this.pump();
         return;
       }
       if (cancelledSpeculation) {
