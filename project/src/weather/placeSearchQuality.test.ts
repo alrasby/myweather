@@ -76,3 +76,13 @@ test("unrelated remote city names cannot appear among Arabic city suggestions",(
  assert.ok(!rows.some(p=>p.name==="Khartoum"));
  assert.deepEqual(mergeCityResults("الكامل",[],[mk("Unrelated",1,1)]),[]);
 });
+
+test("device search regressions: Galway and country-qualified Brest",()=>{
+ for(const [query,city] of [["غالواي","Galway"],["غَالْوَاي","Galway"],["بريست، فرنسا","Brest"],["Brest, France","Brest"],["نانت","Nantes"]]){
+  const results=mergeCityResults(query,searchLocal(query),[]);
+  assert.equal(results[0]?.nameEn,city,query);
+  if(city==="Brest")assert.equal(results[0]?.countryEn,"France");
+ }
+ const belarus={...mk("بريست",52.1,23.7),nameEn:"Brest",country:"بيلاروس",countryEn:"Belarus"};
+ assert.ok(!mergeCityResults("بريست، فرنسا",searchLocal("بريست"),[belarus]).includes(belarus));
+});

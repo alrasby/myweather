@@ -106,21 +106,21 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" > /tmp/myweather-apk-certificate.txt
           grep -qi "$EXPECTED" /tmp/myweather-apk-certificate.txt
           BADGING="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK")"
-          printf '%s\n' "$BADGING" | grep -F "name='net.nabdhserv.myweather' versionCode='69' versionName='1.0.0'"
+          printf '%s\n' "$BADGING" | grep -F "name='net.nabdhserv.myweather' versionCode='70' versionName='1.0.0'"
           printf '%s\n' "$BADGING" | grep -F "targetSdkVersion:'36'"
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK" >/dev/null
           mkdir -p app/build/outputs/play-candidate
-          cp "$AAB" app/build/outputs/play-candidate/MyWeather-1.0.0-build69-upload.aab
-          cp "$APK" app/build/outputs/play-candidate/MyWeather-1.0.0-build69-test.apk
+          cp "$AAB" app/build/outputs/play-candidate/MyWeather-1.0.0-build70-upload.aab
+          cp "$APK" app/build/outputs/play-candidate/MyWeather-1.0.0-build70-test.apk
           (
             cd app/build/outputs/play-candidate
             sha256sum *.aab *.apk > SHA256SUMS.txt
-            printf 'GitHub SHA: %s\npackage: net.nabdhserv.myweather\nversion: 1.0.0\nversionCode: 69\ntargetSdk: 36\nAAB+APK signer SHA256: %s\nPyFES: disabled\nPlay upload: not automatic\n' "$GITHUB_SHA" "$EXPECTED" > RELEASE_INFO.txt
+            printf 'GitHub SHA: %s\npackage: net.nabdhserv.myweather\nversion: 1.0.0\nversionCode: 70\ntargetSdk: 36\nAAB+APK signer SHA256: %s\nPyFES: disabled\nPlay upload: not automatic\n' "$GITHUB_SHA" "$EXPECTED" > RELEASE_INFO.txt
           )
       - name: Save private testing artifacts (does not publish to Google Play)
         uses: actions/upload-artifact@v4
         with:
-          name: MyWeather-PlayCandidate-1.0.0-Build69
+          name: MyWeather-PlayCandidate-1.0.0-Build70
           path: project/android/app/build/outputs/play-candidate/
           if-no-files-found: error
           retention-days: 30
@@ -139,7 +139,7 @@ jobs:
         with:
           serviceAccountJsonPlainText: ${{ secrets.MYWEATHER_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: net.nabdhserv.myweather
-          releaseFiles: project/android/app/build/outputs/play-candidate/MyWeather-1.0.0-build69-upload.aab
+          releaseFiles: project/android/app/build/outputs/play-candidate/MyWeather-1.0.0-build70-upload.aab
           tracks: internal
           status: draft
           releaseName: MyWeather 1.0.0 RC1 (Build 69)

@@ -141,6 +141,9 @@ const SEEDS: Seed[] = [
   ["Hanoi", "هانوي", "Vietnam", "فيتنام", 21.028, 105.854, 8000000],
   ["Mumbai", "مومباي", "India", "الهند", 19.076, 72.878, 20600000],
   ["Delhi", "دلهي", "India", "الهند", 28.614, 77.209, 32000000],
+  ["Galway", "غالواي", "Ireland", "أيرلندا", 53.274, -9.049, 85000, ["غالوي", "جالواي"]],
+  ["Brest", "بريست", "France", "فرنسا", 48.39, -4.486, 140000, ["برست"]],
+  ["Nantes", "نانت", "France", "فرنسا", 47.218, -1.554, 320000],
   ["Bangalore", "بنغالور", "India", "الهند", 12.972, 77.594, 12700000],
   ["Kolkata", "كلكتا", "India", "الهند", 22.573, 88.364, 15100000],
   ["Karachi", "كراتشي", "Pakistan", "باكستان", 24.861, 67.01, 16100000],
@@ -189,7 +192,9 @@ export function normalizePlaceQuery(query: string): string {
 }
 
 export function searchLocal(query: string): Place[] {
-  const q = fold(query);
+  const [city, ...qualifiers] = query.split(/[,،]/);
+  const q = fold(city ?? "");
+  const countryQuery = fold(qualifiers.join(" "));
   if (q.length < 2) return [];
   const ranked = SEEDS.map((row) => {
     const [en, ar, country, countryAr, lat, lon, pop] = row;
@@ -198,6 +203,9 @@ export function searchLocal(query: string): Place[] {
     const fields = [en, ar, ...(row[7] ?? [])].map(fold);
     const stem = q.length > 2 ? q.slice(0, -1) : "";
     let score = 0;
+    if (countryQuery && ![country, countryAr].some(name => fold(name).startsWith(countryQuery))) {
+      return { row, score, pop, lat, lon };
+    }
     for (const field of fields) {
       if (field === q) score = Math.max(score, 100);
       else if (field.startsWith(q)) score = Math.max(score, 80);
