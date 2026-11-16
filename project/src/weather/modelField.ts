@@ -699,6 +699,11 @@ export class ModelField {
       onMove();
       this.viewportMoving = false;
       origin = null;
+      if (this.zoomSnapshot && !map.getBounds().overlaps(this.zoomSnapshot.overlay.getBounds())) {
+        this.clearZoomSnapshot();
+        if (!this.spatialVisible) this.onMiss?.();
+        this.onClockFrameChanged?.();
+      }
       // The spatial model is a regional product on constrained WebViews.
       // Never start another continent-sized .om read during a zoomed-out
       // world tour: fully retire its layers and use the real global fallback.
@@ -831,7 +836,8 @@ export class ModelField {
             const coords = tile.coords;
             if (!tile.loaded || !tile.current || coords?.z !== zoom ||
                 coords.x === undefined || coords.y === undefined ||
-                !(tile.el instanceof HTMLCanvasElement) || tile.el.style.visibility === "hidden") continue;
+                tile.el?.style?.visibility === "hidden") continue;
+            if (!(tile.el instanceof HTMLCanvasElement) && !(tile.el instanceof HTMLImageElement)) return;
             ctx.drawImage(tile.el, (coords.x * size.x - min.x) * scale,
               (coords.y * size.y - min.y) * scale, size.x * scale, size.y * scale);
           }
