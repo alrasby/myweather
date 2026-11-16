@@ -31,8 +31,8 @@ export function heroRainStreaks(code: number, coverage: number, windKmh: number)
     const length = [4.2, 7.7, 11.1][depth]! + hash(n, 63.21) * [2.3, 3.0, 4.2][depth]!;
     return {
       x: hash(n, 78.233), y: hash(n, 17.37), depth,
-      length, width: [0.6, 0.95, 1.3][depth]!,
-      opacity: [0.22, 0.42, 0.61][depth]! + hash(n, 12.9898) * 0.11,
+      length, width: [0.65, 1.0, 1.3][depth]!,
+      opacity: [0.22, 0.47, 0.68][depth]! + hash(n, 12.9898) * 0.11,
       speed: [47, 82, 113][depth]! + hash(n, 44.31) * 25,
       drift: (2.5 + wind * 0.24) * [0.55, 1, 1.35][depth]!,
     };
