@@ -26,11 +26,14 @@ const matchScore=(value:string,q:string):number=>{
  return 0;
 };
 export function mergeCityResults(query:string,local:readonly Place[],remote:readonly Place[],limit=12):Place[] {
- const q=cityKey(query);
+ const [city,...qualifiers]=query.split(/[,،]/);
+ const q=cityKey(city??"");
+ const region=cityKey(qualifiers.join(" "));
  const rows:{place:Place;score:number;order:number}[]=[];
  for(const place of [...local,...remote]){
   if(!Number.isFinite(place.lat)||!Number.isFinite(place.lon)||
      Math.abs(place.lat)>90||Math.abs(place.lon)>180||!place.name.trim())continue;
+  if(region && ![place.country,place.countryEn,place.admin].some(value=>cityKey(value??"").startsWith(region)))continue;
   if(rows.some(r=>Math.abs(r.place.lat-place.lat)<0.018&&Math.abs(r.place.lon-place.lon)<0.018))continue;
   const names=[place.name,place.nameEn??"",...(place.aliases??[])];
   const score=Math.max(...names.map(name=>matchScore(name,q)));
