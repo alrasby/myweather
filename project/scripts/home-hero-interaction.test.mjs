@@ -104,7 +104,7 @@ test("visible version stays 1.0.0 while upgrade-safe Android code advances to 70
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
   assert.ok(gradle.includes('versionCode 70') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='69' versionName='1.0.0'"));
+  assert.ok(workflow.includes("versionCode='70' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
