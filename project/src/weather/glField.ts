@@ -1357,7 +1357,7 @@ export class FieldEngine {
     if (Math.hypot(head.x - tail.x, head.y - tail.y) < 2) return;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 1.0;
+    ctx.lineWidth = 1.15;
     ctx.beginPath();
     ctx.moveTo(tail.x, tail.y);
     for (let i = 1; i < xy.length - 1; i++) {
@@ -1369,8 +1369,9 @@ export class FieldEngine {
     ctx.lineTo(head.x, head.y);
     const light = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
     light.addColorStop(0, "rgba(238,248,255,0)");
-    light.addColorStop(0.35, `rgba(240,249,255,${(0.24 * fade).toFixed(3)})`);
-    light.addColorStop(1, `rgba(255,255,255,${(0.82 * fade).toFixed(3)})`);
+    light.addColorStop(0.32, `rgba(218,239,255,${(0.24 * fade).toFixed(3)})`);
+    light.addColorStop(0.72, `rgba(239,250,255,${(0.66 * fade).toFixed(3)})`);
+    light.addColorStop(1, `rgba(255,255,255,${(0.94 * fade).toFixed(3)})`);
     ctx.strokeStyle = light;
     ctx.stroke();
   }
