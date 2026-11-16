@@ -67,6 +67,7 @@ export type WeatherModelDiagnostics = {
   holdingPreviousFrame: boolean;
   /** A certified same-zoom source is held while nearby tile edges refresh. */
   viewportHeld?: boolean;
+  zoomSnapshot?: { visible: boolean; validTime: string | null; visibleMs: number };
   /** Number of truly overlapping source holds in this renderer session. */
   viewportHoldActivations?: number;
   /** Same-zoom pans that avoided unconditional opacity-zero reset. */
@@ -563,7 +564,7 @@ export class ModelField {
   private firstCloudReadyMs: number | null = null;
   private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
-  private zoomSnapshot: { overlay: ImageOverlay; time: number; timer: number } | null = null;
+  private zoomSnapshot: { overlay: ImageOverlay; time: number; timer: number; visibleSince: number | null } | null = null;
   private zoomStartListener: (() => void) | null = null;
 
   private clearZoomSnapshot() {
@@ -760,6 +761,9 @@ export class ModelField {
         const snapshot = this.zoomSnapshot?.overlay;
         if (snapshot && map.getBounds().overlaps(snapshot.getBounds())) {
           snapshot.addTo(map).setOpacity(1);
+          if (this.hasZoomSnapshot() && this.zoomSnapshot && this.zoomSnapshot.visibleSince === null) {
+            this.zoomSnapshot.visibleSince = performance.now();
+          }
         }
         this.onMiss?.();
         // Zoom retired every old GridLayer. Start the requested viewport
@@ -842,14 +846,31 @@ export class ModelField {
               (coords.y * size.y - min.y) * scale, size.x * scale, size.y * scale);
           }
         }
+        // Fade inward from the captured geographic bounds without
+        // extending or resampling the forecast beyond its actual coverage.
+        ctx.globalCompositeOperation = "destination-out";
+        const w = canvas.width, h = canvas.height;
+        const edge = Math.min(32, w / 8, h / 8);
+        for (const [x, y, dx, dy, fillWidth, fillHeight] of [
+          [0, 0, edge, 0, edge, h], [w - edge, 0, edge, 0, edge, h],
+          [0, 0, 0, edge, w, edge], [0, h - edge, 0, edge, w, edge],
+        ]) {
+          const mask = ctx.createLinearGradient(x!, y!, x! + dx!, y! + dy!);
+          const reverse = x! > 0 || y! > 0;
+          mask.addColorStop(0, reverse ? "transparent" : "black");
+          mask.addColorStop(1, reverse ? "black" : "transparent");
+          ctx.fillStyle = mask;
+          ctx.fillRect(x!, y!, fillWidth!, fillHeight!);
+        }
         const bounds = leaflet.latLngBounds(map.unproject(min, zoom), map.unproject(max, zoom));
         const overlay = leaflet.imageOverlay(canvas.toDataURL(), bounds, { pane: "wx-zoom-weather", opacity: 0 });
         overlay.on("load", () => {
           if (this.zoomSnapshot?.overlay !== overlay || this.spatialVisible || !this.hasZoomSnapshot()) return;
+          this.zoomSnapshot.visibleSince ??= performance.now();
           this.onLive?.();
           this.onClockFrameChanged?.();
         });
-        this.zoomSnapshot = { overlay, time, timer: window.setTimeout(() => {
+        this.zoomSnapshot = { overlay, time, visibleSince: null, timer: window.setTimeout(() => {
           this.clearZoomSnapshot();
           if (!this.spatialVisible) this.onMiss?.();
           this.onClockFrameChanged?.();
@@ -1050,6 +1071,12 @@ export class ModelField {
           })) : [],
       blendFraction: Number(this.blend.toFixed(3)),
       holdingPreviousFrame: this.holdingPreviousFrame,
+      zoomSnapshot: {
+        visible: this.hasZoomSnapshot(),
+        validTime: this.zoomSnapshot ? new Date(this.zoomSnapshot.time).toISOString() : null,
+        visibleMs: this.zoomSnapshot?.visibleSince == null ? 0 :
+          Math.round(performance.now() - this.zoomSnapshot.visibleSince),
+      },
       viewportHeld: frame?.viewportHeld ?? false,
       viewportHoldActivations: this.viewportHoldActivations,
       sameZoomPanPreserved: this.sameZoomPanPreserved,
