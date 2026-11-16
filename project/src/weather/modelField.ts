@@ -1,4 +1,4 @@
-import type { Map as LeafletMap } from "leaflet";
+import type { ImageOverlay, Map as LeafletMap } from "leaflet";
 import { spatialFrameReadyDuringRefresh, spatialCloudPreviewReady, modelVariablesReady, canVisuallyHoldSpatialTiles, SPATIAL_LAYER_COUNT } from "@/weather/modelTileReadiness";
 import {mapForecastClock,type MapForecastClock} from "@/weather/mapForecastClock";
 import { selectSpatialFramePlan, spatialStackKey } from "@/weather/modelFrameTimeline";
@@ -563,6 +563,23 @@ export class ModelField {
   private firstCloudReadyMs: number | null = null;
   private firstCompleteReadyMs: number | null = null;
   private updateBoundsListener: (() => void) | null = null;
+  private zoomSnapshot: { overlay: ImageOverlay; time: number; timer: number } | null = null;
+  private zoomStartListener: (() => void) | null = null;
+
+  private clearZoomSnapshot() {
+    if (!this.zoomSnapshot) return;
+    window.clearTimeout(this.zoomSnapshot.timer);
+    this.zoomSnapshot.overlay.remove();
+    this.zoomSnapshot = null;
+  }
+
+  hasZoomSnapshot(): boolean {
+    const overlay = this.zoomSnapshot?.overlay;
+    return !!overlay && !!this.map?.hasLayer(overlay) &&
+      (overlay.getElement()?.naturalWidth ?? 0) > 0 &&
+      this.map.getBounds().overlaps(overlay.getBounds());
+  }
+
   private moveStartListener: (() => void) | null = null;
   private moveEndListener: (() => void) | null = null;
   private moveListener: (() => void) | null = null;
@@ -575,6 +592,9 @@ export class ModelField {
     installSpatialFetch();
     this.metadataAbort?.abort();
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    this.clearZoomSnapshot();
+    if (this.map && this.zoomStartListener) this.map.off("zoomstart", this.zoomStartListener);
+    this.zoomStartListener = null;
     if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
     if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
     if (this.map && this.moveListener) this.map.off("move", this.moveListener);
@@ -679,6 +699,11 @@ export class ModelField {
       onMove();
       this.viewportMoving = false;
       origin = null;
+      if (this.zoomSnapshot && !map.getBounds().overlaps(this.zoomSnapshot.overlay.getBounds())) {
+        this.clearZoomSnapshot();
+        if (!this.spatialVisible) this.onMiss?.();
+        this.onClockFrameChanged?.();
+      }
       // The spatial model is a regional product on constrained WebViews.
       // Never start another continent-sized .om read during a zoomed-out
       // world tour: fully retire its layers and use the real global fallback.
@@ -732,6 +757,10 @@ export class ModelField {
         this.orderKey = "";
         this.spatialVisible = false;
         this.holdingPreviousFrame = false;
+        const snapshot = this.zoomSnapshot?.overlay;
+        if (snapshot && map.getBounds().overlaps(snapshot.getBounds())) {
+          snapshot.addTo(map).setOpacity(1);
+        }
         this.onMiss?.();
         // Zoom retired every old GridLayer. Start the requested viewport
         // immediately instead of waiting to reuse tile queues that are gone.
@@ -775,6 +804,61 @@ export class ModelField {
       this.refreshSince = Date.now();
       this.pump();
     };
+    this.zoomStartListener = () => {
+      if (this.zoomSnapshot || !this.spatialVisible || this.diagnosticMode !== "all") return;
+      const step = this.lastDisplayedStep;
+      const frame = step === null ? undefined : this.frames.get(step);
+      const time = step === null ? undefined : this.times[step];
+      const zoom = map.getZoom();
+      if (!frame?.ready || frame.viewportHeld || frame.opacity < 0.98 || time === undefined ||
+          !frame.coverageSnapshot?.().every(layer => layer.complete)) return;
+      const pixels = map.getPixelBounds();
+      const min = pixels.min;
+      const max = pixels.max;
+      if (!min || !max) return;
+      const width = max.x - min.x, height = max.y - min.y;
+      if (!(width > 0 && height > 0)) return;
+      const scale = Math.min(1, 1024 / Math.max(width, height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const leaflet = L as typeof import("leaflet");
+      const pane = map.getPane("wx-zoom-weather") ?? map.createPane("wx-zoom-weather");
+      pane.style.zIndex = "244";
+      pane.style.pointerEvents = "none";
+      try {
+        for (const layer of frame.layers) {
+          const size = layer.getTileSize?.();
+          if (!size) return;
+          for (const tile of Object.values(layer._tiles ?? {})) {
+            const coords = tile.coords;
+            if (!tile.loaded || !tile.current || coords?.z !== zoom ||
+                coords.x === undefined || coords.y === undefined ||
+                tile.el?.style?.visibility === "hidden") continue;
+            if (!(tile.el instanceof HTMLCanvasElement) && !(tile.el instanceof HTMLImageElement)) return;
+            ctx.drawImage(tile.el, (coords.x * size.x - min.x) * scale,
+              (coords.y * size.y - min.y) * scale, size.x * scale, size.y * scale);
+          }
+        }
+        const bounds = leaflet.latLngBounds(map.unproject(min, zoom), map.unproject(max, zoom));
+        const overlay = leaflet.imageOverlay(canvas.toDataURL(), bounds, { pane: "wx-zoom-weather", opacity: 0 });
+        overlay.on("load", () => {
+          if (this.zoomSnapshot?.overlay !== overlay || this.spatialVisible || !this.hasZoomSnapshot()) return;
+          this.onLive?.();
+          this.onClockFrameChanged?.();
+        });
+        this.zoomSnapshot = { overlay, time, timer: window.setTimeout(() => {
+          this.clearZoomSnapshot();
+          if (!this.spatialVisible) this.onMiss?.();
+          this.onClockFrameChanged?.();
+        }, 6500) };
+      } catch {
+        // Unsupported or unreadable raster: use the existing source fallback.
+      }
+    };
+    map.on("zoomstart", this.zoomStartListener);
     map.on("movestart", onMoveStart);
     map.on("move", onMove);
     map.on("moveend", onMoveEnd);
@@ -902,6 +986,7 @@ export class ModelField {
    * weather fields without changing wind/temperature or map preferences. */
   setDiagnosticMode(mode: WeatherDiagnosticMode) {
     if (this.diagnosticMode === mode) return;
+    this.clearZoomSnapshot();
     this.diagnosticMode = mode;
     // Reapply each tile's visibility even if the frame opacity itself did
     // not change, so diagnostic isolation takes effect immediately.
@@ -920,6 +1005,9 @@ export class ModelField {
    * held/stale ECMWF raster must not be labelled as a different forecast hour.
    * Normal temporal blending, wind, temperature, and fallback are untouched. */
   getMapClock(timelineMs:number):MapForecastClock {
+    if (this.visible && !this.spatialVisible && this.zoomSnapshot && this.hasZoomSnapshot()) {
+      return mapForecastClock(timelineMs, [this.zoomSnapshot.time], true);
+    }
     if (!this.visible || !this.spatialVisible) return mapForecastClock(timelineMs,[]);
     const visibleTimes = [...this.frames.entries()]
       .filter(([step, frame]) => frame.ready && frame.opacity > 0.01 &&
@@ -1029,6 +1117,7 @@ export class ModelField {
     this.visible = on;
     if (on && !this.spatialBudget.allow) this.onMiss?.();
     if (!on) {
+      this.clearZoomSnapshot();
       this.seq += 1;
       this.failedUntil.clear();
       this.loading.clear();
@@ -1709,7 +1798,10 @@ export class ModelField {
       // Visibility changes require switching the fallback renderer. Repeated
       // identical callbacks were redundantly aborting fallback timers while
       // a large OM field was being decoded.
-      if (nextVisible) this.onLive?.();
+      if (nextVisible) {
+        this.clearZoomSnapshot();
+        this.onLive?.();
+      }
       else this.onMiss?.();
     }
     // The source may finish a new hourly raster between throttled 180ms
@@ -1734,6 +1826,9 @@ export class ModelField {
     this.metadataAbort?.abort();
     this.metadataAbort = null;
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
+    this.clearZoomSnapshot();
+    if (this.map && this.zoomStartListener) this.map.off("zoomstart", this.zoomStartListener);
+    this.zoomStartListener = null;
     if (this.map && this.moveStartListener) this.map.off("movestart", this.moveStartListener);
     if (this.map && this.moveEndListener) this.map.off("moveend", this.moveEndListener);
     if (this.map && this.moveListener) this.map.off("move", this.moveListener);

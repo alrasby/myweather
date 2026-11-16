@@ -266,7 +266,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       }
       if (coverageStatusRef.current) {
         const waiting = kindRef.current === 2 && !modelRef.current?.isSpatialVisible() &&
-          !engine.hasSourceRain();
+          !modelRef.current?.hasZoomSnapshot() && !engine.hasSourceRain();
         coverageStatusRef.current.hidden = !waiting;
         const label = waiting ? (language === "ar" ? "جارٍ تحميل طبقات الطقس…" : "Loading weather layers…") : "";
         if (coverageStatusRef.current.textContent !== label) coverageStatusRef.current.textContent = label;
@@ -616,6 +616,10 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             rainFallbackSuspendRef.current?.();
           };
           modelRef.current.onMiss = () => {
+            if (modelRef.current?.hasZoomSnapshot()) {
+              engine.setModelCover(true);
+              return;
+            }
             engine.setModelCover(false);
             // A zoom-out invalidates the previous ECMWF raster coverage.
             // Prepare one REAL, source-backed small global precipitation
