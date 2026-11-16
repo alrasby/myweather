@@ -574,8 +574,10 @@ export class ModelField {
   }
 
   hasZoomSnapshot(): boolean {
-    return !!this.zoomSnapshot?.overlay.getElement()?.complete &&
-      !!this.map?.getBounds().overlaps(this.zoomSnapshot.overlay.getBounds());
+    const overlay = this.zoomSnapshot?.overlay;
+    return !!overlay && !!this.map?.hasLayer(overlay) &&
+      (overlay.getElement()?.naturalWidth ?? 0) > 0 &&
+      this.map.getBounds().overlaps(overlay.getBounds());
   }
 
   private moveStartListener: (() => void) | null = null;
@@ -836,6 +838,11 @@ export class ModelField {
         }
         const bounds = leaflet.latLngBounds(map.unproject(min, zoom), map.unproject(max, zoom));
         const overlay = leaflet.imageOverlay(canvas.toDataURL(), bounds, { pane: "wx-zoom-weather", opacity: 0 });
+        overlay.on("load", () => {
+          if (this.zoomSnapshot?.overlay !== overlay || this.spatialVisible || !this.hasZoomSnapshot()) return;
+          this.onLive?.();
+          this.onClockFrameChanged?.();
+        });
         this.zoomSnapshot = { overlay, time, timer: window.setTimeout(() => {
           this.clearZoomSnapshot();
           if (!this.spatialVisible) this.onMiss?.();
