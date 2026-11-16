@@ -99,6 +99,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
   const peek = useWeather((s) => s.peek);
   const place = activePlace({ places, activeId, peek });
   const hostRef = useRef<HTMLDivElement>(null);
+  const coverageStatusRef = useRef<HTMLDivElement>(null);
   const imageryRef = useRef<TileLayer | null>(null);
   const satelliteDiagnosticsRef = useRef<(() => {
     detail: SatelliteRasterCoverage; underlay: SatelliteRasterCoverage; worldParent: SatelliteRasterCoverage;
@@ -262,6 +263,13 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
       if (timeRef.current) {
         timeRef.current.textContent = formatClock(
           visualClockRef.current?.timeMs ?? info.timeMs, tzRef.current, language);
+      }
+      if (coverageStatusRef.current) {
+        const waiting = kindRef.current === 2 && !modelRef.current?.isSpatialVisible() &&
+          !engine.hasSourceRain();
+        coverageStatusRef.current.hidden = !waiting;
+        const label = waiting ? (language === "ar" ? "جارٍ تحميل طبقات الطقس…" : "Loading weather layers…") : "";
+        if (coverageStatusRef.current.textContent !== label) coverageStatusRef.current.textContent = label;
       }
       if (valueRef.current) {
         if (kindRef.current === 2) {
@@ -614,7 +622,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
             // grid immediately at broad scales, rather than exposing the
             // obsolete half-painted tiles for 4.5 seconds. The quick-world
             // loader is deduplicated by its existing pending/ready flags.
-            if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.();
+            if (!engine.hasSourceRain()) rainPlaybackQuickRef.current?.();
             rainFallbackRefreshRef.current?.();
           };
         }
@@ -1759,6 +1767,8 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
               <span ref={valueRef} className="min-w-0 whitespace-nowrap text-end font-semibold leading-tight text-accent"
                 role="status">—</span>
             </div>
+            <div ref={coverageStatusRef} hidden role="status"
+              className="mt-1 text-center text-xs text-muted" />
             <div className="mt-0.5 h-1 rounded-full" style={{ background: gradient }} />
             <div className="mt-0.5 flex justify-between text-[0.65rem] leading-none text-muted" dir="ltr">
               {ticks.map((tick) => <span key={tick}>{tickText(tick, kind, prefs, lang)}</span>)}
