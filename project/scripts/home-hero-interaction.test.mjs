@@ -581,7 +581,7 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(screen.includes("satelliteHandoffDecision({") &&
    screen.includes("map.on(\"zoomend\", onSatelliteZoomEnd)"),
    "world-scale satellite source cannot disappear until correct replacement imagery loads");
- assert.ok(screen.includes("if (map && map.getZoom() <= 5) rainPlaybackQuickRef.current?.()"));
+ assert.ok(screen.includes("if (!engine.hasSourceRain()) rainPlaybackQuickRef.current?.()"));
 });
 
 test("ECMWF source compositing follows exact valid-time weights; never retain ghost old hours",()=>{
