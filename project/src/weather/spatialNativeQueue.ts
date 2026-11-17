@@ -13,7 +13,7 @@ export class SpatialNativeQueue {
   private urgentStreak = 0;
   private waiters: Array<{
     signal: AbortSignal | undefined;
-    priority: 0 | 1;
+    priority: () => 0 | 1 | 2;
     releaseAbort: () => void;
     resolve: () => void;
     reject: (reason: Error) => void;
@@ -35,7 +35,7 @@ export class SpatialNativeQueue {
    * queued (not-yet-started) tasks remain cancellable. */
   async run<T>(
     signal: AbortSignal | undefined, job: () => Promise<T>,
-    priority: 0 | 1 = 0, retainCompletedAfterAbort = false,
+    priority: 0 | 1 | (() => 0 | 1 | 2) = 0, retainCompletedAfterAbort = false,
   ): Promise<T> {
     if (signal?.aborted) throw this.abortError();
     if (this.active < this.limit && this.waiters.length === 0) {
@@ -44,7 +44,7 @@ export class SpatialNativeQueue {
       await new Promise<void>((resolve, reject) => {
         const waiter = {
           signal,
-          priority,
+          priority: typeof priority === "function" ? priority : () => priority,
           releaseAbort: () => {},
           resolve: () => resolve(),
           reject: (reason: Error) => reject(reason),
@@ -70,9 +70,10 @@ export class SpatialNativeQueue {
       while (this.waiters.length) {
         // Cloud/rain data can jump ahead of queued snowfall, but serve one
         // normal read at least every four turns to avoid starvation.
-        const firstNormal = this.waiters.findIndex((w) => w.priority === 0);
-        const firstUrgent = this.waiters.findIndex((w) => w.priority === 1);
-        const index = this.urgentStreak >= 3 && firstNormal >= 0 ? firstNormal
+        const firstVisible = this.waiters.findIndex((w) => w.priority() === 2);
+        const firstNormal = this.waiters.findIndex((w) => w.priority() === 0);
+        const firstUrgent = this.waiters.findIndex((w) => w.priority() === 1);
+        const index = firstVisible >= 0 ? firstVisible : this.urgentStreak >= 3 && firstNormal >= 0 ? firstNormal
           : firstUrgent >= 0 ? firstUrgent : 0;
         const [waiter] = this.waiters.splice(index, 1);
         if (!waiter) break;
@@ -82,7 +83,7 @@ export class SpatialNativeQueue {
           continue;
         }
         this.active++;
-        this.urgentStreak = waiter.priority === 1 ? this.urgentStreak + 1 : 0;
+        this.urgentStreak = waiter.priority() === 1 ? this.urgentStreak + 1 : 0;
         waiter.resolve();
         break;
       }

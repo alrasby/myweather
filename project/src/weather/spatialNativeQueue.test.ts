@@ -93,3 +93,23 @@ test("cache warming never starts a canceled native task still waiting in the que
  release();await first;
  assert.equal(entered,false);
 });
+
+test("a changed visible hour reprioritizes queued reads and skips canceled viewport work", async () => {
+  const queue = new SpatialNativeQueue(1);
+  let release!: () => void;
+  const active = queue.run(undefined, () => new Promise<void>(resolve => { release = resolve; }));
+  let visible = "old";
+  const oldViewport = new AbortController();
+  const order: string[] = [];
+  const read = (hour: string, signal?: AbortSignal) => queue.run(signal,
+    async () => { order.push(hour); }, () => visible === hour ? 2 : 1);
+  const pendingOld = read("old", oldViewport.signal);
+  const speculative = read("future");
+  const latest = read("new");
+  const canceled = assert.rejects(pendingOld, /spatial-request-aborted/);
+  visible = "new";
+  oldViewport.abort();
+  release();
+  await Promise.all([active, speculative, latest, canceled]);
+  assert.deepEqual(order, ["new", "future"]);
+});

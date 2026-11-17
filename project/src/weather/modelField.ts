@@ -103,6 +103,7 @@ export type WeatherModelDiagnostics = {
   viewportRenderer: ViewportRendererStats;
   rateLimitedResponses: number;
   rateLimitRemainingMs: number;
+  viewportTransition?: { zoom: number; firstCoverageMs: number | null; firstCompleteMs: number | null } | null;
   startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
 };
 
@@ -255,6 +256,7 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
 // prevent obsolete snowfall queues from delaying the first useful coverage.
 // Do not raise concurrency or bypass provider cooldowns.
 const spatialNativeQueue = new SpatialNativeQueue(6);
+let currentSpatialReadFile: string | null = null;
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
 const spatialRangeFlights = new SpatialRangeFlights<Response>();
@@ -289,7 +291,8 @@ async function measuredNativeRequest(
       spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
-    }, spatialNativePriority(options.url),retainCompleted);
+    }, () => currentSpatialReadFile !== null && options.url.split("?")[0] === currentSpatialReadFile
+      ? 2 : spatialNativePriority(options.url), retainCompleted);
     const retryAfter = Object.entries(result.headers ?? {})
       .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
     spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));
@@ -544,6 +547,7 @@ export class ModelField {
   // A new visible viewport temporarily outranks speculative forecast hours.
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
+  private viewportTransition: { zoom: number; startedAt: number; firstCoverageMs: number | null; firstCompleteMs: number | null } | null = null;
   private viewportHoldUntil = 0;
   private viewportHoldActivations = 0;
   private sameZoomPanPreserved = 0;
@@ -609,6 +613,7 @@ export class ModelField {
   private moveListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
+    this.viewportTransition = null;
     this.attachedAt = performance.now();
     this.metadataReadyMs = null;
     this.firstCloudReadyMs = null;
@@ -722,6 +727,9 @@ export class ModelField {
       }
       onMove();
       this.viewportMoving = false;
+      if (origin && this.visible) {
+        this.viewportTransition = { zoom: map.getZoom(), startedAt: performance.now(), firstCoverageMs: null, firstCompleteMs: null };
+      }
       const previousZoom = origin?.zoom;
       origin = null;
       if (this.zoomSnapshot && !this.zoomSnapshotCoversViewport()) {
@@ -1005,6 +1013,15 @@ export class ModelField {
     return canAdvanceSpatialTime(i, ready, blocked, this.loading, this.sourceBackedFallback);
   }
 
+  recordViewportCoverage(fallbackReady: boolean) {
+    const transition = this.viewportTransition;
+    if (!this.visible || this.viewportMoving || !transition ||
+        transition.zoom !== this.map?.getZoom() || transition.firstCoverageMs !== null) return;
+    if (this.spatialVisible || this.hasZoomSnapshot() || fallbackReady) {
+      transition.firstCoverageMs = Math.round(performance.now() - transition.startedAt);
+    }
+  }
+
   setSourceBackedFallback(available: boolean) {
     if (this.sourceBackedFallback === available) return;
     this.sourceBackedFallback = available;
@@ -1128,6 +1145,11 @@ export class ModelField {
       ),
       rateLimitedResponses: spatialRateLimit.incidents,
       rateLimitRemainingMs: spatialRateLimit.remainingMs(),
+      viewportTransition: this.viewportTransition ? {
+        zoom: this.viewportTransition.zoom,
+        firstCoverageMs: this.viewportTransition.firstCoverageMs,
+        firstCompleteMs: this.viewportTransition.firstCompleteMs,
+      } : null,
       startupMs: {
         metadata: this.metadataReadyMs,
         firstCloudReady: this.firstCloudReadyMs,
@@ -1153,6 +1175,7 @@ export class ModelField {
     this.visible = on;
     if (on && !this.spatialBudget.allow) this.onMiss?.();
     if (!on) {
+      currentSpatialReadFile = null;
       this.clearZoomSnapshot();
       this.seq += 1;
       this.failedUntil.clear();
@@ -1223,6 +1246,9 @@ export class ModelField {
     // old genuine pixels remain visible, do not compete for the WebView's
     // three expensive decode slots with speculative next-hour imagery.
     // The bounded hold expires; completion or the watchdog resumes planning.
+    currentSpatialReadFile = this.pinnedRun && this.times[this.base] != null
+      ? pinnedSpatialTileUrl(this.pinnedRun, "precipitation", this.base).slice(5).split("?")[0] ?? null
+      : null;
     if (this.frames.get(this.base)?.viewportHeld) return;
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
@@ -1391,6 +1417,10 @@ export class ModelField {
       // CURRENT image has actual pixels and no tile remains CSS-hidden.
       const coverageCertified = coverage.every(item => item.complete) &&
         frame.tileGates.every(gate => gate.pending === 0);
+      if (coverageCertified && step === this.base && this.viewportTransition &&
+          !this.viewportMoving && this.viewportTransition.zoom === map.getZoom()) {
+        this.viewportTransition.firstCompleteMs ??= Math.round(performance.now() - this.viewportTransition.startedAt);
+      }
       const ready = spatialFrameReadyDuringRefresh(
         frame.ready, frame.loaded, frame.errored, frame.tileCounts, coverageCertified);
       // If previously certified source tiles still cover >=78% of a nearby
@@ -1859,6 +1889,7 @@ export class ModelField {
    * React StrictMode can re-attach the same instance after effect cleanup.
    */
   dispose() {
+    currentSpatialReadFile = null;
     this.metadataAbort?.abort();
     this.metadataAbort = null;
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);

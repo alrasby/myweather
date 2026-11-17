@@ -192,7 +192,7 @@ test("a missing rain grid uses a stable forecast time reference, never Date.now 
   assert.ok(engine.includes("this.rainForecastTime(grid, candidate)"));
   assert.ok(engine.includes("this.rainForecastTime(grid, this.hour)"));
   assert.ok(helper.includes("rainClockWithoutGrid(startMs: number, hour: number)"));
-  assert.ok(engine.includes("if (usable(this.global)) return this.global;"), "real global data must also meet visible raster-quality constraints");
+  assert.ok(engine.includes("if (usable(this.global) && this.detailFillsView(this.global)) return this.global;"), "real global data must also meet visible raster-quality constraints");
 });
 
 test("regression: map does not mount PR81 duplicate safety grids or defer spatial frames during dragging", () => {
@@ -245,7 +245,8 @@ test("fallback rain grid cells must not become large blurry polygons after zoom"
   const field = read("project/src/weather/glField.ts");
   const quality = read("project/src/weather/rainRasterQuality.ts");
   assert.ok(field.includes("usablePrecipitationGrid(") && field.includes("grid.lonSpan, grid.cols"), "verify geographic resolution before drawing fallback");
-  assert.ok(field.includes("if (usable(world)) return world;"));
+  assert.ok(field.includes("const worldCoversView = usable(world) && this.detailFillsView(world);"));
+ assert.ok(field.includes("if (worldCoversView) return world;"));
   assert.ok(field.includes("if (usable(this.detail) && this.detailFillsView(this.detail))"));
   assert.ok(quality.includes("Math.max(horizontalPixels, verticalPixels) <= maxCellPixels"), "rain resolution must account for longitude and latitude scale");
   assert.ok(field.includes('!grid.id.startsWith("est|")'), "no estimated rain tiles");
@@ -565,7 +566,7 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(model.includes("decideSpatialViewport({"));
  assert.ok(model.includes("if (!this.visible || !this.spatialBudget.allow) return;"));
  assert.ok(model.includes("this.viewportRenderer?.clear();"));
- assert.ok(model.includes("if (zoomChanged) {"), "zoom changes must invalidate source grids");
+ assert.ok(model.includes("if (zoomChanged || policyChanged) {"), "zoom changes must invalidate source grids");
  assert.ok(model.includes("if (cancelledSpeculation) {"), "large same-zoom moves are a separate case");
  assert.ok(!model.includes("requested?.invalidateZoom?.(zoom, true)"),
    "never force opacity=0 on the same ECMWF hour and unchanged zoom");
