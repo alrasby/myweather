@@ -259,9 +259,9 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
           <span dir="ltr" className="wx-build-id px-2.5 py-1" aria-label={`Android build ${ANDROID_BUILD_CODE}, design ${DESIGN_REVISION}`}>
             MyWeather 1.0.0 · Build {ANDROID_BUILD_CODE} · {DESIGN_REVISION}
           </span>
-          <p dir="ltr" className="credit credit-glass inline-flex items-center gap-1 rounded-full px-3 py-1 text-[0.68rem] font-medium">
-            Made with <span className="text-danger">♥</span> By NabdhServ.Net
-          </p>
+          <a href="https://nabdhserv.net/" target="_blank" rel="noopener noreferrer" dir="ltr" className="credit credit-glass inline-flex min-h-11 items-center rounded-full px-3 py-1 text-[0.68rem] font-medium focus-visible:outline-2 focus-visible:outline-offset-2 active:opacity-75">
+            Made with<span className="text-danger">♥</span>By NabdhServ.Net
+          </a>
         </div>
       </div>
     </div>
