@@ -350,6 +350,8 @@ export class FieldEngine {
   private lastRainOverlayAt = 0;
   private lastRainFallbackPaintAt = 0;
   private whirl = 0;
+  private readonly reducedMotion = typeof matchMedia === "function"
+    ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 
   constructor(private host: HTMLElement) {
     this.fieldCanvas = document.createElement("canvas");
@@ -1408,9 +1410,9 @@ export class FieldEngine {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.systems = paintCyclones(
       ctx,
-      (lat, lon) => this.local(lat, lon) ?? { x: -9999, y: -9999 },
+      (lat, lon) => this.local(lat, lon) ?? { x: NaN, y: NaN },
       this.cyclones,
-      this.whirl,
+      this.reducedMotion?.matches ? 0 : this.whirl,
     );
     ctx.restore();
   }
