@@ -26,19 +26,40 @@ export function stormGradeKey(windKmh: number): "catTd" | "catTs" | "cat1" | "ca
 
 type Pt = { x: number; y: number };
 
-function strokeTrack(ctx: CanvasRenderingContext2D, pts: Pt[]) {
+function strokeTrack(ctx: CanvasRenderingContext2D, pts: Pt[], phase: number, viewportWidth: number) {
   if (pts.length < 2) return;
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.beginPath();
-  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  let previous: Pt | undefined;
+  for (const point of pts) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      previous = undefined;
+      continue;
+    }
+    // Projection can choose a different world copy on either side of
+    // the viewport seam. Do not draw a line across the entire map.
+    if (previous && Math.abs(point.x - previous.x) <= viewportWidth) {
+      ctx.lineTo(point.x, point.y);
+    } else {
+      ctx.moveTo(point.x, point.y);
+    }
+    previous = point;
+  }
   ctx.strokeStyle = "rgba(12, 18, 28, 0.45)";
   ctx.lineWidth = 4.4;
   ctx.stroke();
   ctx.strokeStyle = "rgba(255, 248, 236, 0.95)";
   ctx.lineWidth = 2.1;
   ctx.stroke();
+  if (phase > 0) {
+    ctx.setLineDash([7, 17]);
+    ctx.lineDashOffset = -(phase * 18 % 24);
+    ctx.strokeStyle = "rgba(241, 119, 79, 0.95)";
+    ctx.lineWidth = 2.1;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -48,12 +69,12 @@ export function paintCyclones(
   cyclones: LiveCyclone[],
   now: number,
 ): PaintedSystem[] {
-  void now;
+  const viewportWidth = ctx.canvas.width / Math.abs(ctx.getTransform().a || 1);
   const hits: PaintedSystem[] = [];
   for (const storm of cyclones) {
     const track = storm.track.length ? storm.track : [{ lat: storm.lat, lon: storm.lon }];
     const drawn = track.map((p) => project(p.lat, p.lon));
-    strokeTrack(ctx, drawn);
+    strokeTrack(ctx, drawn, now, viewportWidth);
     hits.push({
       kind: "cyclone",
       name: storm.name,
