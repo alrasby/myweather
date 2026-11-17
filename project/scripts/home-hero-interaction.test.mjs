@@ -565,7 +565,7 @@ test("continent-scale map pans use actual world weather rather than crushing on-
  assert.ok(model.includes("decideSpatialViewport({"));
  assert.ok(model.includes("if (!this.visible || !this.spatialBudget.allow) return;"));
  assert.ok(model.includes("this.viewportRenderer?.clear();"));
- assert.ok(model.includes("if (zoomChanged) {"), "zoom changes must invalidate source grids");
+ assert.ok(model.includes("if (zoomChanged || policyChanged) {"), "zoom changes must invalidate source grids");
  assert.ok(model.includes("if (cancelledSpeculation) {"), "large same-zoom moves are a separate case");
  assert.ok(!model.includes("requested?.invalidateZoom?.(zoom, true)"),
    "never force opacity=0 on the same ECMWF hour and unchanged zoom");
