@@ -485,7 +485,14 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
   });
   const now = Date.now();
   const nearest = hourly.reduce((best, row) => (Math.abs(row.t - now) < Math.abs(best.t - now) ? row : best));
-  const instant = series[0]?.data?.instant?.details ?? {};
+  const instant = series.find((row) => Date.parse(row.time) === nearest.t)?.data?.instant?.details ?? {};
+  const cloud = instant.cloud_area_fraction;
+  // A MET shower symbol summarizes a forecast interval. Use the cloud
+  // fraction from the matching instant for the current sky description.
+  const forecastShowers = nearest.code >= 80 && nearest.code <= 82;
+  const currentCode = forecastShowers && typeof cloud === "number" && Number.isFinite(cloud)
+    ? cloud < 10 ? 0 : cloud < 35 ? 1 : cloud < 85 ? 2 : 3
+    : nearest.code;
   return {
     forecastSource: "met-no",
     placeId: place.id,
@@ -498,8 +505,8 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
       feels: nearest.feels,
       humidity: Math.round(num(instant.relative_humidity)),
       precip: nearest.precip,
-      code: nearest.code,
-      cloud: num(instant.cloud_area_fraction),
+      code: currentCode,
+      cloud: num(cloud),
       pressure: num(instant.air_pressure_at_sea_level),
       wind: nearest.wind,
       gust: nearest.gust,
