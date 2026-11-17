@@ -722,17 +722,39 @@ export class ModelField {
       }
       onMove();
       this.viewportMoving = false;
+      const previousZoom = origin?.zoom;
       origin = null;
       if (this.zoomSnapshot && !this.zoomSnapshotCoversViewport()) {
         this.clearZoomSnapshot("insufficient-coverage");
         if (!this.spatialVisible) this.onMiss?.();
         this.onClockFrameChanged?.();
       }
-      // The spatial model is a regional product on constrained WebViews.
-      // Never start another continent-sized .om read during a zoomed-out
-      // world tour: fully retire its layers and use the real global fallback.
-      const wasAllowed = this.spatialBudget.allow;
-      this.refreshSpatialBudget();
+      // Classify the transition before the sampling policy can empty the old
+      // frame map. The requested viewport owns one retirement and one restart.
+      const zoom = map.getZoom();
+      const zoomChanged = (previousZoom !== undefined && spatialZoomNeedsNewCoverage(previousZoom, zoom)) ||
+        [...this.frames.values()].some(frame => spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom));
+      const policyChanged = this.refreshSpatialBudget();
+      if (zoomChanged || policyChanged) {
+        for (const step of [...this.frames.keys()]) this.discardFrame(step);
+        this.orderKey = "";
+        this.spatialVisible = false;
+        this.holdingPreviousFrame = false;
+        if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
+        this.viewportSettleTimer = null;
+        this.viewportSettleUntil = 0;
+        this.speculationResumeAt = Date.now() + 1200;
+        const snapshot = this.zoomSnapshot?.overlay;
+        if (snapshot && this.zoomSnapshotCoversViewport()) {
+          snapshot.addTo(map).setOpacity(1);
+          if (this.hasZoomSnapshot() && this.zoomSnapshot && this.zoomSnapshot.visibleSince === null) {
+            this.zoomSnapshot.visibleSince = performance.now();
+          }
+        }
+        if (this.visible) this.onMiss?.();
+        this.pump();
+        return;
+      }
       if (!this.spatialBudget.allow) return;
       // The next settled viewport is a single decoding generation. Repeated
       // moveend events during a continental fling must not immediately
@@ -747,10 +769,6 @@ export class ModelField {
         this.frames.get(this.base)?.revalidateCurrentTiles?.();
         this.pump();
       }, 275);
-      if (!wasAllowed) {
-        this.pump();
-        return;
-      }
       // Every pan/zoom begins a new viewport generation. Old completed
       // cloud/rain/snow events must not authorize a new raster reveal.
       for (const frame of this.frames.values()) {
@@ -763,39 +781,6 @@ export class ModelField {
         const incomplete = frame.loaded.flatMap((done, index) => done ? [] : [index]);
         const adopted = frame.renderGeneration.begin(incomplete);
         for (const index of incomplete) frame.layerGeneration[index] = adopted;
-      }
-      // A new zoom invalidates the raster of ALL old forecast hours. Do
-      // not trigger 3 expensive variable reads for each hidden lookahead
-      // hour: keep the requested hour, retire unrelated forecast layers,
-      // and let the normal bounded scheduler prefetch once the view settles.
-      // Same-zoom drags retain their buffered tiles unchanged.
-      const zoom = map.getZoom();
-      const zoomChanged = [...this.frames.values()].some(frame =>
-        spatialZoomNeedsNewCoverage(frame.requestedZoom, zoom));
-      // Changing zoom or sampling footprint requires genuinely new grids.
-      // Same-zoom long pans do NOT: discarding all three raster GridLayers
-      // on each continent fling caused 129 worker dataset copies and 87
-      // evictions in the user's recorded session. Keep their verified caches.
-      if (zoomChanged) {
-        for (const step of [...this.frames.keys()]) this.discardFrame(step);
-        this.orderKey = "";
-        this.spatialVisible = false;
-        this.holdingPreviousFrame = false;
-        const snapshot = this.zoomSnapshot?.overlay;
-        if (snapshot && this.zoomSnapshotCoversViewport()) {
-          snapshot.addTo(map).setOpacity(1);
-          if (this.hasZoomSnapshot() && this.zoomSnapshot && this.zoomSnapshot.visibleSince === null) {
-            this.zoomSnapshot.visibleSince = performance.now();
-          }
-        }
-        this.onMiss?.();
-        // Zoom retired every old GridLayer. Start the requested viewport
-        // immediately instead of waiting to reuse tile queues that are gone.
-        if (this.viewportSettleTimer !== null) window.clearTimeout(this.viewportSettleTimer);
-        this.viewportSettleTimer = null;
-        this.viewportSettleUntil = 0;
-        this.pump();
-        return;
       }
       if (cancelledSpeculation) {
         // SAME-ZOOM continental panning must not force all three ECMWF
@@ -969,7 +954,7 @@ export class ModelField {
     });
   }
 
-  private refreshSpatialBudget(): void {
+  private refreshSpatialBudget(): boolean {
     const next = this.currentSpatialBudget();
     const previous = this.spatialBudget;
     this.spatialBudget = next;
@@ -984,7 +969,7 @@ export class ModelField {
     // tileSize and zoomOffset are fixed when Leaflet creates its layer.
     const worldChanged = this.compactSpatialTiles &&
       (previous.reason === "world-scale") !== (next.reason === "world-scale");
-    if (next.allow === previous.allow && !sampleChanged && !worldChanged) return;
+    if (next.allow === previous.allow && !sampleChanged && !worldChanged) return false;
     // Retire in-flight model hours only when the sampling level changes
     // or the viewport is invalid. Never disable ECMWF just for zoom <=5.
     this.clear();
@@ -998,7 +983,7 @@ export class ModelField {
     this.refreshBase = null;
     this.refreshSince = 0;
     this.lastScheduledAt = 0;
-    if (this.visible) this.onMiss?.();
+    return true;
   }
 
   /** Playback safety gate for the rain/snow map only. Frame decoding is
