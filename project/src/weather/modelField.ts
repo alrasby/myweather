@@ -103,6 +103,7 @@ export type WeatherModelDiagnostics = {
   viewportRenderer: ViewportRendererStats;
   rateLimitedResponses: number;
   rateLimitRemainingMs: number;
+  viewportTransition?: { zoom: number; firstCompleteMs: number | null } | null;
   startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
 };
 
@@ -546,6 +547,7 @@ export class ModelField {
   // A new visible viewport temporarily outranks speculative forecast hours.
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
+  private viewportTransition: { zoom: number; startedAt: number; firstCompleteMs: number | null } | null = null;
   private viewportHoldUntil = 0;
   private viewportHoldActivations = 0;
   private sameZoomPanPreserved = 0;
@@ -611,6 +613,7 @@ export class ModelField {
   private moveListener: (() => void) | null = null;
 
   attach(L: unknown, map: LeafletMap) {
+    this.viewportTransition = null;
     this.attachedAt = performance.now();
     this.metadataReadyMs = null;
     this.firstCloudReadyMs = null;
@@ -724,6 +727,9 @@ export class ModelField {
       }
       onMove();
       this.viewportMoving = false;
+      if (origin && this.visible) {
+        this.viewportTransition = { zoom: map.getZoom(), startedAt: performance.now(), firstCompleteMs: null };
+      }
       const previousZoom = origin?.zoom;
       origin = null;
       if (this.zoomSnapshot && !this.zoomSnapshotCoversViewport()) {
@@ -1397,6 +1403,10 @@ export class ModelField {
       // CURRENT image has actual pixels and no tile remains CSS-hidden.
       const coverageCertified = coverage.every(item => item.complete) &&
         frame.tileGates.every(gate => gate.pending === 0);
+      if (coverageCertified && step === this.base && this.viewportTransition &&
+          !this.viewportMoving && this.viewportTransition.zoom === map.getZoom()) {
+        this.viewportTransition.firstCompleteMs ??= Math.round(performance.now() - this.viewportTransition.startedAt);
+      }
       const ready = spatialFrameReadyDuringRefresh(
         frame.ready, frame.loaded, frame.errored, frame.tileCounts, coverageCertified);
       // If previously certified source tiles still cover >=78% of a nearby
