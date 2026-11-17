@@ -812,7 +812,7 @@ html {
   --wx-glass-surface: rgb(16 47 72 / 0.78);
   --wx-sky-glass-rim: rgb(211 241 255 / 0.42);
   --wx-sky-glass-shine: rgb(219 246 255 / 0.19);
-  --wx-sky-glass-base: rgb(12 43 68 / 0.48);
+  --wx-sky-glass-base: rgb(12 43 68 / 0.30);
   --wx-nav-selected: #c4eeff;
   --wx-nav-selected-ink: #092f43;
   --wx-card-base: #e8f1f9;
@@ -828,7 +828,7 @@ html {
 html:not(.light) {
   --wx-sky-glass-rim: rgb(168 216 242 / 0.33);
   --wx-sky-glass-shine: rgb(161 214 248 / 0.14);
-  --wx-sky-glass-base: rgb(7 23 42 / 0.58);
+  --wx-sky-glass-base: rgb(7 23 42 / 0.30);
   --wx-nav-selected: #a8dff3;
   --wx-card-base: #10283c;
   --wx-card-text: #eaf3fa;
@@ -1254,5 +1254,16 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
 @media (prefers-contrast: more), (prefers-reduced-transparency: reduce) {
   .temp-under-orb[data-sky-hero], .wx-bottom-nav {
     background: #16334c;
+  }
+}
+
+/* Carry the hero's glass rim into standard cards at their existing opacity. */
+.wx-card, .wx-settings-card, html:not(.light) .wx-card, html:not(.light) .wx-settings-card {
+  border-color: color-mix(in srgb, var(--wx-card-outline) 70%, var(--wx-sky-glass-rim));
+  box-shadow: inset 0 1px 0 var(--wx-card-highlight), var(--wx-elevation);
+}
+@media (prefers-contrast: more) {
+  .wx-card, .wx-settings-card, html:not(.light) .wx-card, html:not(.light) .wx-settings-card {
+    box-shadow: none;
   }
 }
