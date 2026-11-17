@@ -67,6 +67,7 @@ export type WeatherModelDiagnostics = {
   holdingPreviousFrame: boolean;
   /** A certified same-zoom source is held while nearby tile edges refresh. */
   viewportHeld?: boolean;
+  lastZoomTransition?: { validTime: string; visibleMs: number; reason: string } | null;
   zoomSnapshot?: { visible: boolean; validTime: string | null; visibleMs: number };
   /** Number of truly overlapping source holds in this renderer session. */
   viewportHoldActivations?: number;
@@ -567,18 +568,40 @@ export class ModelField {
   private zoomSnapshot: { overlay: ImageOverlay; time: number; timer: number; visibleSince: number | null } | null = null;
   private zoomStartListener: (() => void) | null = null;
 
-  private clearZoomSnapshot() {
+  private lastZoomTransition: WeatherModelDiagnostics["lastZoomTransition"] = null;
+
+  private clearZoomSnapshot(reason = "reset") {
     if (!this.zoomSnapshot) return;
+    const { time, visibleSince } = this.zoomSnapshot;
+    this.lastZoomTransition = {
+      validTime: new Date(time).toISOString(),
+      visibleMs: visibleSince === null ? 0 : Math.round(performance.now() - visibleSince),
+      reason,
+    };
     window.clearTimeout(this.zoomSnapshot.timer);
     this.zoomSnapshot.overlay.remove();
     this.zoomSnapshot = null;
+  }
+
+  private zoomSnapshotCoversViewport(): boolean {
+    const map = this.map;
+    const bounds = this.zoomSnapshot?.overlay.getBounds();
+    if (!map || !bounds) return false;
+    const view = map.getPixelBounds();
+    const { min, max } = view;
+    if (!min || !max || max.x <= min.x || max.y <= min.y) return false;
+    const nw = map.project(bounds.getNorthWest(), map.getZoom());
+    const se = map.project(bounds.getSouthEast(), map.getZoom());
+    const width = Math.max(0, Math.min(max.x, se.x) - Math.max(min.x, nw.x));
+    const height = Math.max(0, Math.min(max.y, se.y) - Math.max(min.y, nw.y));
+    return width >= (max.x - min.x) * 0.7 && height >= (max.y - min.y) * 0.7;
   }
 
   hasZoomSnapshot(): boolean {
     const overlay = this.zoomSnapshot?.overlay;
     return !!overlay && !!this.map?.hasLayer(overlay) &&
       (overlay.getElement()?.naturalWidth ?? 0) > 0 &&
-      this.map.getBounds().overlaps(overlay.getBounds());
+      this.zoomSnapshotCoversViewport();
   }
 
   private moveStartListener: (() => void) | null = null;
@@ -700,8 +723,8 @@ export class ModelField {
       onMove();
       this.viewportMoving = false;
       origin = null;
-      if (this.zoomSnapshot && !map.getBounds().overlaps(this.zoomSnapshot.overlay.getBounds())) {
-        this.clearZoomSnapshot();
+      if (this.zoomSnapshot && !this.zoomSnapshotCoversViewport()) {
+        this.clearZoomSnapshot("insufficient-coverage");
         if (!this.spatialVisible) this.onMiss?.();
         this.onClockFrameChanged?.();
       }
@@ -759,7 +782,7 @@ export class ModelField {
         this.spatialVisible = false;
         this.holdingPreviousFrame = false;
         const snapshot = this.zoomSnapshot?.overlay;
-        if (snapshot && map.getBounds().overlaps(snapshot.getBounds())) {
+        if (snapshot && this.zoomSnapshotCoversViewport()) {
           snapshot.addTo(map).setOpacity(1);
           if (this.hasZoomSnapshot() && this.zoomSnapshot && this.zoomSnapshot.visibleSince === null) {
             this.zoomSnapshot.visibleSince = performance.now();
@@ -871,7 +894,7 @@ export class ModelField {
           this.onClockFrameChanged?.();
         });
         this.zoomSnapshot = { overlay, time, visibleSince: null, timer: window.setTimeout(() => {
-          this.clearZoomSnapshot();
+          this.clearZoomSnapshot("timeout");
           if (!this.spatialVisible) this.onMiss?.();
           this.onClockFrameChanged?.();
         }, 6500) };
@@ -1071,6 +1094,7 @@ export class ModelField {
           })) : [],
       blendFraction: Number(this.blend.toFixed(3)),
       holdingPreviousFrame: this.holdingPreviousFrame,
+      lastZoomTransition: this.lastZoomTransition,
       zoomSnapshot: {
         visible: this.hasZoomSnapshot(),
         validTime: this.zoomSnapshot ? new Date(this.zoomSnapshot.time).toISOString() : null,
@@ -1826,7 +1850,7 @@ export class ModelField {
       // identical callbacks were redundantly aborting fallback timers while
       // a large OM field was being decoded.
       if (nextVisible) {
-        this.clearZoomSnapshot();
+        this.clearZoomSnapshot("replacement-ready");
         this.onLive?.();
       }
       else this.onMiss?.();
