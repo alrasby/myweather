@@ -103,7 +103,7 @@ export type WeatherModelDiagnostics = {
   viewportRenderer: ViewportRendererStats;
   rateLimitedResponses: number;
   rateLimitRemainingMs: number;
-  viewportTransition?: { zoom: number; firstCompleteMs: number | null } | null;
+  viewportTransition?: { zoom: number; firstCoverageMs: number | null; firstCompleteMs: number | null } | null;
   startupMs: { metadata: number | null; firstCloudReady: number | null; firstCompleteReady: number | null };
 };
 
@@ -547,7 +547,7 @@ export class ModelField {
   // A new visible viewport temporarily outranks speculative forecast hours.
   // Both flags are reset when the rain map is hidden/disposed.
   private viewportMoving = false;
-  private viewportTransition: { zoom: number; startedAt: number; firstCompleteMs: number | null } | null = null;
+  private viewportTransition: { zoom: number; startedAt: number; firstCoverageMs: number | null; firstCompleteMs: number | null } | null = null;
   private viewportHoldUntil = 0;
   private viewportHoldActivations = 0;
   private sameZoomPanPreserved = 0;
@@ -728,7 +728,7 @@ export class ModelField {
       onMove();
       this.viewportMoving = false;
       if (origin && this.visible) {
-        this.viewportTransition = { zoom: map.getZoom(), startedAt: performance.now(), firstCompleteMs: null };
+        this.viewportTransition = { zoom: map.getZoom(), startedAt: performance.now(), firstCoverageMs: null, firstCompleteMs: null };
       }
       const previousZoom = origin?.zoom;
       origin = null;
@@ -1013,6 +1013,15 @@ export class ModelField {
     return canAdvanceSpatialTime(i, ready, blocked, this.loading, this.sourceBackedFallback);
   }
 
+  recordViewportCoverage(fallbackReady: boolean) {
+    const transition = this.viewportTransition;
+    if (!this.visible || this.viewportMoving || !transition ||
+        transition.zoom !== this.map?.getZoom() || transition.firstCoverageMs !== null) return;
+    if (this.spatialVisible || this.hasZoomSnapshot() || fallbackReady) {
+      transition.firstCoverageMs = Math.round(performance.now() - transition.startedAt);
+    }
+  }
+
   setSourceBackedFallback(available: boolean) {
     if (this.sourceBackedFallback === available) return;
     this.sourceBackedFallback = available;
@@ -1136,6 +1145,11 @@ export class ModelField {
       ),
       rateLimitedResponses: spatialRateLimit.incidents,
       rateLimitRemainingMs: spatialRateLimit.remainingMs(),
+      viewportTransition: this.viewportTransition ? {
+        zoom: this.viewportTransition.zoom,
+        firstCoverageMs: this.viewportTransition.firstCoverageMs,
+        firstCompleteMs: this.viewportTransition.firstCompleteMs,
+      } : null,
       startupMs: {
         metadata: this.metadataReadyMs,
         firstCloudReady: this.firstCloudReadyMs,
