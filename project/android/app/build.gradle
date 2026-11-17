@@ -13,7 +13,7 @@ android {
         applicationId "net.nabdhserv.myweather"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 77
+        versionCode 78
         versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -31,9 +31,6 @@ android {
         }
     }
     buildTypes {
-        debug {
-            applicationIdSuffix '.glasspreview'
-        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
