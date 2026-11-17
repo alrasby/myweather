@@ -228,6 +228,7 @@ export function MapScreen({ lang, active }: { lang: Lang; active: boolean }) {
           info.playbackWaitingMs >= 1600
         );
         modelRef.current?.setSourceBackedFallback(needFallback);
+        modelRef.current?.recordViewportCoverage(hasRealRain);
         modelRef.current?.setPlaybackActive(engine.playing);
         modelRef.current?.sync(info.timeMs);
         // While the next spatial hour decodes, fetch ONE lightweight genuine
