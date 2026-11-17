@@ -812,7 +812,7 @@ html {
   --wx-glass-surface: rgb(16 47 72 / 0.78);
   --wx-sky-glass-rim: rgb(211 241 255 / 0.42);
   --wx-sky-glass-shine: rgb(219 246 255 / 0.19);
-  --wx-sky-glass-base: rgb(12 43 68 / 0.30);
+
   --wx-nav-selected: #c4eeff;
   --wx-nav-selected-ink: #092f43;
   --wx-card-base: #e8f1f9;
@@ -828,7 +828,7 @@ html {
 html:not(.light) {
   --wx-sky-glass-rim: rgb(168 216 242 / 0.33);
   --wx-sky-glass-shine: rgb(161 214 248 / 0.14);
-  --wx-sky-glass-base: rgb(7 23 42 / 0.30);
+
   --wx-nav-selected: #a8dff3;
   --wx-card-base: #10283c;
   --wx-card-text: #eaf3fa;
@@ -904,15 +904,6 @@ html:not(.light) .wx-settings-card {
 .wx-settings-action {
   border-radius: 1.3rem;
 }
-.temp-under-orb[data-sky-hero] {
-  padding: 0.75rem 0.9rem;
-  border-radius: var(--radius-card);
-  border: 1px solid var(--wx-sky-glass-rim);
-  background: linear-gradient(180deg, var(--wx-sky-glass-shine), transparent 51%),
-    var(--wx-sky-glass-base);
-  box-shadow: inset 0 1px 0 rgb(241 252 255 / 0.22), 0 5px 16px rgb(7 22 40 / 0.14);
-}
-
 .wx-bottom-nav {
   background: linear-gradient(180deg, var(--wx-sky-glass-shine), transparent 58%),
     var(--wx-glass-surface);
@@ -1252,7 +1243,7 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
 }
 
 @media (prefers-contrast: more), (prefers-reduced-transparency: reduce) {
-  .temp-under-orb[data-sky-hero], .wx-bottom-nav {
+  .wx-bottom-nav {
     background: #16334c;
   }
 }
