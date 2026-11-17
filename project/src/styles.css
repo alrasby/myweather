@@ -904,7 +904,7 @@ html:not(.light) .wx-settings-card {
 .wx-settings-action {
   border-radius: 1.3rem;
 }
-.wx-home .temp-under-orb {
+.temp-under-orb[data-sky-hero] {
   padding: 0.75rem 0.9rem;
   border-radius: var(--radius-card);
   border: 1px solid var(--wx-sky-glass-rim);
@@ -1252,7 +1252,7 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
 }
 
 @media (prefers-contrast: more), (prefers-reduced-transparency: reduce) {
-  .wx-home .temp-under-orb, .wx-bottom-nav {
+  .temp-under-orb[data-sky-hero], .wx-bottom-nav {
     background: #16334c;
   }
 }
