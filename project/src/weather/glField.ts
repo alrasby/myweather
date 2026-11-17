@@ -714,12 +714,13 @@ export class FieldEngine {
         );
       const world = this.rainWorld;
       const view = this.rainView;
+      const worldCoversView = usable(world) && this.detailFillsView(world);
       if (usable(view) && this.detailFillsView(view)) {
         const viewCell = view.lonSpan / Math.max(1, view.cols);
         const worldCell = world ? world.lonSpan / Math.max(1, world.cols) : 99;
-        if ((!usable(world) || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
+        if ((!worldCoversView || viewCell < worldCell * 0.85) && viewCell < 4.2) return view;
       }
-      if (usable(world)) return world;
+      if (worldCoversView) return world;
       // The initial global grid may be estimateGrid(). Never sample it as
       // real precipitation (or let a missing model fabricate rain on a map).
       // Only a successfully fetched rain/world/view or measured detail
@@ -728,7 +729,7 @@ export class FieldEngine {
       // The wind/heat global grid is also fetched from Open-Meteo and
       // contains real precipitation fields. Reuse it if present, but NEVER
       // use the synthetic estimateGrid() bootstrap as a rain forecast.
-      if (usable(this.global)) return this.global;
+      if (usable(this.global) && this.detailFillsView(this.global)) return this.global;
       return null;
     }
     if (this.detail && this.detailFillsView(this.detail)) return this.detail;
