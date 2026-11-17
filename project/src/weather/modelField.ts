@@ -255,6 +255,7 @@ function responseFrom(status: number, headers: Headers, bytes: Uint8Array): Resp
 // prevent obsolete snowfall queues from delaying the first useful coverage.
 // Do not raise concurrency or bypass provider cooldowns.
 const spatialNativeQueue = new SpatialNativeQueue(6);
+let currentSpatialReadFile: string | null = null;
 const spatialPerformance = new SpatialPerformance();
 const spatialRangeCache = new SpatialRangeCache();
 const spatialRangeFlights = new SpatialRangeFlights<Response>();
@@ -289,7 +290,8 @@ async function measuredNativeRequest(
       spatialRateLimit.assertAllowed();
       spatialNativeReads++;
       return CapacitorHttp.request(options);
-    }, spatialNativePriority(options.url),retainCompleted);
+    }, () => currentSpatialReadFile !== null && options.url.split("?")[0] === currentSpatialReadFile
+      ? 2 : spatialNativePriority(options.url), retainCompleted);
     const retryAfter = Object.entries(result.headers ?? {})
       .find(([key]) => key.toLowerCase() === "retry-after")?.[1];
     spatialRateLimit.observe(result.status, retryAfter == null ? null : String(retryAfter));
@@ -1153,6 +1155,7 @@ export class ModelField {
     this.visible = on;
     if (on && !this.spatialBudget.allow) this.onMiss?.();
     if (!on) {
+      currentSpatialReadFile = null;
       this.clearZoomSnapshot();
       this.seq += 1;
       this.failedUntil.clear();
@@ -1223,6 +1226,9 @@ export class ModelField {
     // old genuine pixels remain visible, do not compete for the WebView's
     // three expensive decode slots with speculative next-hour imagery.
     // The bounded hold expires; completion or the watchdog resumes planning.
+    currentSpatialReadFile = this.pinnedRun && this.times[this.base] != null
+      ? pinnedSpatialTileUrl(this.pinnedRun, "precipitation", this.base).slice(5).split("?")[0] ?? null
+      : null;
     if (this.frames.get(this.base)?.viewportHeld) return;
     const ready = new Set<number>();
     for (const [step, frame] of this.frames) if (frame.ready) ready.add(step);
@@ -1859,6 +1865,7 @@ export class ModelField {
    * React StrictMode can re-attach the same instance after effect cleanup.
    */
   dispose() {
+    currentSpatialReadFile = null;
     this.metadataAbort?.abort();
     this.metadataAbort = null;
     if (this.map && this.updateBoundsListener) this.map.off("moveend", this.updateBoundsListener);
