@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
 import android.os.Handler;
+import android.view.MotionEvent;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -18,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -91,13 +93,28 @@ public class CitySearchInputTest {
                     + "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'');"
                     + "input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();return true;})()");
                 awaitScript("Search did not focus", "document.activeElement===document.querySelector('input[type=search]')");
+                JSONArray rect = new JSONArray(evaluate("(() => {const r=document.querySelector('input[type=search]').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,devicePixelRatio];})()"));
+                int[] origin = new int[2];
+                instrumentation.runOnMainSync(() -> web.getLocationOnScreen(origin));
+                float x = origin[0] + (float) (rect.getDouble(0) * rect.getDouble(2));
+                float y = origin[1] + (float) (rect.getDouble(1) * rect.getDouble(2));
+                long downTime = SystemClock.uptimeMillis();
+                MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0);
+                MotionEvent up = MotionEvent.obtain(downTime, downTime + 50, MotionEvent.ACTION_UP, x, y, 0);
+                instrumentation.sendPointerSync(down);
+                instrumentation.sendPointerSync(up);
+                down.recycle();
+                up.recycle();
                 AtomicReference<InputConnection> editor = new AtomicReference<>();
-                instrumentation.runOnMainSync(() -> {
-                    web.requestFocus();
-                    InputMethodManager keyboard = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
-                    keyboard.showSoftInput(web, InputMethodManager.SHOW_IMPLICIT);
-                    editor.set(web.onCreateInputConnection(new EditorInfo()));
-                });
+                long editorDeadline = SystemClock.elapsedRealtime() + 10000;
+                while (editor.get() == null && SystemClock.elapsedRealtime() < editorDeadline) {
+                    instrumentation.runOnMainSync(() -> {
+                        InputMethodManager keyboard = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+                        keyboard.showSoftInput(web, InputMethodManager.SHOW_IMPLICIT);
+                        editor.set(web.onCreateInputConnection(new EditorInfo()));
+                    });
+                    if (editor.get() == null) SystemClock.sleep(100);
+                }
                 assertNotNull("Missing native WebView input connection", editor.get());
                 assertNotEquals("Dummy input connection breaks composing text", BaseInputConnection.class, editor.get().getClass());
                 for (int length = 1; length <= city[0].length(); length++) {
