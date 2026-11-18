@@ -223,6 +223,11 @@ export const useWeather = create<WeatherState>((set, get) => ({
       get().setActive(saved.id);
       return;
     }
+    if (get().activeId === place.id && get().peek?.id === place.id) {
+      saveLastViewed(place);
+      set({ peek: place });
+      return;
+    }
     // Persist last selected GPS preview without ever adding it to saved cities.
     // Only explicit save/delete actions may change the persisted list.
     saveLastViewed(place);

@@ -87,7 +87,9 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
             aria-controls="wx-city-search-results"
             aria-autocomplete="list"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            onCompositionEnd={(e) => setQuery(e.currentTarget.value)}
             placeholder={t(lang, "searchPh")}
             className="wx-search-field h-12 w-full rounded-2xl ps-12 pe-12 text-sm outline-none"
           />
