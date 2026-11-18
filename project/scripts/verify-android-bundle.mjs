@@ -22,6 +22,8 @@ for(const path of files){
  assert.equal(statSync(other).size,statSync(path).size,"stale size: "+path);
  assert.equal(sum(other),sum(path),"stale native WebView resource: "+path);
 }
+const packagedConfig=JSON.parse(readFileSync(join(root,"android/app/src/main/assets/capacitor.config.json"),"utf8"));
+assert.equal(packagedConfig.android?.captureInput,false,"Native city input must use the WebView IME connection");
 const compiled=files.filter(p=>p.endsWith(".js")).map(p=>readFileSync(p,"utf8")).join("\n");
 for(const symbol of ["Glass 3","wx-city-results","wx-setting-field-inline","Prague",
  "myweather-city-search-production.up.railway.app"]){
