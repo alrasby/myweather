@@ -50,7 +50,9 @@ jobs:
         run: npm ci
       - name: Audit locked dependencies (direct, transitive, production)
         working-directory: project
-        run: node scripts/security-audit.mjs
+        run: |
+          node --test scripts/picomatch-security.test.mjs
+          node scripts/security-audit.mjs
       - name: Verify upgraded auth and parser APIs
         working-directory: project
         run: node scripts/security-compat.mjs
