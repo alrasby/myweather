@@ -117,26 +117,43 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       .finally(() => setCompassLocating(false));
   };
 
+  useEffect(() => () => { ++locateGen.current; }, []);
+
   const refresh = () => {
     void loadActive(true);
+    locate();
   };
 
   const locate = () => {
     if (locating) return;
     setLocating(true);
     const gen = ++locateGen.current;
+    let selectedId = useWeather.getState().activeId;
     let ticket = 0;
+    const names: Promise<void>[] = [];
     const apply = (pos: { lat: number; lon: number }) => {
+      if (gen !== locateGen.current || useWeather.getState().activeId !== selectedId) return;
       const mine = ++ticket;
-      void lookupPlace(pos.lat, pos.lon, textBase()).then((rev) => {
-        if (mine !== ticket || gen !== locateGen.current) return;
-        const name = rev?.name || `${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)}`;
-        const next = placeFromCoords(pos.lat, pos.lon, name, rev?.country || "", rev?.admin || "");
-        setHere(next);
-        locatePlace(next);
-      });
+      const previous = useWeather.getState().here;
+      const nearby = previous && Math.hypot(
+        (previous.lat - pos.lat) * 111,
+        (previous.lon - pos.lon) * 111 * Math.cos(pos.lat * Math.PI / 180),
+      ) < 0.35;
+      const known = nearby && !/^[\d\s.,+−-]+$/.test(previous.name) ? previous : null;
+      const next = placeFromCoords(pos.lat, pos.lon,
+        known?.name || t(lang, "locate"), known?.country || "", known?.admin || "");
+      setHere(next);
+      locatePlace(next);
+      selectedId = useWeather.getState().activeId;
+      names.push(lookupPlace(pos.lat, pos.lon, textBase()).then((rev) => {
+        if (!rev || mine !== ticket || gen !== locateGen.current ||
+            useWeather.getState().activeId !== selectedId) return;
+        const named = placeFromCoords(pos.lat, pos.lon, rev.name, rev.country, rev.admin);
+        setHere(named);
+        locatePlace(named);
+      }));
     };
-    void readBestPosition(apply).finally(() => {
+    void readBestPosition(apply).then(() => Promise.all(names)).catch(() => undefined).finally(() => {
       if (gen === locateGen.current) setLocating(false);
     });
   };

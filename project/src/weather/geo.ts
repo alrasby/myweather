@@ -65,14 +65,7 @@ export async function readBestPosition(onFix: (fix: Fix) => void): Promise<Fix |
   };
   const coarse = readFix(false, 2800, 8_000).then(take).catch(() => undefined);
   const fine = readFix(true, 12000, 0).then(take).catch(() => undefined);
-  await Promise.race([
-    fine,
-    (async () => {
-      await coarse;
-      const acc = best ? (best as Fix).accuracy : 99999;
-      await new Promise((resolve) => window.setTimeout(resolve, acc <= 60 ? 900 : 2800));
-    })(),
-  ]);
-  await Promise.race([fine, new Promise((resolve) => window.setTimeout(resolve, 250))]);
+  // Keep both fixes owned by the operation until their callbacks finish.
+  await Promise.all([coarse, fine]);
   return best;
 }
