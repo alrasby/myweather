@@ -1,0 +1,67 @@
+name: Android native city-search IME
+on:
+  pull_request:
+    paths:
+      - project/capacitor.config.ts
+      - project/src/components/weather/CitiesScreen.tsx
+      - project/android/app/src/androidTest/java/net/nabdhserv/myweather/CitySearchInputTest.java
+      - .github/workflows/android-search-ime.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-city-ime-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  composing-city-names:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Build the packaged app and native regression test
+        working-directory: project
+        env:
+          VITE_MYWEATHER_GEOCODER_URL: https://myweather-city-search-production.up.railway.app/api
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          npm ci
+          npm run build:android
+          node scripts/verify-android-bundle.mjs
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable hardware acceleration
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Compose seven Arabic city names through Android InputConnection
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          ram-size: 2048M
+          cores: 2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install -r project/android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r project/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r -e class net.nabdhserv.myweather.CitySearchInputTest net.nabdhserv.myweather.test/androidx.test.runner.AndroidJUnitRunner | tee native-ime-result.txt
+            grep -F 'OK (1 test)' native-ime-result.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-city-search-ime-evidence
+          path: native-ime-result.txt
+          if-no-files-found: ignore
+          retention-days: 7
