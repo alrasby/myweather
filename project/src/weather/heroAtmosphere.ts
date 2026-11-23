@@ -1,3 +1,5 @@
+import { reconcileSkyCode } from "./skyCondition.ts";
+
 /** Visual-only sky treatment for the home HERO, not a forecast provider.
  * Depends on the current city's WMO condition, measured cloud cover and wind.
  * Pure, bounded policy so it cannot trigger extra weather/network requests.
@@ -16,13 +18,14 @@ const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 
 export function heroAtmosphere(code: number, cloudCover: number, windKmh: number): HeroAtmosphere {
+  code = reconcileSkyCode(code, cloudCover);
   const cover = clamp(cloudCover, 0, 100) / 100;
   const rain = (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
   const snow = (code >= 71 && code <= 77) || code === 85 || code === 86;
   const fog = code === 45 || code === 48;
   const overcast = code === 3 || fog;
   const partly = code === 2;
-  // WMO code has higher confidence than a mismatched/sparse cloud field.
+  // Reconciled dry sky keeps real cloud evidence; hazardous weather remains provider-driven.
   const coverage = code === 0 ? Math.min(0.1, cover)
     : code === 1 ? Math.min(0.32, Math.max(0.12, cover))
     : partly ? Math.max(0.32, cover)

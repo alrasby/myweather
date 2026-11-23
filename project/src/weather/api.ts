@@ -1,3 +1,4 @@
+import { reconcileSkyCode } from "@/weather/skyCondition";
 import { daylightNow, solarDaylight } from "@/weather/astro";
 import { estimateBundle } from "@/weather/estimate";
 import { repairSolarForecast, solarEventsForDate } from "@/weather/solarForecast";
@@ -43,7 +44,10 @@ export function readCacheFile(): CacheFile {
     for (const [id, entry] of Object.entries(entries)) {
       if (!entry?.bundle || !Number.isFinite(entry.at)) continue;
       const place = places.find((item) => item.id === id);
-      corrected[id] = place ? { ...entry, bundle: repairSolarForecast(entry.bundle, place) } : entry;
+      const bundle = place ? repairSolarForecast(entry.bundle, place) : entry.bundle;
+      const code = reconcileSkyCode(bundle.current.code, bundle.current.cloud);
+      corrected[id] = code === bundle.current.code ? { ...entry, bundle }
+        : { ...entry, bundle: { ...bundle, current: { ...bundle.current, code } } };
     }
     return {
       places,
@@ -121,7 +125,7 @@ function buildBundle(
     temp: finite((hourly.temperature_2m as number[] | undefined)?.[i]),
     precip: finite((hourly.precipitation as number[] | undefined)?.[i]),
     pop: finite((hourly.precipitation_probability as number[] | undefined)?.[i]),
-    code: num((hourly.weather_code as number[] | undefined)?.[i]),
+    code: reconcileSkyCode(num((hourly.weather_code as number[] | undefined)?.[i]), (hourly.cloud_cover as number[] | undefined)?.[i]),
     wind: num((hourly.wind_speed_10m as number[] | undefined)?.[i]),
     gust: num((hourly.wind_gusts_10m as number[] | undefined)?.[i]),
     feels: num((hourly.apparent_temperature as number[] | undefined)?.[i]),
@@ -155,7 +159,7 @@ function buildBundle(
       feels: finite(current.apparent_temperature),
       humidity: num(current.relative_humidity_2m),
       precip: finite(current.precipitation),
-      code: num(current.weather_code),
+      code: reconcileSkyCode(num(current.weather_code), current.cloud_cover),
       cloud: num(current.cloud_cover),
       pressure: num(current.pressure_msl),
       wind: num(current.wind_speed_10m),
@@ -257,7 +261,7 @@ async function fetchOpenMeteo(place: Place, signal?: AbortSignal): Promise<Weath
   );
   url.searchParams.set(
     "hourly",
-    "temperature_2m,precipitation,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,apparent_temperature,uv_index,is_day,pressure_msl",
+    "temperature_2m,precipitation,precipitation_probability,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,apparent_temperature,uv_index,is_day,pressure_msl",
   );
   url.searchParams.set(
     "daily",
@@ -441,7 +445,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
           temp,
           precip,
           pop: precip >= 0.3 ? 70 : precip > 0 ? 35 : 0,
-          code: wmoFromSymbol(metSymbol(row.data ?? {})),
+          code: reconcileSkyCode(wmoFromSymbol(metSymbol(row.data ?? {})), details.cloud_area_fraction),
           wind,
           gust: wind * 1.35,
           feels: feelsLike(temp, rh, wind),
@@ -505,7 +509,7 @@ async function fetchMet(place: Place, signal?: AbortSignal): Promise<WeatherBund
       feels: nearest.feels,
       humidity: Math.round(num(instant.relative_humidity)),
       precip: nearest.precip,
-      code: currentCode,
+      code: reconcileSkyCode(currentCode, cloud),
       cloud: num(cloud),
       pressure: num(instant.air_pressure_at_sea_level),
       wind: nearest.wind,

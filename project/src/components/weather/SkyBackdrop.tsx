@@ -1,5 +1,6 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import moonFace from "@/assets/moon-face.jpg";
+import { reconcileSkyCode } from "@/weather/skyCondition";
 import { heroAtmosphere } from "@/weather/heroAtmosphere";
 import { heroRainStreaks } from "@/weather/heroRainStreaks";
 
@@ -179,23 +180,16 @@ const CUMULUS_NIGHT: Pal = { hi: [217, 233, 251], mid: [143, 179, 214], lo: [80,
  * unlike the old cirrus line, no part spans the entire viewport horizontally.
  */
 function cumulusSample(nx: number, ny: number, seed: number) {
-  const lumps = [
-    [0.18, 0.68, 0.21, 0.19],
-    [0.35, 0.49, 0.20, 0.28],
-    [0.53, 0.60, 0.26, 0.24],
-    [0.72, 0.48, 0.19, 0.27],
-    [0.83, 0.70, 0.15, 0.17],
-  ] as const;
-  let shape = 0;
-  for (const [cx, cy, rx, ry] of lumps) {
-    const x = (nx - cx) / rx;
-    const y = (ny - cy) / ry;
-    shape = Math.max(shape, Math.exp(-1.6 * (x * x + y * y)));
-  }
-  const detail = fbm(nx * 6.5 + seed, ny * 6 + seed * 0.3, 4);
-  const edge = smooth(0.17, 0.58, shape + detail * 0.25);
-  const horizon = smooth(0.06, 0.18, ny) * smooth(0.05, 0.21, 1 - ny);
-  return { a: edge * horizon * 0.95, lit: 0.60 + (1 - ny) * 0.26 + detail * 0.20 };
+  // Domain-warped optical density makes irregular, feathered cloud bodies;
+  // fine turbulence breaks up silhouettes without obvious circular blobs.
+  const warp = fbm(nx * 2.2 + seed, ny * 2.4, 3);
+  const body = fbm(nx * 3.3 + seed + warp * 0.7, ny * 3.6 + warp * 0.5, 5);
+  const detail = fbm(nx * 17 + seed, ny * 16 + seed, 3);
+  const envelope = Math.sin(Math.PI * nx) ** 0.65 * Math.sin(Math.PI * ny) ** 0.8;
+  const density = smooth(0.19, 0.70, (body * 0.65 + 0.5) * envelope + detail * 0.1);
+  const light = fbm(nx * 3.3 + seed - 0.06, ny * 3.6 - 0.1, 4) - body;
+  return { a: (1 - Math.exp(-density * 2.7)) * envelope,
+    lit: Math.max(0.2, Math.min(1, 0.78 + light * 1.7 - density * 0.13 + detail * 0.16)) };
 }
 
 
@@ -383,23 +377,23 @@ const spriteCache = new Map<string, CloudSprite[]>();
 
 function makeSprites(day: boolean, code: number): CloudSprite[] {
   const kind = skyKind(code);
-  const key = `v6:${day ? 1 : 0}:${kind}:${code > 0 ? 1 : 0}`;
+  const key = `v7:${day ? 1 : 0}:${kind}:${code > 0 ? 1 : 0}`;
   const hit = spriteCache.get(key);
   if (hit) return hit;
-  const cirrus = () => bake(520, 160, CIRRUS_DAY, (nx, ny) => cirrusSample(nx, ny, kind === "partly" ? 1.4 : 2.6));
+  const cirrus = () => bake(520, 200, day ? CIRRUS_DAY : CUMULUS_NIGHT, (nx, ny) => cirrusSample(nx, ny, kind === "partly" ? 1.4 : 2.6));
   let layers: CloudSprite[] = [];
-  if (day && kind === "clear" && code > 0) {
+  if (kind === "clear" && code > 0) {
     layers = [
       {
         canvas: cirrus(),
-        x0: 0.15,
+        x0: 0.47,
         y: 0.02,
-        w: 1.2,
+        w: 1.1,
         speed: 3.2,
         bob: 0.08,
         amp: 2,
         phase: 0.4,
-        alpha: 0.28,
+        alpha: day ? 0.5 : 0.36,
         flip: false,
       },
     ];
@@ -408,13 +402,13 @@ function makeSprites(day: boolean, code: number): CloudSprite[] {
     layers = [
       {
         canvas: bake(420, 220, palette, (nx, ny) => cumulusSample(nx, ny, 1.2)),
-        x0: 0.06, y: 0.02, w: 0.72, speed: 2.3, bob: 0.10,
-        amp: 2.4, phase: 0.2, alpha: day ? 0.79 : 0.68, flip: false,
+        x0: 0.48, y: -0.08, w: 1.12, speed: 2.3, bob: 0.10,
+        amp: 2.4, phase: 0.2, alpha: day ? 0.84 : 0.68, flip: false,
       },
       {
         canvas: bake(420, 220, palette, (nx, ny) => cumulusSample(nx, ny, 3.9)),
-        x0: 0.60, y: 0.18, w: 0.59, speed: -1.4, bob: 0.07,
-        amp: 2.0, phase: 1.4, alpha: day ? 0.66 : 0.53, flip: true,
+        x0: 0.80, y: 0.18, w: 0.88, speed: -1.4, bob: 0.07,
+        amp: 2.0, phase: 1.4, alpha: day ? 0.76 : 0.56, flip: true,
       },
     ];
   }
@@ -426,6 +420,7 @@ function CloudField({ day, code, cover, animate }: {
   day: boolean; code: number; cover: number; animate: boolean;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  code = reconcileSkyCode(code, cover);
   const kind = skyKind(code);
   const veil = veilKind(day, code);
   useEffect(() => {
@@ -536,9 +531,9 @@ function CloudField({ day, code, cover, animate }: {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [day, code, cover, animate]);
-  if (!veil && !(kind === "partly" || (day && kind === "clear" && code > 0))) return null;
+  if (!veil && !(kind === "partly" || (kind === "clear" && code > 0))) return null;
   const deck = kind === "cloud" || kind === "storm";
-  return <canvas ref={ref} className={`sky-clouds${kind === "partly" ? " is-puffs" : veil ? (deck ? " is-deck" : " is-veil") : ""}`} aria-hidden="true" />;
+  return <canvas ref={ref} className={`sky-clouds${kind === "partly" || code === 1 ? " is-puffs" : veil ? (deck ? " is-deck" : " is-veil") : ""}`} aria-hidden="true" />;
 }
 
 /** Rain/snow ONLY in the upper hero band. All clouds use the existing
@@ -692,6 +687,7 @@ export function SkyBackdrop({ day, code, phase, moonVisible, cover, wind = 0, di
   day: boolean; code: number; phase: number; moonVisible: boolean; cover: number;
   wind?: number; direction?: number; heroWeather?: boolean; animateClouds?: boolean; showClouds?: boolean;
 }) {
+  code = reconcileSkyCode(code, cover);
   const kind = skyKind(code);
   return (
     <div className={`sky-scene sky-${kind} ${day ? "is-day" : "is-night-sky"}`} aria-hidden="true">
