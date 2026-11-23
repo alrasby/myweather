@@ -164,11 +164,12 @@ function bake(w: number, h: number, pal: Pal, sample: (nx: number, ny: number) =
 }
 
 function cirrusSample(nx: number, ny: number, seed: number) {
-  const y0 = 0.42 + Math.sin(nx * Math.PI * 2.2 + seed) * 0.12 + fbm(nx * 1.3 + seed, 1.7, 3) * 0.1;
-  const band = Math.exp(-((ny - y0) * (ny - y0)) / 0.012);
-  const streak = smooth(0.18, 0.72, fbm(nx * 1.4 + seed, ny * 5, 3) * 0.5 + 0.5);
-  const fadeX = smooth(0, 0.16, nx) * smooth(0, 0.16, 1 - nx);
-  return { a: band * streak * fadeX * 0.7, lit: 0.78 + (1 - ny) * 0.16 };
+  const broad = fbm(nx * 3.4 + seed, ny * 7.1 + seed, 5);
+  const fine = fbm(nx * 15 + seed, ny * 25, 3);
+  const envelope = Math.sin(Math.PI * nx) ** 0.65 * Math.sin(Math.PI * ny) ** 0.8;
+  const wisps = smooth(0.38, 0.68, 0.5 + broad * 0.65 + fine * 0.18);
+  return { a: wisps * envelope * 0.62, lit: 0.86 + fine * 0.16 };
+
 }
 
 const CIRRUS_DAY: Pal = { hi: [255, 255, 255], mid: [236, 246, 255], lo: [198, 220, 238] };
@@ -310,7 +311,8 @@ function sampleAtmo(kind: VeilKind, nx: number, ny: number): { r: number; g: num
     const y = ny;
     const n = fit(cloudN(nx, y, 2.5, 1.25, 6.6, 0.75));
     const m = fit(cloudN(nx, y, 4.1, 1.8, 14.2, 0.36));
-    const lit = smooth(0.08, 0.92, n * 0.52 + m * 0.48);
+    const fine = fit(cloudN(nx, y, 12.5, 7.2, 24.8, 0.24));
+    const lit = smooth(0.15, 0.86, n * 0.35 + m * 0.30 + fine * 0.35);
     const rgb = mixRgb([86, 102, 122], [176, 190, 206], 0.38 + 0.62 * lit);
     return { r: rgb[0], g: rgb[1], b: rgb[2], a: 0.94 };
   }
@@ -318,8 +320,9 @@ function sampleAtmo(kind: VeilKind, nx: number, ny: number): { r: number; g: num
     const y = ny;
     const n = fit(cloudN(nx, y, 2.4, 1.2, 5.2, 0.72));
     const m = fit(cloudN(nx, y, 3.9, 1.7, 12.4, 0.34));
-    const lit = smooth(0.08, 0.92, n * 0.52 + m * 0.48);
-    const rgb = mixRgb([150, 166, 182], [248, 250, 253], 0.34 + 0.66 * lit);
+    const fine = fit(cloudN(nx, y, 12.5, 7.2, 24.8, 0.24));
+    const lit = smooth(0.15, 0.86, n * 0.35 + m * 0.30 + fine * 0.35);
+    const rgb = mixRgb([159, 181, 197], [248, 250, 253], 0.24 + 0.76 * lit);
     return { r: rgb[0], g: rgb[1], b: rgb[2], a: 0.93 };
   }
   if (kind === "day-storm") {
@@ -393,7 +396,7 @@ function makeSprites(day: boolean, code: number): CloudSprite[] {
         bob: 0.08,
         amp: 2,
         phase: 0.4,
-        alpha: day ? 0.5 : 0.36,
+        alpha: day ? 0.7 : 0.48,
         flip: false,
       },
     ];
