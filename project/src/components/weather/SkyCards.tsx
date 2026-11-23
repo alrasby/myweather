@@ -281,7 +281,7 @@ export function QiblaCard({
           <RefreshCw aria-hidden="true" className={`size-3.5 shrink-0 ${locating ? "animate-spin" : ""}`} />
           <span>{ar ? "موقعي للقبلة" : "My Qibla location"}</span>
         </button>
-        <p className="fig mt-1 text-xs leading-relaxed text-muted">
+        <p className="fig mt-1 text-[0.625rem] leading-relaxed text-muted">
           {ar ? "المسافة إلى مكة: " : "Distance to Mecca: "}
           <bdi>{distanceKm == null ? "—" : `${ar ? "حوالي " : "About "}${formatNumber(distanceKm, lang, distanceKm < 1 ? 2 : 0)} ${ar ? "كم" : "km"}`}</bdi>
         </p>

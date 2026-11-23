@@ -349,8 +349,8 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
               </div>
             </div>
             <p className="mt-2 text-start text-sm font-medium" data-sky-anchor="">
-              • {t(lang, "hi")} {formatTemp(bundle.daily[0]?.tmax ?? bundle.current.temp, prefs.temp, lang)}
-              <span className="ms-3">• {t(lang, "lo")} {formatTemp(bundle.daily[0]?.tmin ?? bundle.current.temp, prefs.temp, lang)}</span>
+              <span aria-hidden="true" className="text-[#ef7a32]">•</span> {t(lang, "hi")} {formatTemp(bundle.daily[0]?.tmax ?? bundle.current.temp, prefs.temp, lang)}
+              <span className="ms-3"><span aria-hidden="true" className="text-[#ef7a32]">•</span> {t(lang, "lo")} {formatTemp(bundle.daily[0]?.tmin ?? bundle.current.temp, prefs.temp, lang)}</span>
             </p>
             {estimated && !loading ? (
               <p className="mt-1 text-xs font-medium text-on-sky/75">{t(lang, "estimated")}</p>
