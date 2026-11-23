@@ -26,3 +26,12 @@ test("wind drift and alpha remain bounded for invalid/extreme model values", () 
   assert.ok(heroAtmosphere(3, Infinity, Infinity).opacity <= 0.86);
   assert.ok(heroAtmosphere(3, -200, -70).driftPxPerSecond >= 1.2);
 });
+
+
+test("a clear provider symbol cannot suppress valid scattered or dense cloud evidence", () => {
+  assert.ok(heroAtmosphere(0, 24, 5).clouds >= 1);
+  assert.ok(heroAtmosphere(0, 65, 5).coverage >= 0.65);
+  assert.ok(heroAtmosphere(0, 95, 5).coverage >= 0.95);
+  assert.equal(heroAtmosphere(0, 95, 5).precipitation, "none");
+  assert.equal(heroAtmosphere(0, 2, 5).clouds, 0);
+});
