@@ -20,7 +20,7 @@ import {
 } from "@/weather/format";
 import { t, weatherKey, type CopyKey } from "@/weather/i18n";
 import { textBase } from "@/weather/locale";
-import { lookupPlace } from "@/weather/placeLookup";
+import { cachedPlaceName, hasPlaceName, lookupPlace } from "@/weather/placeLookup";
 import { pinWeatherAlerts } from "@/weather/pinnedAlerts";
 import { suppressCityOnRefresh, visibleWeatherNotices } from "@/weather/alertVisibility";
 import { activePlace, useWeather } from "@/weather/store";
@@ -87,6 +87,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const swipeLast = useRef<{ x: number; y: number } | null>(null);
   const [pulling, setPulling] = useState(0);
   const [locating, setLocating] = useState(false);
+  const [locationNameFailed, setLocationNameFailed] = useState(false);
   const locateGen = useRef(0);
   const [openDay, setOpenDay] = useState<number | null>(null);
   const [hideMorning, setHideMorning] = useState(false);
@@ -118,6 +119,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   };
 
   useEffect(() => () => { ++locateGen.current; }, []);
+  useEffect(() => { setLocationNameFailed(false); }, [activeId]);
 
   const refresh = () => {
     void loadActive(true);
@@ -127,34 +129,47 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const locate = () => {
     if (locating) return;
     setLocating(true);
+    setLocationNameFailed(false);
     const gen = ++locateGen.current;
     let selectedId = useWeather.getState().activeId;
     let ticket = 0;
+    let nameFailed = false;
     const names: Promise<void>[] = [];
     const apply = (pos: { lat: number; lon: number }) => {
       if (gen !== locateGen.current || useWeather.getState().activeId !== selectedId) return;
       const mine = ++ticket;
-      const previous = useWeather.getState().here;
-      const nearby = previous && Math.hypot(
-        (previous.lat - pos.lat) * 111,
-        (previous.lon - pos.lon) * 111 * Math.cos(pos.lat * Math.PI / 180),
-      ) < 0.35;
-      const known = nearby && !/^[\d\s.,+−-]+$/.test(previous.name) ? previous : null;
-      const next = placeFromCoords(pos.lat, pos.lon,
-        known?.name || t(lang, "locate"), known?.country || "", known?.admin || "");
-      setHere(next);
-      locatePlace(next);
-      selectedId = useWeather.getState().activeId;
+      const state = useWeather.getState();
+      const previous = [state.here, activePlace(state)].find((candidate) => candidate &&
+        hasPlaceName(candidate.name) && Math.hypot(
+          (candidate.lat - pos.lat) * 111,
+          (candidate.lon - pos.lon) * 111 * Math.cos(pos.lat * Math.PI / 180),
+        ) < 0.35);
+      const known = cachedPlaceName(pos.lat, pos.lon, textBase()) || previous;
+      const commit = (name: string, country: string, admin: string) => {
+        const next = placeFromCoords(pos.lat, pos.lon, name, country, admin);
+        setHere(next);
+        locatePlace(next);
+        selectedId = useWeather.getState().activeId;
+      };
+      if (known) commit(known.name, known.country, known.admin);
+      // Keep the currently named view while an unnamed fix is being resolved.
+      // A coarse fix must never erase the successful name needed by a later GPS fix.
       names.push(lookupPlace(pos.lat, pos.lon, textBase()).then((rev) => {
-        if (!rev || mine !== ticket || gen !== locateGen.current ||
+        if (mine !== ticket || gen !== locateGen.current ||
             useWeather.getState().activeId !== selectedId) return;
-        const named = placeFromCoords(pos.lat, pos.lon, rev.name, rev.country, rev.admin);
-        setHere(named);
-        locatePlace(named);
+        if (rev) {
+          commit(rev.name, rev.country, rev.admin);
+          nameFailed = false;
+        } else {
+          nameFailed = !known;
+        }
       }));
     };
     void readBestPosition(apply).then(() => Promise.all(names)).catch(() => undefined).finally(() => {
-      if (gen === locateGen.current) setLocating(false);
+      if (gen === locateGen.current) {
+        setLocating(false);
+        if (useWeather.getState().activeId === selectedId) setLocationNameFailed(nameFailed);
+      }
     });
   };
 
@@ -289,7 +304,11 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
           </button>
           <button type="button" onClick={onOpenPlaces} className="min-h-12 min-w-0 flex-1 text-start" aria-label={lang === "ar" ? "اختيار المدينة" : "Choose city"}>
             <span className="block truncate text-base font-semibold leading-tight">{placeTitle(place, lang)}</span>
-            <span className="block truncate text-xs leading-tight opacity-80">{placeCountry(place, lang)}</span>
+            <span className="block truncate text-xs leading-tight opacity-80" role={locationNameFailed ? "status" : undefined}>
+              {locationNameFailed
+                ? (lang === "ar" ? "تعذر جلب اسم الموقع. اسحب لإعادة المحاولة" : "Place name unavailable. Pull to retry")
+                : placeCountry(place, lang)}
+            </span>
           </button>
         </div>
       </header>
