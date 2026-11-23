@@ -19,3 +19,13 @@ export function qiblaBearing(lat: number, lon: number): number | null {
 export function relativeQiblaDirection(bearing: number, trueHeading: number): number {
   return ((bearing - trueHeading) % 360 + 360) % 360;
 }
+
+/** Surface great-circle distance to the Kaaba, in kilometres (mean Earth radius). */
+export function distanceToMeccaKm(lat: number, lon: number): number | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  const a = Math.sin((KAABA_LAT - lat) * RAD / 2) ** 2
+    + Math.cos(lat * RAD) * Math.cos(KAABA_LAT * RAD)
+    * Math.sin((KAABA_LON - lon) * RAD / 2) ** 2;
+  // Clamp rounding at coincident and antipodal positions.
+  return 6371.0088 * 2 * Math.asin(Math.sqrt(Math.max(0, Math.min(1, a))));
+}

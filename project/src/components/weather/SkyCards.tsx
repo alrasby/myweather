@@ -6,7 +6,7 @@ import { hasDisplayableCoastalTide, modelTideForecast } from "@/weather/marineTi
 import { fetchEot20Forecast, isEot20GatewayEnabled, type Eot20Forecast } from "@/weather/eot20TideClient";
 import { fetchOpenWatersTide, type OpenWatersTideForecast } from "@/weather/openWatersTideClient";
 import { coastalDistanceKm, COASTAL_CITY_MAX_KM } from "@/weather/coastline";
-import { qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
+import { distanceToMeccaKm, qiblaBearing, relativeQiblaDirection } from "@/weather/qibla";
 import type { CompassReading } from "@/weather/deviceHeading";
 import {
   formatHour24,
@@ -223,6 +223,7 @@ export function QiblaCard({
   onLocate: () => void;
 }) {
   const bearing = qiblaBearing(lat, lon);
+  const distanceKm = distanceToMeccaKm(lat, lon);
   const { heading } = reading;
   const northOnScreen = heading == null ? 0 : -heading;
   const qiblaOnScreen = bearing == null ? null : heading == null ? bearing : relativeQiblaDirection(bearing, heading);
@@ -275,11 +276,15 @@ export function QiblaCard({
           <span className="text-accent">{ar ? "القبلة" : "Qibla"}</span>
           <span className="ms-1" dir="ltr">{bearing == null ? "—" : `${formatNumber(bearing, lang, 1)}°`}</span>
         </p>
-        <button type="button" className="wx-qibla-refresh mt-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-full px-3 py-1.5 text-[0.72rem] font-semibold text-accent disabled:opacity-65"
+        <button type="button" className="wx-qibla-refresh mt-1 inline-flex min-h-9 items-center justify-center gap-2 rounded-full px-3 py-1.5 text-[0.72rem] font-semibold text-accent disabled:opacity-65"
           onClick={onLocate} disabled={locating} aria-busy={locating}>
           <RefreshCw aria-hidden="true" className={`size-3.5 shrink-0 ${locating ? "animate-spin" : ""}`} />
-          <span>{ar ? "تحديث موقعي للقبلة" : "Update my Qibla location"}</span>
+          <span>{ar ? "موقعي للقبلة" : "My Qibla location"}</span>
         </button>
+        <p className="fig mt-1 text-xs leading-relaxed text-muted">
+          {ar ? "المسافة إلى مكة: " : "Distance to Mecca: "}
+          <bdi>{distanceKm == null ? "—" : `${ar ? "حوالي " : "About "}${formatNumber(distanceKm, lang, distanceKm < 1 ? 2 : 0)} ${ar ? "كم" : "km"}`}</bdi>
+        </p>
       </div>
     </article>
   );
