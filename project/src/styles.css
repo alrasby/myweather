@@ -209,7 +209,7 @@ html.light {
 .sky-sun,
 .sky-moon {
   position: absolute;
-  top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 4.45rem + 2mm);
+  top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 5.05rem + 2mm);
   right: 1.15rem;
   z-index: 4;
   width: 3rem;
