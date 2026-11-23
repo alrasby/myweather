@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { qiblaBearing, relativeQiblaDirection } from "./qibla.ts";
+import { distanceToMeccaKm, qiblaBearing, relativeQiblaDirection } from "./qibla.ts";
 
 test("great-circle bearings for Muscat, New York and London", () => {
   assert.ok(Math.abs(qiblaBearing(23.588, 58.3829)! - 266.3) < 1);
@@ -15,4 +15,14 @@ test("invalid or geographically undefined bearing is not fabricated", () => {
 test("relative direction rotates with device heading, wrapping across north", () => {
   assert.equal(relativeQiblaDirection(5, 355), 10);
   assert.equal(relativeQiblaDirection(260, 280), 340);
+});
+
+test("distance to Mecca uses the compass coordinates and great-circle kilometres", () => {
+  assert.equal(distanceToMeccaKm(21.4224779, 39.8251832), 0);
+  assert.ok(Math.abs(distanceToMeccaKm(23.588, 58.3829)! - 1920) < 10);
+  assert.ok(Math.abs(distanceToMeccaKm(51.5074, -0.1278)! - 4794) < 10);
+  assert.ok(Math.abs(distanceToMeccaKm(-21.4224779, -140.1748168)! - Math.PI * 6371.0088) < 0.001);
+  for (const [lat, lon] of [[NaN, 0], [0, Infinity], [91, 0], [0, -181]]) {
+    assert.equal(distanceToMeccaKm(lat, lon), null);
+  }
 });
