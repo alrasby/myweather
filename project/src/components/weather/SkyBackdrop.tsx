@@ -304,7 +304,7 @@ function sampleAtmo(kind: VeilKind, nx: number, ny: number): { r: number; g: num
     const pocket = Math.exp(-(angdist(nx, 0.86) ** 2) / 0.035) * smooth(0.28, 0.78, ny);
     const dens = smooth(0.22, 0.68, n * 0.6 + fine * 0.4);
     const a = Math.min(0.78, cover * (0.5 + 0.5 * dens) * (1 - 0.72 * pocket));
-    const rgb = mixRgb([162, 192, 228], [236, 244, 252], 0.2 + 0.8 * fine);
+    const rgb = mixRgb([26, 38, 54], [78, 96, 118], 0.2 + 0.8 * fine);
     return { r: rgb[0], g: rgb[1], b: rgb[2], a };
   }
   if (kind === "night-cloud") {
@@ -313,7 +313,7 @@ function sampleAtmo(kind: VeilKind, nx: number, ny: number): { r: number; g: num
     const m = fit(cloudN(nx, y, 4.1, 1.8, 14.2, 0.36));
     const fine = fit(cloudN(nx, y, 12.5, 7.2, 24.8, 0.24));
     const lit = smooth(0.15, 0.86, n * 0.35 + m * 0.30 + fine * 0.35);
-    const rgb = mixRgb([86, 102, 122], [176, 190, 206], 0.38 + 0.62 * lit);
+    const rgb = mixRgb([29, 45, 64], [88, 107, 128], 0.38 + 0.62 * lit);
     return { r: rgb[0], g: rgb[1], b: rgb[2], a: 0.94 };
   }
   if (kind === "day-cloud") {

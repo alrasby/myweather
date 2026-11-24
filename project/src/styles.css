@@ -234,14 +234,8 @@ html.light {
   background: linear-gradient(180deg, #36485e 0%, #51687e 42%, #a4bccd 100%);
 }
 
-.sky-scene.is-night-sky.sky-cloud {
-  background: linear-gradient(180deg, #3a4b63 0%, #4c5e78 38%, #3c536e 100%);
-}
-
-.sky-scene.is-night-sky.sky-storm,
-.sky-scene.is-night-sky.sky-partly {
-  background: linear-gradient(180deg, #102e78 0%, #1a4a9e 48%, #245eae 100%);
-}
+/* All night conditions share the dark astronomical-night sky above.
+   Weather differences come from the cloud textures, never a daylight-blue sky. */
 
 .sky-scene.is-night-sky.sky-cloud .sky-stars,
 .sky-scene.is-night-sky.sky-cloud .sky-moon {
