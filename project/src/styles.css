@@ -399,9 +399,9 @@ html:not(.light) .map-bar {
   font-variant-numeric: lining-nums tabular-nums;
 }
 
-/* More specific than .fig so the rendered Qibla distance is 13px, not 14px. */
+/* More specific than .fig so the rendered two-line Qibla distance is 12px. */
 .fig.wx-qibla-distance {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
 }
 
 .hour-chip {

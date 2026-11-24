@@ -12,7 +12,7 @@ test("weather animation is behind the upper cards, not a child of scrolling temp
   assert.ok(home.includes('className="temp-under-orb'), "keep original temperature layout");
   assert.ok(!home.includes("<HeroClouds"), "remove cloud canvas that was glued to the hero card");
   assert.ok(sky.includes("heroWeather ? <HeroPrecipitation"), "retain only weather-driven precipitation in sky scene");
-  assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}'));
+  assert.ok(app.includes('heroWeather={tab === "home" && !placesOpen && sky !== null}'));
   assert.ok(style.includes(".wx-hero-atmosphere") && style.includes("pointer-events: none;"));
   assert.ok(style.includes("height: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14.1rem + 5mm)"), "precipitation follows the cloud deck, not half the screen");
 });
@@ -100,11 +100,11 @@ test("15-day card receives subtle polish without changing its structure or basel
   assert.match(effectiveGlass, /\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s);
 });
 
-test("visible version stays 1.0.0 while upgrade-safe Android code advances to 87", () => {
+test("visible version stays 1.0.0 while upgrade-safe Android code advances to 88", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.ok(gradle.includes('versionCode 87') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='87' versionName='1.0.0'"));
+  assert.ok(gradle.includes('versionCode 88') && gradle.includes('versionName "1.0.0"'));
+  assert.ok(workflow.includes("versionCode='88' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
@@ -376,7 +376,7 @@ test("cloud field uses seamless single-pass pattern and moon respects the city's
 test("home sky renders gently but never competes with weather map tile decoding offscreen", () => {
   const sky = read("project/src/components/weather/SkyBackdrop.tsx");
   const app = read("project/src/components/weather/WeatherApp.tsx");
-  assert.ok(app.includes('animateClouds={tab === "home" && !placesOpen}'));
+  assert.ok(app.includes('animateClouds={tab === "home" && !placesOpen && sky !== null}'));
   assert.ok(sky.includes('animate={animateClouds}'));
   assert.ok(sky.includes("if (!alive || !animate || document.hidden) return"), "no animation under foreground map or hidden tab");
   assert.ok(sky.includes("window.setTimeout(() => {") && sky.includes("}, 25);"), "bounded 24fps cloud drift, not continuous 60fps repaint");

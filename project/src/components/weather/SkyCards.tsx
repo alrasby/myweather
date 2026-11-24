@@ -282,8 +282,8 @@ export function QiblaCard({
           <span>{ar ? "موقعي للقبلة" : "My Qibla location"}</span>
         </button>
         <p className="fig wx-qibla-distance mt-1 text-muted">
-          {ar ? "المسافة إلى مكة: " : "Distance to Mecca: "}
-          <bdi>{distanceKm == null ? "—" : `${ar ? "حوالي " : "About "}${formatNumber(distanceKm, lang, distanceKm < 1 ? 2 : 0)} ${ar ? "كم" : "km"}`}</bdi>
+          <span className="block">{ar ? "المسافة إلى مكة:" : "Distance to Mecca:"}</span>
+          <bdi className="block">{distanceKm == null ? "—" : `${ar ? "حوالي " : "About "}${formatNumber(distanceKm, lang, distanceKm < 1 ? 2 : 0)} ${ar ? "كم" : "km"}`}</bdi>
         </p>
       </div>
     </article>
