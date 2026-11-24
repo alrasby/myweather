@@ -1257,3 +1257,43 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
     box-shadow: none;
   }
 }
+
+/* Illustrative celestial passage stays between the location chip and hero. */
+.sky-orbit-body {
+  position: absolute;
+  left: calc(1.65rem + (100% - 3.3rem) * var(--orbit-x));
+  top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 6.75rem + var(--orbit-drop));
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%) scale(var(--orbit-scale));
+  opacity: var(--orbit-strength);
+  pointer-events: none;
+  transition: left 1.2s linear, top 1.2s linear, opacity 1.2s linear;
+}
+.sky-orbit-body > .sky-sun, .sky-orbit-body > .sky-moon {
+  position: relative;
+  inset: auto;
+}
+.sky-orbit-body.is-horizon .sky-sun {
+  background: radial-gradient(circle at 42% 38%, #fff8de 0%, #ffe49a 26%, #ffbc53 55%, #f08b31 85%, #d96b26 100%);
+}
+.sky-orbit-trail {
+  position: absolute;
+  left: 1.65rem;
+  width: calc(100% - 3.3rem);
+  top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 6rem);
+  height: 2rem;
+  overflow: visible;
+  pointer-events: none;
+  opacity: 0.16;
+  fill: none;
+  stroke: #f6c56b;
+  stroke-width: 0.7;
+}
+.sky-orbit-trail.is-moon { stroke: #bbd9f4; opacity: 0.1; }
+.sky-orbit-trail path { vector-effect: non-scaling-stroke; }
+@media (prefers-reduced-motion: reduce) {
+  .sky-orbit-body { transition: none; }
+}

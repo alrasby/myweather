@@ -1,3 +1,4 @@
+import { orbitPoint, type CelestialBody, type CelestialSky } from "@/weather/celestialMotion";
 import { useEffect, useRef, type CSSProperties } from "react";
 import moonFace from "@/assets/moon-face.jpg";
 import { reconcileSkyCode } from "@/weather/skyCondition";
@@ -686,8 +687,8 @@ export function HeroPrecipitation({ code, cover, wind, direction }: {
   );
 }
 
-export function SkyBackdrop({ day, code, phase, moonVisible, cover, wind = 0, direction = 0, heroWeather = false, animateClouds = true, showClouds = true }: {
-  day: boolean; code: number; phase: number; moonVisible: boolean; cover: number;
+export function SkyBackdrop({ day, code, celestial, cover, wind = 0, direction = 0, heroWeather = false, animateClouds = true, showClouds = true }: {
+  day: boolean; code: number; celestial: CelestialSky; cover: number;
   wind?: number; direction?: number; heroWeather?: boolean; animateClouds?: boolean; showClouds?: boolean;
 }) {
   code = reconcileSkyCode(code, cover);
@@ -721,14 +722,39 @@ export function SkyBackdrop({ day, code, phase, moonVisible, cover, wind = 0, di
       {showClouds ? <CloudField day={day} code={code} cover={cover} animate={animateClouds} /> : null}
       {heroWeather ? <HeroPrecipitation code={code} cover={cover} wind={wind} direction={direction} /> : null}
       <div className="sky-column">
-        {day && kind !== "cloud" && kind !== "storm" ? (
-          <div className="sky-sun" />
-        ) : !day && moonVisible ? (
-          <MoonDisc phase={phase} sizeClass="sky-moon" shadeId="sky" />
+        {celestial.sun && kind !== "cloud" && kind !== "storm" ? (
+          <OrbitBody body={celestial.sun} kind="sun" phase={celestial.phase} rotation={0} />
+        ) : null}
+        {celestial.moon && kind !== "cloud" && kind !== "storm" ? (
+          <OrbitBody body={celestial.moon} kind="moon" phase={celestial.phase} rotation={celestial.moonRotation} />
         ) : null}
       </div>
     </div>
   );
+}
+
+/** A light SVG trail and a positioned disc; no new canvas or animation loop. */
+function OrbitBody({ body, kind, phase, rotation }: {
+  body: CelestialBody; kind: "sun" | "moon"; phase: number; rotation: number;
+}) {
+  const point = orbitPoint(body.progress);
+  const style = {
+    "--orbit-x": point.x,
+    "--orbit-drop": `${1 - point.arch}rem`,
+    "--orbit-strength": 0.45 + point.arch * 0.55,
+    "--orbit-scale": 0.85 + point.arch * 0.15,
+  } as CSSProperties;
+  return <>
+    {!body.continuous ? <svg className={`sky-orbit-trail is-${kind}`} viewBox="0 0 1000 100" preserveAspectRatio="none">
+      <path d="M 0 87.5 Q 500 -12.5 1000 87.5" pathLength="1" />
+    </svg> : null}
+    <div className={`sky-orbit-body is-${kind}${point.arch < 0.25 ? " is-horizon" : ""}`}
+      data-body={kind} data-progress={body.progress.toFixed(5)} data-continuous={body.continuous}
+      style={style}>
+      {kind === "sun" ? <div className="sky-sun" /> :
+        <MoonDisc phase={phase} sizeClass="sky-moon" shadeId="sky" rotation={rotation} shadeOpacity={0.95} />}
+    </div>
+  </>;
 }
 
 /** Shadow of the unlit side. Phase 0 = new, 0.25 = first quarter (right lit), 0.5 = full, 0.75 = last quarter (left lit). */
@@ -755,14 +781,14 @@ function shadowPath(phase: number): string {
   return `M ${term.join(" L ")} L ${limb.join(" L ")} Z`;
 }
 
-export function MoonDisc({ phase, sizeClass, shadeId }: { phase: number; sizeClass: string; shadeId: string }) {
+export function MoonDisc({ phase, sizeClass, shadeId, rotation = 0, shadeOpacity = 0.7 }: { phase: number; sizeClass: string; shadeId: string; rotation?: number; shadeOpacity?: number }) {
   const d = shadowPath(phase);
   return (
-    <span className={`moon-disc ${sizeClass}`}>
+    <span className={`moon-disc ${sizeClass}`} style={{ rotate: `${rotation}deg` }}>
       <img src={moonFace} alt="" draggable={false} />
       {d ? (
         <svg className="moon-shade" viewBox="0 0 100 100" data-shade={shadeId} aria-hidden="true">
-          <path d={d} fill="#142033" fillOpacity="0.7" />
+          <path d={d} fill="#142033" fillOpacity={shadeOpacity} />
         </svg>
       ) : null}
     </span>

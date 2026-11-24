@@ -246,3 +246,43 @@ export function tideForecast(lat: number, lon: number, now: number): {
   };
 }
 
+
+/** Nearby lunar horizon crossings, independent of the device's calendar zone.
+ * Bounded hourly cache avoids scanning on every sky-clock update. */
+const lunarPassCache = new Map<string, { rises: number[]; sets: number[] }>();
+export function lunarHorizonPass(lat: number, lon: number, now: number): {
+  rise: number | null; set: number | null;
+} | null {
+  if (![lat, lon, now].every(Number.isFinite) || !Number.isFinite(new Date(now).getTime()) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  const threshold = rad(0.13);
+  if (moonAlt(now, lat, lon) <= threshold) return null;
+  const hour = Math.floor(now / 3_600_000);
+  const key = `${lat}:${lon}:${hour}`;
+  let events = lunarPassCache.get(key);
+  if (!events) {
+    events = { rises: [], sets: [] };
+    const step = 10 * 60_000;
+    const start = hour * 3_600_000 - 36 * 3_600_000;
+    let previous = moonAlt(start, lat, lon) - threshold;
+    for (let t = start + step; t <= start + 72 * 3_600_000; t += step) {
+      const altitude = moonAlt(t, lat, lon) - threshold;
+      if ((previous < 0 && altitude >= 0) || (previous >= 0 && altitude < 0)) {
+        // Refine the bracket so hourly cache rotation cannot jump the orbit.
+        let lo = t - step, hi = t;
+        const rising = previous < 0;
+        for (let i = 0; i < 18; i++) {
+          const mid = (lo + hi) / 2;
+          if ((moonAlt(mid, lat, lon) >= threshold) === rising) hi = mid;
+          else lo = mid;
+        }
+        (rising ? events.rises : events.sets).push((lo + hi) / 2);
+      }
+      previous = altitude;
+    }
+    if (lunarPassCache.size >= 16) lunarPassCache.delete(lunarPassCache.keys().next().value!);
+    lunarPassCache.set(key, events);
+  }
+  const rise = events.rises.filter(t => t <= now).at(-1) ?? null;
+  const set = events.sets.find(t => t > now) ?? null;
+  return { rise, set };
+}

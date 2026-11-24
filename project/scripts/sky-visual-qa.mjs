@@ -77,6 +77,42 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
  await ctx.close();
 }
 
+
+// Real-time solar progression: distinct fresh contexts cannot inherit another city's orbit.
+const solarPositions=new Map();
+for(const [city,lat,lon,zone,rise,set] of [
+ ['Muscat',23.59,58.38,'Asia/Muscat','2026-11-24T02:26:00Z','2026-11-24T13:20:00Z'],
+ ['NewYork',40.71,-74.01,'America/New_York','2026-11-24T11:50:00Z','2026-11-24T21:30:00Z'],
+]){
+ const riseMs=Date.parse(rise),setMs=Date.parse(set);
+ const positions=[];
+ for(const [label,p] of [['rise',0.02],['noon',0.5],['set',0.98]]){
+  const now=riseMs+(setMs-riseMs)*p;
+  const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,reducedMotion:'reduce'});
+  const page=await ctx.newPage();await page.clock.setFixedTime(now);
+  await page.addInitScript(({now,lat,lon,zone,riseMs,setMs})=>{
+   const place={id:'orbit-fixture',name:'مسار السماء',nameEn:'Sky passage',country:'',admin:'',lat,lon,primary:true};
+   const hour={t:now,temp:28,feels:29,code:0,precip:0,pop:0,wind:4,gust:6,uv:4,isDay:true,pressure:1010};
+   const b={placeId:place.id,timezone:zone,offset:0,fetchedAt:now,forecastSource:'open-meteo-best-match',current:{...hour,humidity:50,cloud:0,dir:120,visibility:10000},hourly:Array.from({length:24},(_,i)=>({...hour,t:now+i*3600000})),daily:[{t:(riseMs+setMs)/2,code:0,tmax:30,tmin:22,sunrise:riseMs,sunset:setMs,precip:0,pop:0,uv:5,wind:4}],air:null,marine:null,marineVersion:3};
+   localStorage.setItem('myweather-cache-v6',JSON.stringify({places:[place],activeId:place.id,entries:{[place.id]:{at:now,bundle:b}}}));
+   localStorage.setItem('myweather-prefs-v2',JSON.stringify({lang:'ar',theme:'sun',refreshMin:0,alerts:false,particles:'low'}));
+  },{now,lat,lon,zone,riseMs,setMs});
+  await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
+  await page.goto('http://127.0.0.1:8765');await page.locator('[data-sky-hero]').waitFor();await page.evaluate(()=>document.fonts.ready);
+  const sun=page.locator('[data-body="sun"]');await sun.waitFor();
+  assert.ok(Math.abs(Number(await sun.getAttribute('data-progress'))-p)<0.01,city+' actual time progress');
+  const box=await sun.boundingBox(),hero=await page.locator('[data-sky-hero]').boundingBox();
+  assert.ok(box.y+box.height<=hero.y+4,city+' solar disc avoids the temperature');
+  assert.ok(box.x>=0 && box.x+box.width<=390,city+' orbit fits mobile width');
+  positions.push(box.x+box.width/2);
+  await page.screenshot({path:`sky-qa/orbit-${city}-${label}.png`,clip:{x:0,y:0,width:390,height:260}});
+  await ctx.close();
+ }
+ assert.ok(positions[0]>positions[1] && positions[1]>positions[2],city+' right-to-left solar motion');
+ solarPositions.set(city,positions);
+}
+console.log(JSON.stringify({scenario:'city-local-solar-orbits',cities:solarPositions.size}));
+
 // Replay the reported cloudy-city -> clear-city transition with real UI input.
 // Observe DOM commits as well as animation frames, including a held network response.
 {
