@@ -107,7 +107,7 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
    started();await gate;
    const b=makeBundle(pending,0,0);
    const stamp=t=>new Date(t).toISOString();
-   const payload={timezone:'Asia/Muscat',utc_offset_seconds:14400,current:{time:stamp(now),temperature_2m:22,apparent_temperature:22,relative_humidity_2m:55,precipitation:0,weather_code:0,cloud_cover:0,pressure_msl:1010,wind_speed_10m:8,wind_gusts_10m:12,wind_direction_10m:120,is_day:0},hourly:{time:b.hourly.map(h=>stamp(h.t)),temperature_2m:b.hourly.map(()=>22),weather_code:b.hourly.map(()=>0),cloud_cover:b.hourly.map(()=>0)},daily:{time:b.daily.map(d=>stamp(d.t)),weather_code:b.daily.map(()=>0),temperature_2m_max:b.daily.map(()=>30),temperature_2m_min:b.daily.map(()=>20),sunrise:b.daily.map(d=>stamp(d.sunrise)),sunset:b.daily.map(d=>stamp(d.sunset))}};
+   const payload={timezone:'Asia/Muscat',utc_offset_seconds:14400,current:{time:stamp(now),temperature_2m:22,apparent_temperature:22,relative_humidity_2m:55,precipitation:0,weather_code:0,cloud_cover:0,pressure_msl:1010,wind_speed_10m:8,wind_gusts_10m:12,wind_direction_10m:120,is_day:0},hourly:{time:b.hourly.map(h=>stamp(h.t)),temperature_2m:b.hourly.map(()=>22),weather_code:b.hourly.map(()=>0),cloud_cover:b.hourly.map(()=>0)},daily:{time:b.daily.map(d=>stamp(d.t).slice(0,10)),weather_code:b.daily.map(()=>0),temperature_2m_max:b.daily.map(()=>30),temperature_2m_min:b.daily.map(()=>20),sunrise:b.daily.map(d=>stamp(d.sunrise)),sunset:b.daily.map(d=>stamp(d.sunset)),precipitation_sum:b.daily.map(()=>0),precipitation_probability_max:b.daily.map(()=>0),uv_index_max:b.daily.map(()=>5),wind_speed_10m_max:b.daily.map(()=>8)}};
    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(payload)}).catch(()=>{});finished();return;
   }
   return route.abort();
@@ -124,11 +124,30 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
   window.__skyObserver.observe(document.body,{subtree:true,childList:true,attributes:true});
   const tick=()=>{inspect();if(window.__watchSky)requestAnimationFrame(tick);};requestAnimationFrame(tick);
  });
+ let switches=0;
  const choose=async name=>{
   await page.getByRole('button',{name:'اختيار المدينة',exact:true}).click();
   await page.getByText(name,{exact:true}).click();
   await page.locator('header').filter({hasText:name}).waitFor();
+  switches++;
  };
+ // Exercise the persistent Home container as well as the city-picker path.
+ const swipe=async(dx,name)=>{
+  await page.locator('[data-sky-hero]').evaluate((el,dx)=>{
+   const send=(type,touches,changedTouches=[])=>{
+    const e=new Event(type,{bubbles:true});
+    Object.defineProperty(e,'touches',{value:touches});Object.defineProperty(e,'changedTouches',{value:changedTouches});el.dispatchEvent(e);
+   };
+   const a={clientX:190,clientY:180},b={clientX:190+dx,clientY:180};
+   send('touchstart',[a]);send('touchmove',[b]);send('touchend',[],[b]);
+  },dx);
+  await page.locator('header').filter({hasText:name}).waitFor();switches++;
+ };
+ for(let i=0;i<2;i++){
+  await swipe(150,clear.name);await page.waitForFunction(()=>document.querySelector('[data-sky-hero]')?.textContent.includes('صافٍ'));
+  assert.equal(await page.locator('.sky-clouds').count(),0,'swipe cannot carry previous cloud pixels');
+  await swipe(-150,cloudy.name);await page.locator('.sky-clouds').waitFor();
+ }
  for(let i=0;i<4;i++){
   await choose(clear.name);await page.waitForFunction(()=>document.querySelector('[data-sky-hero]')?.textContent.includes('صافٍ'));
   assert.equal(await page.locator('.sky-clouds').count(),0,'cached clear city has no ghost cloud');
@@ -149,7 +168,7 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
  assert.deepEqual(leaks,[],'no ghost clouds at DOM commits or animation frames');
  assert.deepEqual(errors,[],'switching runtime errors');
  await page.screenshot({path:'sky-qa/transition-clear.png'});
- console.log(JSON.stringify({scenario:'rapid-city-and-delayed-forecast-transition',switches:12,leaks:leaks.length,errors}));
+ console.log(JSON.stringify({scenario:'rapid-city-and-delayed-forecast-transition',switches,leaks:leaks.length,errors}));
  await ctx.close();
 }
 } finally {await browser?.close();await new Promise(r=>server.close(r));}
