@@ -66,7 +66,7 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
    assert.ok(brightness<120,name+' clouds retain a night palette');
   }
  }
- assert.equal(await page.locator('.wx-qibla-refresh + p').evaluate(e=>getComputedStyle(e).fontSize),'9px','Mecca distance is one size smaller');
+ assert.equal(await page.locator('.wx-qibla-refresh + p').evaluate(e=>getComputedStyle(e).fontSize),'13px','Mecca distance is one size smaller than the actual 14px baseline');
  assert.deepEqual(errors,[],name+' runtime errors');
  await page.screenshot({path:`sky-qa/${name}.png`});
  console.log(JSON.stringify({name,errors,description:await page.locator('[data-sky-hero]').innerText(),canvas:await page.locator('.sky-clouds').count()}));
