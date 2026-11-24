@@ -1,10 +1,11 @@
+import { celestialMotion } from "@/weather/celestialMotion";
 import { House, Map as MapIcon, Settings } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { CitiesScreen } from "@/components/weather/CitiesScreen";
 import { HomeScreen } from "@/components/weather/HomeScreen";
 import { SettingsScreen } from "@/components/weather/SettingsScreen";
 import { SkyBackdrop } from "@/components/weather/SkyBackdrop";
-import { moonState, moonAboveHorizon, daylightNow } from "@/weather/astro";
+import { daylightNow } from "@/weather/astro";
 import { placeTitle } from "@/weather/format";
 import { hasWorldPack } from "@/weather/i18n-world";
 import { t } from "@/weather/i18n";
@@ -111,8 +112,23 @@ export function WeatherApp() {
   }, [hydrated, prefs.refreshMin, prefs.wifiOnly, loadActive]);
 
   useEffect(() => {
-    const id = window.setInterval(() => setClock(Date.now()), 30_000);
-    return () => window.clearInterval(id);
+    let timer = 0;
+    const sync = () => {
+      if (timer) window.clearInterval(timer);
+      timer = 0;
+      if (!document.hidden) {
+        setClock(Date.now());
+        timer = window.setInterval(() => setClock(Date.now()), 30_000);
+      }
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      if (timer) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
   }, []);
 
   useEffect(() => {
@@ -184,6 +200,7 @@ export function WeatherApp() {
 
   const showMap = tab === "map";
   const code = sky?.current.code ?? 0;
+  const celestial = celestialMotion(place.lat, place.lon, clock, sky?.daily);
 
   return (
     <div className={`relative flex h-dvh flex-col overflow-hidden ${light ? "" : "is-night"}`}>
@@ -192,7 +209,7 @@ export function WeatherApp() {
         wind={sky?.current.wind ?? 0} direction={sky?.current.dir ?? 0}
         heroWeather={tab === "home" && !placesOpen && sky !== null}
         animateClouds={tab === "home" && !placesOpen && sky !== null}
-        phase={moonState(clock).frac} moonVisible={moonAboveHorizon(place.lat, place.lon, clock)} />
+        celestial={celestial} />
       <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
         <section className={`under-status mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col ${tab === "map" ? "hidden" : ""}`}>
           <div className="min-h-0 flex-1">
