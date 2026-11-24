@@ -101,6 +101,8 @@ for(const [city,lat,lon,zone,rise,set] of [
   await page.goto('http://127.0.0.1:8765');await page.locator('[data-sky-hero]').waitFor();await page.evaluate(()=>document.fonts.ready);
   const sun=page.locator('[data-body="sun"]');await sun.waitFor();
   assert.ok(Math.abs(Number(await sun.getAttribute('data-progress'))-p)<0.01,city+' actual time progress');
+  assert.equal(await sun.evaluate(e=>getComputedStyle(e).opacity),'1',city+' opaque sun retains warm hue');
+  assert.equal(await page.locator('.sky-orbit-trail').count(),1,city+' one shared visual orbit');
   const box=await sun.boundingBox(),hero=await page.locator('[data-sky-hero]').boundingBox();
   assert.ok(box.y+box.height<=hero.y+4,city+' solar disc avoids the temperature');
   assert.ok(box.x>=0 && box.x+box.width<=390,city+' orbit fits mobile width');

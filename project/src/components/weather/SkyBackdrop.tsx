@@ -726,7 +726,7 @@ export function SkyBackdrop({ day, code, celestial, cover, wind = 0, direction =
           <OrbitBody body={celestial.sun} kind="sun" phase={celestial.phase} rotation={0} />
         ) : null}
         {celestial.moon && kind !== "cloud" && kind !== "storm" ? (
-          <OrbitBody body={celestial.moon} kind="moon" phase={celestial.phase} rotation={celestial.moonRotation} />
+          <OrbitBody body={celestial.moon} kind="moon" phase={celestial.phase} rotation={celestial.moonRotation} trail={celestial.sun === null} />
         ) : null}
       </div>
     </div>
@@ -734,18 +734,17 @@ export function SkyBackdrop({ day, code, celestial, cover, wind = 0, direction =
 }
 
 /** A light SVG trail and a positioned disc; no new canvas or animation loop. */
-function OrbitBody({ body, kind, phase, rotation }: {
-  body: CelestialBody; kind: "sun" | "moon"; phase: number; rotation: number;
+function OrbitBody({ body, kind, phase, rotation, trail = true }: {
+  body: CelestialBody; kind: "sun" | "moon"; phase: number; rotation: number; trail?: boolean;
 }) {
   const point = orbitPoint(body.progress);
   const style = {
     "--orbit-x": point.x,
     "--orbit-drop": `${1 - point.arch}rem`,
-    "--orbit-strength": 0.45 + point.arch * 0.55,
     "--orbit-scale": 0.85 + point.arch * 0.15,
   } as CSSProperties;
   return <>
-    {!body.continuous ? <svg className={`sky-orbit-trail is-${kind}`} viewBox="0 0 1000 100" preserveAspectRatio="none">
+    {!body.continuous && trail ? <svg className={`sky-orbit-trail is-${kind}`} viewBox="0 0 1000 100" preserveAspectRatio="none">
       <path d="M 0 87.5 Q 500 -12.5 1000 87.5" pathLength="1" />
     </svg> : null}
     <div className={`sky-orbit-body is-${kind}${point.arch < 0.25 ? " is-horizon" : ""}`}

@@ -1268,7 +1268,7 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
   display: grid;
   place-items: center;
   transform: translate(-50%, -50%) scale(var(--orbit-scale));
-  opacity: var(--orbit-strength);
+  opacity: 1;
   pointer-events: none;
   transition: left 1.2s linear, top 1.2s linear, opacity 1.2s linear;
 }
@@ -1287,12 +1287,12 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
   height: 2rem;
   overflow: visible;
   pointer-events: none;
-  opacity: 0.16;
+  opacity: 0.08;
   fill: none;
   stroke: #f6c56b;
   stroke-width: 0.7;
 }
-.sky-orbit-trail.is-moon { stroke: #bbd9f4; opacity: 0.1; }
+.sky-orbit-trail.is-moon { stroke: #bbd9f4; opacity: 0.06; }
 .sky-orbit-trail path { vector-effect: non-scaling-stroke; }
 @media (prefers-reduced-motion: reduce) {
   .sky-orbit-body { transition: none; }
