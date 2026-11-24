@@ -18,9 +18,10 @@ const server=createServer(async(req,res)=>{
 await new Promise(r=>server.listen(8765,'127.0.0.1',r));
 
 let browser;
+let nightBackground;
 try {
 browser=await chromium.launch({headless:true,args:['--no-sandbox']});
-for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['partly',0,55,true],['overcast',0,93,true],['night',0,55,false],['rain',61,76,true]]){
+for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['partly',0,55,true],['overcast',0,93,true],['night',0,55,false],['rain',61,76,true],['night-clear',0,3,false],['night-thin',0,24,false],['night-overcast',0,93,false],['night-storm',95,90,false]]){
  const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,reducedMotion:'reduce'});
  const page=await ctx.newPage(); const now=Date.parse(`2026-11-23T${day?'10':'20'}:00:00Z`);
  await page.clock.setFixedTime(now);
@@ -35,10 +36,10 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto('http://127.0.0.1:8765');
  await page.locator('[data-sky-hero]').waitFor(); await page.evaluate(()=>document.fonts.ready);
- const expected={clear:'صافٍ',thin:'صافية غالبًا',partly:'غائم جزئيًا',overcast:'غائم',night:'غائم جزئيًا',rain:'مطر'};
+ const expected={clear:'صافٍ',thin:'صافية غالبًا',partly:'غائم جزئيًا',overcast:'غائم',night:'غائم جزئيًا',rain:'مطر','night-clear':'صافٍ','night-thin':'صافية غالبًا','night-overcast':'غائم','night-storm':'عاصفة رعدية'};
  assert.ok((await page.locator('[data-sky-hero]').innerText()).includes(expected[name]),name+' description');
  const cloudCount=await page.locator('.sky-clouds').count();
- assert.equal(cloudCount,name==='clear'?0:1,name+' single cloud renderer');
+ assert.equal(cloudCount,name==='clear'||name==='night-clear'?0:1,name+' single cloud renderer');
  if(cloudCount){
   const visible=await page.locator('.sky-clouds').evaluate(c=>{
    const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
@@ -47,6 +48,25 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
   });
   assert.ok(visible>0.005,name+' clouds must actually draw pixels');
  }
+ if(!day){
+  const scene=page.locator('.sky-scene');
+  assert.ok((await scene.getAttribute('class')).includes('is-night-sky'),name+' actual night');
+  const background=await scene.evaluate(e=>getComputedStyle(e).backgroundImage);
+  nightBackground ??= background;
+  assert.equal(background,nightBackground,name+' shared night sky across weather conditions');
+  const tones=[...background.matchAll(/rgb\((\d+), (\d+), (\d+)\)/g)];
+  assert.ok(tones.length>=2 && tones.every(([,r,g,b])=>0.2126*Number(r)+0.7152*Number(g)+0.0722*Number(b)<75),name+' dark night sky');
+  if(name==='night-overcast'||name==='night-storm'){
+   const brightness=await page.locator('.sky-clouds').evaluate(c=>{
+    const px=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+    let luminance=0,weight=0;
+    for(let i=0;i<px.length;i+=4){const a=px[i+3]/255;weight+=a;luminance+=(0.2126*px[i]+0.7152*px[i+1]+0.0722*px[i+2])*a;}
+    return luminance/Math.max(1,weight);
+   });
+   assert.ok(brightness<120,name+' clouds retain a night palette');
+  }
+ }
+ assert.equal(await page.locator('.wx-qibla-refresh + p').evaluate(e=>getComputedStyle(e).fontSize),'13px','Mecca distance is one size smaller than the actual 14px baseline');
  assert.deepEqual(errors,[],name+' runtime errors');
  await page.screenshot({path:`sky-qa/${name}.png`});
  console.log(JSON.stringify({name,errors,description:await page.locator('[data-sky-hero]').innerText(),canvas:await page.locator('.sky-clouds').count()}));
