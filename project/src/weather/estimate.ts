@@ -1,3 +1,4 @@
+import { reconcileSkyCode } from "./skyCondition.ts";
 import type { AirQuality, DayPoint, GridField, HourPoint, Place, WeatherBundle } from "@/weather/types";
 import { solarDaylight } from "@/weather/astro";
 import { mercToLat, mercY } from "@/weather/grid";
@@ -81,10 +82,7 @@ function codeFor(temp: number, rain: number, cloud: number): number {
   if (rain >= 6) return temp <= 0.6 ? 75 : 65;
   if (rain >= 1.2) return temp <= 0.6 ? 73 : 63;
   if (rain >= 0.3) return temp <= 0.6 ? 71 : 61;
-  if (cloud > 85) return 3;
-  if (cloud > 45) return 2;
-  if (cloud > 18) return 1;
-  return 0;
+  return reconcileSkyCode(0, cloud);
 }
 
 function cloudFor(rain: number, lat: number): number {

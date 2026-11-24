@@ -32,7 +32,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const peek = useWeather((s) => s.peek);
   const here = useWeather((s) => s.here);
   const prefs = useWeather((s) => s.prefs);
-  const bundle = useWeather((s) => s.bundle);
+  const weatherBundle = useWeather((s) => s.bundle);
   const loading = useWeather((s) => s.loading);
   const error = useWeather((s) => s.error);
   const estimated = useWeather((s) => s.estimated);
@@ -44,6 +44,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
   const [compassLocating, setCompassLocating] = useState(false);
   const [qiblaFix, setQiblaFix] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
   const place = activePlace({ places, activeId, peek });
+  const bundle = weatherBundle?.placeId === place.id ? weatherBundle : null;
   // A GPS fix remains a preview, not a saved city. Include it in gesture
   // navigation when distinct from saved locations, without modifying places.
   const gpsPreview = here && !places.some((p) => {

@@ -28,6 +28,7 @@ export function WeatherApp() {
   const loadActive = useWeather((s) => s.loadActive);
   const prefs = useWeather((s) => s.prefs);
   const bundle = useWeather((s) => s.bundle);
+  const estimated = useWeather((s) => s.estimated);
   const here = useWeather((s) => s.here);
   const [herePack, setHerePack] = useState<{ place: NonNullable<typeof here>; bundle: WeatherBundle } | null>(null);
   const [tab, setTab] = useState<TabId>("home");
@@ -92,7 +93,7 @@ export function WeatherApp() {
   }, [here, bundle]);
 
   useEffect(() => {
-    if (!bundle) return;
+    if (!bundle || bundle.placeId !== place.id) return;
     const bridge = (window as unknown as { AndroidWidget?: { push?: (json: string) => void } }).AndroidWidget;
     if (!bridge?.push) return;
     bridge.push(JSON.stringify(widgetPayload(bundle, place, places, lang, prefs.temp, ui.dir === "rtl", herePack)));
@@ -122,7 +123,10 @@ export function WeatherApp() {
     return () => mq.removeEventListener("change", apply);
   }, []);
 
-  const daylight = daylightNow(clock, place.lat, place.lon, bundle?.daily, bundle?.hourly);
+  // A scene is atomic: never borrow any field from another city, or animate
+  // guessed weather while a real snapshot for the selected city is loading.
+  const sky = !estimated && bundle?.placeId === place.id ? bundle : null;
+  const daylight = daylightNow(clock, place.lat, place.lon, sky?.daily, sky?.hourly);
   const light =
     prefs.theme === "light" ||
     (prefs.theme === "system" && !systemDark) ||
@@ -179,14 +183,15 @@ export function WeatherApp() {
   }, [hydrated, bundle?.placeId, place.id, tab, prefs.dataSaver]);
 
   const showMap = tab === "map";
-  const code = bundle?.placeId === place.id ? bundle.current.code : 1;
+  const code = sky?.current.code ?? 0;
 
   return (
     <div className={`relative flex h-dvh flex-col overflow-hidden ${light ? "" : "is-night"}`}>
-      <SkyBackdrop day={daylight} code={code} cover={bundle?.current.cloud ?? 50}
-        wind={bundle?.current.wind ?? 0} direction={bundle?.current.dir ?? 0}
-        heroWeather={tab === "home" && !placesOpen && bundle?.placeId === place.id}
-        animateClouds={tab === "home" && !placesOpen}
+      <SkyBackdrop key={place.id} day={daylight} code={code} cover={sky?.current.cloud ?? 0}
+        showClouds={sky !== null}
+        wind={sky?.current.wind ?? 0} direction={sky?.current.dir ?? 0}
+        heroWeather={tab === "home" && !placesOpen && sky !== null}
+        animateClouds={tab === "home" && !placesOpen && sky !== null}
         phase={moonState(clock).frac} moonVisible={moonAboveHorizon(place.lat, place.lon, clock)} />
       <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
         <section className={`under-status mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col ${tab === "map" ? "hidden" : ""}`}>

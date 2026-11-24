@@ -66,10 +66,90 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
    assert.ok(brightness<120,name+' clouds retain a night palette');
   }
  }
- assert.equal(await page.locator('.wx-qibla-refresh + p').evaluate(e=>getComputedStyle(e).fontSize),'13px','Mecca distance is one size smaller than the actual 14px baseline');
+ assert.equal(await page.locator('.wx-qibla-refresh + p').evaluate(e=>getComputedStyle(e).fontSize),'12px','Mecca distance uses the requested size');
+ const distance=page.locator('.wx-qibla-distance');
+ assert.equal(await distance.locator('span').evaluate(e=>getComputedStyle(e).display),'block','distance label on first line');
+ assert.equal(await distance.locator('bdi').evaluate(e=>getComputedStyle(e).display),'block','distance value on second line');
+ assert.ok(await distance.evaluate(e=>e.children[1].getBoundingClientRect().top>e.children[0].getBoundingClientRect().top),'two distinct distance lines');
  assert.deepEqual(errors,[],name+' runtime errors');
  await page.screenshot({path:`sky-qa/${name}.png`});
  console.log(JSON.stringify({name,errors,description:await page.locator('[data-sky-hero]').innerText(),canvas:await page.locator('.sky-clouds').count()}));
+ await ctx.close();
+}
+
+// Replay the reported cloudy-city -> clear-city transition with real UI input.
+// Observe DOM commits as well as animation frames, including a held network response.
+{
+ const now=Date.parse('2026-11-24T02:15:00Z');
+ const cloudy={id:'40.71,-74.01',name:'مدينة غائمة',nameEn:'Cloudy city',country:'الولايات المتحدة',countryEn:'United States',admin:'',lat:40.71,lon:-74.01,primary:true};
+ const clear={id:'23.59,58.38',name:'حي العرفان',nameEn:'Hay Al Irfan',country:'عُمان',countryEn:'Oman',admin:'',lat:23.59,lon:58.38,primary:false};
+ const pending={...clear,id:'23.57,58.25',name:'موقع بلا ذاكرة',lat:23.57,lon:58.25};
+ const makeBundle=(place,code,cloud)=>{
+  const h={t:now,temp:code===3?11:22,feels:22,precip:0,pop:0,code,wind:8,gust:12,uv:0,isDay:false,pressure:1010};
+  const sunrise=Date.parse(place.lon<0?'2026-11-24T11:50:00Z':'2026-11-24T02:26:00Z');
+  const sunset=Date.parse(place.lon<0?'2026-11-24T21:30:00Z':'2026-11-24T13:20:00Z');
+  return {placeId:place.id,timezone:place.lon<0?'America/New_York':'Asia/Muscat',offset:place.lon<0?-18000:14400,fetchedAt:now,forecastSource:'open-meteo-best-match',current:{...h,humidity:55,cloud,dir:120,visibility:10000},hourly:Array.from({length:48},(_,i)=>({...h,t:now+i*3600000})),daily:Array.from({length:15},(_,i)=>({t:Date.parse('2026-11-24T08:00:00Z')+i*86400000,code,tmax:30,tmin:20,sunrise:sunrise+i*86400000,sunset:sunset+i*86400000,precip:0,pop:0,uv:5,wind:8})),air:null,marine:null,marineVersion:3};
+ };
+ const entries=Object.fromEntries([cloudy,clear].map(p=>[p.id,{at:now,bundle:makeBundle(p,p===cloudy?3:0,p===cloudy?100:0)}]));
+ const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,reducedMotion:'reduce'});
+ const page=await ctx.newPage();await page.clock.setFixedTime(now);
+ await page.addInitScript(({cloudy,clear,pending,entries})=>{
+  localStorage.setItem('myweather-cache-v6',JSON.stringify({places:[cloudy,clear,pending],activeId:cloudy.id,entries}));
+  localStorage.setItem('myweather-prefs-v2',JSON.stringify({lang:'ar',theme:'sun',refreshMin:0,alerts:false,particles:'low'}));
+ },{cloudy,clear,pending,entries});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ let release,started,finished;
+ const gate=new Promise(r=>release=r),requestStarted=new Promise(r=>started=r),requestFinished=new Promise(r=>finished=r);
+ await page.route('**/*',async route=>{
+  const url=new URL(route.request().url());
+  if(url.origin==='http://127.0.0.1:8765')return route.continue();
+  if(url.hostname==='api.open-meteo.com'&&url.pathname==='/v1/forecast'){
+   started();await gate;
+   const b=makeBundle(pending,0,0);
+   const stamp=t=>new Date(t).toISOString();
+   const payload={timezone:'Asia/Muscat',utc_offset_seconds:14400,current:{time:stamp(now),temperature_2m:22,apparent_temperature:22,relative_humidity_2m:55,precipitation:0,weather_code:0,cloud_cover:0,pressure_msl:1010,wind_speed_10m:8,wind_gusts_10m:12,wind_direction_10m:120,is_day:0},hourly:{time:b.hourly.map(h=>stamp(h.t)),temperature_2m:b.hourly.map(()=>22),weather_code:b.hourly.map(()=>0),cloud_cover:b.hourly.map(()=>0)},daily:{time:b.daily.map(d=>stamp(d.t)),weather_code:b.daily.map(()=>0),temperature_2m_max:b.daily.map(()=>30),temperature_2m_min:b.daily.map(()=>20),sunrise:b.daily.map(d=>stamp(d.sunrise)),sunset:b.daily.map(d=>stamp(d.sunset))}};
+   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(payload)}).catch(()=>{});finished();return;
+  }
+  return route.abort();
+ });
+ await page.goto('http://127.0.0.1:8765');await page.locator('[data-sky-hero]').waitFor();
+ assert.equal(await page.locator('.sky-clouds').count(),1,'initial cloudy city');
+ await page.evaluate(()=>{
+  window.__skyLeaks=[];window.__watchSky=true;
+  const inspect=()=>{
+   const title=document.querySelector('header')?.textContent||'';
+   if((title.includes('حي العرفان')||title.includes('موقع بلا ذاكرة')) && document.querySelector('.sky-clouds'))window.__skyLeaks.push(title);
+  };
+  window.__skyObserver=new MutationObserver(inspect);
+  window.__skyObserver.observe(document.body,{subtree:true,childList:true,attributes:true});
+  const tick=()=>{inspect();if(window.__watchSky)requestAnimationFrame(tick);};requestAnimationFrame(tick);
+ });
+ const choose=async name=>{
+  await page.getByRole('button',{name:'اختيار المدينة',exact:true}).click();
+  await page.getByText(name,{exact:true}).click();
+  await page.locator('header').filter({hasText:name}).waitFor();
+ };
+ for(let i=0;i<4;i++){
+  await choose(clear.name);await page.waitForFunction(()=>document.querySelector('[data-sky-hero]')?.textContent.includes('صافٍ'));
+  assert.equal(await page.locator('.sky-clouds').count(),0,'cached clear city has no ghost cloud');
+  await choose(cloudy.name);await page.locator('.sky-clouds').waitFor();
+ }
+ await choose(pending.name);await requestStarted;
+ await page.waitForFunction(()=>document.querySelector('[data-sky-hero]')?.textContent.includes('صافية غالبًا'));
+ assert.equal(await page.locator('.sky-clouds').count(),0,'estimated state cannot animate guessed clouds');
+ assert.equal(await page.locator('.wx-hero-atmosphere').count(),0,'estimated state cannot animate guessed precipitation');
+ await page.screenshot({path:'sky-qa/transition-pending.png'});
+ release();await requestFinished;
+ await page.waitForFunction(()=>document.querySelector('[data-sky-hero]')?.textContent.includes('صافٍ'));
+ assert.equal(await page.locator('.sky-clouds').count(),0,'real clear result replaces neutral pending sky');
+ await choose(cloudy.name);await page.locator('.sky-clouds').waitFor();
+ await choose(clear.name);await page.waitForFunction(()=>document.querySelector('[data-sky-hero]')?.textContent.includes('صافٍ'));
+ await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+ const leaks=await page.evaluate(()=>{window.__watchSky=false;window.__skyObserver.disconnect();return window.__skyLeaks;});
+ assert.deepEqual(leaks,[],'no ghost clouds at DOM commits or animation frames');
+ assert.deepEqual(errors,[],'switching runtime errors');
+ await page.screenshot({path:'sky-qa/transition-clear.png'});
+ console.log(JSON.stringify({scenario:'rapid-city-and-delayed-forecast-transition',switches:12,leaks:leaks.length,errors}));
  await ctx.close();
 }
 } finally {await browser?.close();await new Promise(r=>server.close(r));}
