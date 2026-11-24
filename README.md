@@ -13,6 +13,14 @@
   <a href="#العربية">العربية</a> · <a href="#english">English</a> · <a href="https://nabdhserv.net/">NabdhServ.Net</a>
 </p>
 
+<h3 align="center">
+  <a href="https://t.me/TaqsiApp">📲 تنزيل التطبيق وآخر التحديثات — قناة طقسي على تليجرام</a>
+</h3>
+<p align="center">
+  <strong><a href="https://t.me/TaqsiApp">Download the app &amp; get the latest updates — Taqsi on Telegram</a></strong><br>
+  <a href="https://t.me/TaqsiApp">@TaqsiApp</a>
+</p>
+
 ---
 
 <div dir="rtl">
@@ -20,6 +28,10 @@
 ## العربية
 
 **طقسي** تطبيق أندرويد يجمع حالة الطقس والتوقعات والخرائط التفاعلية في واجهة زجاجية أنيقة. تابع طقس موقعك والمدن التي تهمك، واستكشف المطر والسحب والرياح، وشاهد الشمس والقمر يتقدمان على مسارهما مع مرور الوقت في المدينة المختارة.
+
+### تنزيل التطبيق وآخر التحديثات
+
+تابع **[قناة طقسي على تليجرام — @TaqsiApp](https://t.me/TaqsiApp)** لتنزيل التطبيق والاطلاع على أحدث الإصدارات والتحديثات.
 
 ### أبرز المميزات
 
@@ -79,6 +91,10 @@ Screenshots show the actual app interface using fixed illustrative data. Their w
 ## English
 
 **MyWeather (Taqsi)** is an Android weather app that brings current conditions, forecasts and interactive maps into an elegant glass-inspired interface. Follow your location and favorite cities, explore rain, clouds and wind, and watch the Sun and Moon progress through the sky as time passes in your selected city.
+
+### Download & latest updates
+
+Visit **[the Taqsi Telegram channel — @TaqsiApp](https://t.me/TaqsiApp)** to download the app and follow the latest releases and updates.
 
 ### Features
 
