@@ -1,3 +1,4 @@
+import { shadowPath } from "@/weather/moonDisc";
 import { orbitPoint, type CelestialBody, type CelestialSky } from "@/weather/celestialMotion";
 import { useEffect, useRef, type CSSProperties } from "react";
 import moonFace from "@/assets/moon-face.jpg";
@@ -754,30 +755,6 @@ function OrbitBody({ body, kind, phase, rotation, trail = true }: {
         <MoonDisc phase={phase} sizeClass="sky-moon" shadeId="sky" rotation={rotation} shadeOpacity={0.95} />}
     </div>
   </>;
-}
-
-/** Shadow of the unlit side. Phase 0 = new, 0.25 = first quarter (right lit), 0.5 = full, 0.75 = last quarter (left lit). */
-function shadowPath(phase: number): string {
-  const p = ((phase % 1) + 1) % 1;
-  if (Math.abs(p - 0.5) < 0.02) return "";
-  const r = 50;
-  const k = Math.cos(p * Math.PI * 2);
-  const samples = 48;
-  const term: string[] = [];
-  const limb: string[] = [];
-  const darkOnRight = p > 0.5;
-  for (let i = 0; i <= samples; i++) {
-    const yy = 50 - r * Math.cos((Math.PI * i) / samples);
-    const dy = yy - 50;
-    const half = Math.sqrt(Math.max(0, r * r - dy * dy));
-    const tx = 50 + k * half;
-    term.push(`${tx.toFixed(2)} ${yy.toFixed(2)}`);
-    const reach = Math.min(86, half + 36);
-    const lx = darkOnRight ? 50 + reach : 50 - reach;
-    limb.push(`${lx.toFixed(2)} ${yy.toFixed(2)}`);
-  }
-  limb.reverse();
-  return `M ${term.join(" L ")} L ${limb.join(" L ")} Z`;
 }
 
 export function MoonDisc({ phase, sizeClass, shadeId, rotation = 0, shadeOpacity = 0.7 }: { phase: number; sizeClass: string; shadeId: string; rotation?: number; shadeOpacity?: number }) {

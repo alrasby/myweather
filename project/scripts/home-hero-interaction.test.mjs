@@ -100,11 +100,11 @@ test("15-day card receives subtle polish without changing its structure or basel
   assert.match(effectiveGlass, /\.wx-card\s*\{[^}]*backdrop-filter:\s*none/s);
 });
 
-test("visible version stays 1.0.0 while upgrade-safe Android code advances to 89", () => {
+test("visible version stays 1.0.0 while upgrade-safe Android code advances to 90", () => {
   const gradle = read("project/android/app/build.gradle");
   const workflow = read(".github/workflows/android-ci.yml");
-  assert.ok(gradle.includes('versionCode 89') && gradle.includes('versionName "1.0.0"'));
-  assert.ok(workflow.includes("versionCode='89' versionName='1.0.0'"));
+  assert.ok(gradle.includes('versionCode 90') && gradle.includes('versionName "1.0.0"'));
+  assert.ok(workflow.includes("versionCode='90' versionName='1.0.0'"));
 });
 
 test("Android Auto weather uses trusted Car App templates and the existing forecast snapshot", () => {
@@ -370,7 +370,7 @@ test("cloud field uses seamless single-pass pattern and moon respects the city's
   assert.ok(!sky.includes("const overlap = 1 / dpr"), "no double-alpha cloud seam");
   assert.ok(sky.includes("celestial.moon"), "moon visibility comes from its actual horizon pass, including daylight");
   assert.ok(app.includes("celestialMotion(place.lat, place.lon, clock, sky?.daily)"));
-  assert.ok(astro.includes("return moonAlt(now, lat, lon) > 0"));
+  assert.ok(astro.includes("return moonAlt(now, lat, lon) > rad(0.13)"));
 });
 
 test("home sky renders gently but never competes with weather map tile decoding offscreen", () => {
