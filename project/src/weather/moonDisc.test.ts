@@ -40,3 +40,22 @@ test("invalid dates never throw in lunar event or illumination functions", () =>
   assert.deepEqual(moonRiseSet(23,58,1e99), {rise:null,set:null});
   assert.equal(moonState(NaN).illum,0);
 });
+
+
+// Fixed independent Swiss Ephemeris 2.10.03/Moshier outputs, generated with
+// rise_trans (standard upper-limb rise/set, sea level, pressure auto, 15C).
+// UTC calendar dates; phase illumination sampled at 12:00 UTC.
+// No ephemeris package or network is used by the app or these tests.
+test("four global cities and four phases agree with independent ephemeris fixtures", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const fixtures = JSON.parse(await readFile(new URL("./lunarReference.json", import.meta.url), "utf8"));
+  for (const f of fixtures) {
+    const now = Date.parse(f.date + "T12:00:00Z");
+    const actual = moonRiseSet(f.lat, f.lon, now, "UTC");
+    for (const k of ["rise", "set"] as const) {
+      if (f[k] === null) assert.equal(actual[k], null, f.city + " no event on UTC date");
+      else assert.ok(actual[k] !== null && Math.abs(actual[k]! - f[k]) < 120_000, f.city + " " + f.date + " " + k);
+    }
+    assert.ok(Math.abs(moonState(now).illum - f.illum) < 0.002, f.date + " illuminated fraction");
+  }
+});
