@@ -1,8 +1,18 @@
 /** حسابات فلكية محلية: قوس الشمس، عمر القمر، اتجاه الضغط. */
 
 const SYNODIC = 29.530588853;
-/** محاق معروف: 6 يناير 2000، 18:14 UTC. */
-const MOON_EPOCH = Date.UTC(2000, 0, 6, 18, 14, 0);
+/** Schlyter orbital elements use 1999-12-31 00:00 UTC, NOT J2000 noon.
+ * Reference: https://stjarnhimlen.se/comp/ppcomp.html sections 3, 9, 15. */
+const ORBIT_EPOCH = Date.UTC(1999, 11, 31);
+function sunLongitude(ms: number): number {
+  const d = (ms - ORBIT_EPOCH) / 86_400_000;
+  const w = rad(282.9404 + 4.70935e-5 * d);
+  const e = 0.016709 - 1.151e-9 * d;
+  const m = rad(356.0470 + 0.9856002585 * d);
+  let E = m;
+  for (let k = 0; k < 8; k++) E = m + e * Math.sin(E);
+  return Math.atan2(Math.sqrt(1 - e * e) * Math.sin(E), Math.cos(E) - e) + w;
+}
 
 export function sunProgress(nowMs: number, sunriseMs: number, sunsetMs: number): number {
   if (!Number.isFinite(sunriseMs) || !Number.isFinite(sunsetMs) || sunsetMs <= sunriseMs) return 0;
@@ -80,11 +90,12 @@ export function daylightNow(
 }
 
 export function moonState(nowMs: number): { age: number; frac: number; illum: number } {
-  const days = (nowMs - MOON_EPOCH) / 86_400_000;
-  const age = ((days % SYNODIC) + SYNODIC) % SYNODIC;
-  const frac = age / SYNODIC;
-  const illum = (1 - Math.cos(2 * Math.PI * frac)) / 2;
-  return { age, frac, illum };
+  if (!Number.isFinite(new Date(nowMs).getTime())) return { age: 0, frac: 0, illum: 0 };
+  const moon = moonEquatorial(nowMs);
+  const elongation = ((moon.longitude - sunLongitude(nowMs)) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  const frac = elongation / (2 * Math.PI);
+  const illum = (1 - Math.cos(elongation) * Math.cos(moon.latitude)) / 2;
+  return { age: frac * SYNODIC, frac, illum };
 }
 
 export function pressureDelta(current: number, past: number | null): number {
@@ -102,8 +113,8 @@ function rad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-function moonEquatorial(ms: number): { ra: number; dec: number } {
-  const d = (ms - Date.UTC(2000, 0, 1, 12, 0, 0)) / 86_400_000;
+function moonEquatorial(ms: number): { ra: number; dec: number; longitude: number; latitude: number } {
+  const d = (ms - ORBIT_EPOCH) / 86_400_000;
   const N = rad(125.1228 - 0.0529538083 * d);
   const i = rad(5.1454);
   const w = rad(318.0634 + 0.1643573223 * d);
@@ -119,13 +130,23 @@ function moonEquatorial(ms: number): { ra: number; dec: number } {
   const xh = r * (Math.cos(N) * Math.cos(v + w) - Math.sin(N) * Math.sin(v + w) * Math.cos(i));
   const yh = r * (Math.sin(N) * Math.cos(v + w) + Math.cos(N) * Math.sin(v + w) * Math.cos(i));
   const zh = r * Math.sin(v + w) * Math.sin(i);
-  const lonecl = Math.atan2(yh, xh);
-  const latecl = Math.atan2(zh, Math.hypot(xh, yh));
+  const msun = rad(356.0470 + 0.9856002585 * d);
+  const wsun = rad(282.9404 + 4.70935e-5 * d);
+  const L = M + w + N, D = L - msun - wsun, F = L - N;
+  const sin = Math.sin;
+  const lonecl = Math.atan2(yh, xh) + rad(
+    -1.274*sin(M-2*D) + 0.658*sin(2*D) - 0.186*sin(msun)
+    -0.059*sin(2*M-2*D) - 0.057*sin(M-2*D+msun) + 0.053*sin(M+2*D)
+    +0.046*sin(2*D-msun) + 0.041*sin(M-msun) - 0.035*sin(D)
+    -0.031*sin(M+msun) - 0.015*sin(2*F-2*D) + 0.011*sin(M-4*D));
+  const latecl = Math.atan2(zh, Math.hypot(xh, yh)) + rad(
+    -0.173*sin(F-2*D) - 0.055*sin(M-F-2*D) - 0.046*sin(M+F-2*D)
+    +0.033*sin(F+2*D) + 0.017*sin(2*M+F));
   const obl = rad(23.4393 - 3.563e-7 * d);
   const xeq = Math.cos(lonecl) * Math.cos(latecl);
   const yeq = Math.sin(lonecl) * Math.cos(latecl) * Math.cos(obl) - Math.sin(latecl) * Math.sin(obl);
   const zeq = Math.sin(lonecl) * Math.cos(latecl) * Math.sin(obl) + Math.sin(latecl) * Math.cos(obl);
-  return { ra: Math.atan2(yeq, xeq), dec: Math.atan2(zeq, Math.hypot(xeq, yeq)) };
+  return { ra: Math.atan2(yeq, xeq), dec: Math.atan2(zeq, Math.hypot(xeq, yeq)), longitude: lonecl, latitude: latecl };
 }
 
 function moonAlt(ms: number, lat: number, lon: number): number {
@@ -143,9 +164,9 @@ function moonAlt(ms: number, lat: number, lon: number): number {
  * Reuses the same lunar coordinates already used for moonrise/set instead of
  * treating every night as a moonlit night. */
 export function moonAboveHorizon(lat: number, lon: number, now: number): boolean {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(now) ||
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(new Date(now).getTime()) ||
       Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
-  return moonAlt(now, lat, lon) > 0;
+  return moonAlt(now, lat, lon) > rad(0.13);
 }
 
 /** Moon rise/set in the *place's current local calendar day*, not merely
@@ -158,7 +179,7 @@ export function moonAboveHorizon(lat: number, lon: number, now: number): boolean
 export function moonRiseSet(
   lat: number, lon: number, now: number, timeZone = "UTC",
 ): { rise: number | null; set: number | null } {
-  if (![lat, lon, now].every(Number.isFinite) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+  if (![lat, lon, now].every(Number.isFinite) || !Number.isFinite(new Date(now).getTime()) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
     return { rise: null, set: null };
   }
   let dateFormatter: Intl.DateTimeFormat;

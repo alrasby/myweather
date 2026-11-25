@@ -20,7 +20,7 @@ await new Promise(r=>server.listen(8765,'127.0.0.1',r));
 let browser;
 let nightBackground;
 try {
-browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH||undefined,args:['--no-sandbox']});
 for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['partly',0,55,true],['overcast',0,93,true],['night',0,55,false],['rain',61,76,true],['night-clear',0,3,false],['night-thin',0,24,false],['night-overcast',0,93,false],['night-storm',95,90,false]]){
  const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,reducedMotion:'reduce'});
  const page=await ctx.newPage(); const now=Date.parse(`2026-11-23T${day?'10':'20'}:00:00Z`);
@@ -77,6 +77,32 @@ for(const [name,code,cloud,day] of [['clear',0,3,true],['thin',0,24,true],['part
  await ctx.close();
 }
 
+
+// Pixel-level regression: November 25 waning gibbous stays illuminated.
+{
+ const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
+ const page=await ctx.newPage();
+ await page.clock.setFixedTime(Date.parse('2026-11-25T14:44:00Z'));
+ await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
+ await page.goto('http://127.0.0.1:8765');
+ await page.locator('.sky-moon img').waitFor();
+ const moon=page.locator('.sky-moon');
+ const lit=await moon.locator('img').evaluate(async(img)=>{
+   await img.decode();
+   const c=document.createElement('canvas');c.width=100;c.height=100;
+   const g=c.getContext('2d');g.drawImage(img,0,0,100,100);
+   // Apply the actual production SVG shadow, not a duplicate phase formula.
+   const svg=img.parentElement.querySelector('svg');
+   if(svg){const overlay=new Image();overlay.src='data:image/svg+xml,'+encodeURIComponent(new XMLSerializer().serializeToString(svg));await overlay.decode();g.drawImage(overlay,0,0,100,100);}
+   const p=g.getImageData(0,0,100,100).data;let sum=0,n=0;
+   for(let y=20;y<80;y++)for(let x=20;x<80;x++){const i=(y*100+x)*4;sum+=p[i]*.2126+p[i+1]*.7152+p[i+2]*.0722;n++;}
+   return sum/n;
+ });
+ assert.ok(lit>80,'near-full Moon must retain visible surface detail, measured '+lit);
+ await page.screenshot({path:'sky-qa/moon-waning-gibbous.png'});
+ console.log(JSON.stringify({moonWaningGibbousLuminance:lit}));
+ await ctx.close();
+}
 
 // Real-time solar progression: distinct fresh contexts cannot inherit another city's orbit.
 const solarPositions=new Map();
