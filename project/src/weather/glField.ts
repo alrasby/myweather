@@ -1,3 +1,4 @@
+import { completeWindHeatGrid, windHeatCoversView } from "./windHeatCoverage";
 import type { Map as LeafletMap } from "leaflet";
 import { nearestWorldLongitude, windScreenStepDegrees } from "@/weather/windProjection";
 import { usablePrecipitationGrid } from "@/weather/rainRasterQuality";
@@ -291,6 +292,7 @@ export class FieldEngine {
   private blank: WebGLTexture | null = null;
   private textures = new Map<string, WebGLTexture>();
   private global: GridField | null = null;
+  private windHeatFallback: GridField | null = null;
   private detail: GridField | null = null;
   private rainWorld: GridField | null = null;
   private rainView: GridField | null = null;
@@ -392,6 +394,9 @@ export class FieldEngine {
   }
 
   setGlobal(grid: GridField | null) {
+    // Retain a wind/heat-only fallback; the rain-facing global stays unchanged.
+    if (!grid) this.windHeatFallback = null;
+    else if (!this.windHeatFallback && this.global) this.windHeatFallback = this.global;
     if (this.global?.id !== grid?.id) this.dropTextures();
     this.global = grid;
     if (grid) this.hourMax = Math.max(0, grid.hours - 1);
@@ -732,7 +737,12 @@ export class FieldEngine {
       if (usable(this.global) && this.detailFillsView(this.global)) return this.global;
       return null;
     }
-    if (this.detail && this.detailFillsView(this.detail)) return this.detail;
+    // Only wind and temperature reach this branch. Rain selection above is unchanged.
+    if (this.global && completeWindHeatGrid(this.global)) this.windHeatFallback = this.global;
+    const visible = (g: GridField) => !this.frameBox || windHeatCoversView(g, this.frameBox, this.hour);
+    if (this.detail && this.detailFillsView(this.detail) && visible(this.detail)) return this.detail;
+    if (this.global && visible(this.global)) return this.global;
+    if (this.windHeatFallback && visible(this.windHeatFallback)) return this.windHeatFallback;
     return this.global ?? this.detail;
   }
 

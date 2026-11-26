@@ -300,4 +300,59 @@ for(const [name,width,height,scale,inset,lang] of [
  console.log(JSON.stringify({scenario:'navigation-clearance',name,homeGap,settingsGap,mapGap,overflow}));
  await ctx.close();
 }
+
+// A multi-point provider may return only southern rows. Those batches pass the
+// fetcher's existing global threshold; they must not blank wind/heat in the north.
+{
+ const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
+ const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>{
+  localStorage.setItem('myweather-prefs-v2',JSON.stringify({lang:'ar',theme:'dark',mapLayer:1,mapHours:24,refreshMin:0,dataSaver:false,particles:'low',storms:false}));
+ });
+ let gridCalls=0;
+ await page.route('**/*',async r=>{
+  const url=new URL(r.request().url());
+  if(url.origin==='http://127.0.0.1:8765')return r.continue();
+  if(url.hostname==='api.open-meteo.com'&&url.searchParams.get('latitude')?.includes(',')){
+   gridCalls++;
+   const lats=url.searchParams.get('latitude').split(',').map(Number),lons=url.searchParams.get('longitude').split(',').map(Number);
+   const hours=Number(url.searchParams.get('forecast_hours')||24),start=Math.floor(Date.now()/3600000)*3600000;
+   const blocks=lats.map((lat,i)=>{
+    const values=v=>Array.from({length:hours},()=>lat<0?v:null);
+    return {latitude:lat,longitude:lons[i],hourly:{time:Array.from({length:hours},(_,h)=>new Date(start+h*3600000).toISOString()),
+     temperature_2m:values(20),wind_speed_10m:values(24),wind_direction_10m:values(90),
+     wind_u_component_10m:values(-24),wind_v_component_10m:values(0),precipitation:values(0)}};
+   });
+   return r.fulfill({json:blocks});
+  }
+  return r.abort();
+ });
+ await page.goto('http://127.0.0.1:8765');
+ await page.locator('.wx-bottom-nav button').nth(1).click();await page.locator('.map-bar').waitFor();
+ await page.waitForFunction(()=>!document.querySelector('.map-sheet > .mx-3'));
+ assert.ok(gridCalls>=4,'partial API fixture actually replaced the first global request');
+ for(const kind of [1,0]){
+  await page.locator('.map-tools > button').nth(kind).click();
+  await page.waitForFunction(()=>document.querySelector('.wx-map-playback-meta [role=status]')?.textContent.trim()!=='—');
+  const pixels=await page.locator('.wx-field').evaluate(c=>new Promise(resolve=>requestAnimationFrame(()=>{
+   const gl=c.getContext('webgl2');if(!gl)return resolve({renderer:'2d',alpha:[]});
+   const alpha=[];
+   for(const x of [.25,.5,.75])for(const y of [.25,.5,.75]){
+    const p=new Uint8Array(4);gl.readPixels(Math.floor(c.width*x),Math.floor(c.height*y),1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);alpha.push(p[3]);
+   }
+   resolve({renderer:'webgl2',alpha});
+  })));
+  assert.equal(pixels.renderer,'webgl2','exercise production WebGL path');
+  assert.ok(pixels.alpha.every(a=>a>80),'wind/heat must cover northern viewport instead of a bottom strip '+JSON.stringify(pixels));
+  if(kind===0)await page.waitForFunction(()=>{
+   const c=document.querySelector('.wx-parts'),p=c?.getContext('2d')?.getImageData(0,0,c.width,c.height).data;
+   if(!p)return false;let count=0;for(let i=3;i<p.length;i+=4)if(p[i]>30)count++;
+   return count>100;
+  });
+  await page.screenshot({path:`sky-qa/wind-heat-partial-source-${kind}.png`});
+  console.log(JSON.stringify({scenario:'partial-source-wind-heat',kind,gridCalls,pixels,reading:await page.locator('.wx-map-playback-meta [role=status]').innerText()}));
+ }
+ assert.deepEqual(errors,[],'wind/heat partial-source runtime errors');
+ await ctx.close();
+}
 } finally {await browser?.close();await new Promise(r=>server.close(r));}
