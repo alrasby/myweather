@@ -42,7 +42,7 @@ export function WeatherApp() {
     const measure = () => shell.style.setProperty("--wx-nav-occupied", `${Math.ceil(navigation.getBoundingClientRect().height)}px`);
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(navigation);
+    observer.observe(navigation, { box: "border-box" });
     return () => observer.disconnect();
   }, []);
   const [tab, setTab] = useState<TabId>("home");
