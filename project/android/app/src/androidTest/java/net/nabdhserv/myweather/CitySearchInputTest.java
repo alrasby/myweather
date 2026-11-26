@@ -70,6 +70,25 @@ public class CitySearchInputTest {
         assertTrue("InputConnection rejected composing text", accepted.get());
     }
 
+    /** A real pointer opens the picker without awaiting a JS click callback
+     * while Android is opening its native keyboard. */
+    private void tapCityPicker() throws Exception {
+        JSONArray rect = new JSONArray(evaluate("(() => {const r=document.querySelector("
+            + "'button[aria-label=\"Choose city\"],button[aria-label=\"اختيار المدينة\"]'"
+            + ").getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,devicePixelRatio];})()"));
+        int[] origin = new int[2];
+        instrumentation.runOnMainSync(() -> web.getLocationOnScreen(origin));
+        float x = origin[0] + (float) (rect.getDouble(0) * rect.getDouble(2));
+        float y = origin[1] + (float) (rect.getDouble(1) * rect.getDouble(2));
+        long at = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(at, at, MotionEvent.ACTION_DOWN, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(at, at + 50, MotionEvent.ACTION_UP, x, y, 0);
+        instrumentation.sendPointerSync(down);
+        instrumentation.sendPointerSync(up);
+        down.recycle();
+        up.recycle();
+    }
+
     @Test
     public void completeArabicNamesUpdateDuringNativeComposition() throws Exception {
         Context context = instrumentation.getTargetContext();
@@ -82,7 +101,7 @@ public class CitySearchInputTest {
                 web = activity.getBridge().getWebView();
             });
             awaitScript("Home did not mount", "!!document.querySelector('button[aria-label=\"Choose city\"],button[aria-label=\"اختيار المدينة\"]')");
-            evaluate("document.querySelector('button[aria-label=\"Choose city\"],button[aria-label=\"اختيار المدينة\"]').click()");
+            tapCityPicker();
             awaitScript("City search did not mount", "!!document.querySelector('input[type=search]')");
             String[][] cities = {
                 {"برلين", "Berlin"}, {"مدريد", "Madrid"}, {"برشلونة", "Barcelona"},
