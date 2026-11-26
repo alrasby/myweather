@@ -1300,10 +1300,11 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
 
 
 /* One measured reservation for every surface sharing the floating navigation.
-   The fallback covers the 48px bar, its border/padding, margin and device inset. */
+   The fallback covers the 48px bar, its border/padding, margin and device inset.
+   One pixel absorbs fractional scroll-height rounding so the visible gap stays >=2mm. */
 .wx-app {
   --wx-nav-occupied: calc(62px + max(0.65rem, env(safe-area-inset-bottom, 0px)));
-  --wx-bottom-clearance: calc(var(--wx-nav-occupied) + 2mm);
+  --wx-bottom-clearance: calc(var(--wx-nav-occupied) + 2mm + 1px);
 }
 .wx-bottom-clearance {
   padding-bottom: var(--wx-bottom-clearance);
