@@ -69,7 +69,7 @@ export function CitiesScreen({ lang, onClose }: { lang: Lang; onClose: () => voi
   },[q,base,local]);
 
   return (
-    <div className="wx-city-screen h-full overflow-y-auto px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)] pt-3">
+    <div className="wx-city-screen h-full overflow-y-auto px-3 wx-bottom-clearance pt-3">
       <header className="glass-bar sticky top-3 z-20 mb-4 flex items-center gap-2 rounded-full p-1.5">
         <button type="button" onClick={onClose} className="grid size-12 place-items-center rounded-full" aria-label={t(lang, "back")}>
           <ChevronLeft className="size-5 rtl:rotate-180" />

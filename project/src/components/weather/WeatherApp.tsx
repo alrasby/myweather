@@ -1,6 +1,6 @@
 import { celestialMotion } from "@/weather/celestialMotion";
 import { House, Map as MapIcon, Settings } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CitiesScreen } from "@/components/weather/CitiesScreen";
 import { HomeScreen } from "@/components/weather/HomeScreen";
 import { SettingsScreen } from "@/components/weather/SettingsScreen";
@@ -32,6 +32,19 @@ export function WeatherApp() {
   const estimated = useWeather((s) => s.estimated);
   const here = useWeather((s) => s.here);
   const [herePack, setHerePack] = useState<{ place: NonNullable<typeof here>; bundle: WeatherBundle } | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const navigationRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const shell = shellRef.current, navigation = navigationRef.current;
+    if (!shell || !navigation) return;
+    // Measure the whole occupied dock: actual bar height, margin and device inset.
+    // Observing the dock also handles font scaling and gesture/three-button insets.
+    const measure = () => shell.style.setProperty("--wx-nav-occupied", `${Math.ceil(navigation.getBoundingClientRect().height)}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(navigation);
+    return () => observer.disconnect();
+  }, []);
   const [tab, setTab] = useState<TabId>("home");
   const [placesOpen, setPlacesOpen] = useState(false);
   const [systemDark, setSystemDark] = useState(false);
@@ -203,7 +216,7 @@ export function WeatherApp() {
   const celestial = celestialMotion(place.lat, place.lon, clock, sky?.daily);
 
   return (
-    <div className={`relative flex h-dvh flex-col overflow-hidden ${light ? "" : "is-night"}`}>
+    <div ref={shellRef} className={`wx-app relative flex h-dvh flex-col overflow-hidden ${light ? "" : "is-night"}`}>
       <SkyBackdrop key={place.id} day={daylight} code={code} cover={sky?.current.cloud ?? 0}
         showClouds={sky !== null}
         wind={sky?.current.wind ?? 0} direction={sky?.current.dir ?? 0}
@@ -230,7 +243,7 @@ export function WeatherApp() {
           ) : null}
         </section>
       </div>
-      <nav aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"} className="safe-bottom pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center">
+      <nav ref={navigationRef} aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"} className="safe-bottom pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center">
         <div className="glass-bar wx-bottom-nav pointer-events-auto mb-1.5 flex rounded-full">
           {(
             [

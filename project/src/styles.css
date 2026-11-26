@@ -389,7 +389,7 @@ html:not(.light) .map-bar {
 }
 
 .map-dock {
-  padding-bottom: calc(2.85rem + max(0.65rem, env(safe-area-inset-bottom)) + 14px);
+  padding-bottom: var(--wx-bottom-clearance);
 }
 
 .fig {
@@ -1297,3 +1297,32 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
 @media (prefers-reduced-motion: reduce) {
   .sky-orbit-body { transition: none; }
 }
+
+
+/* One measured reservation for every surface sharing the floating navigation.
+   The fallback covers the 48px bar, its border/padding, margin and device inset. */
+.wx-app {
+  --wx-nav-occupied: calc(62px + max(0.65rem, env(safe-area-inset-bottom, 0px)));
+  --wx-bottom-clearance: calc(var(--wx-nav-occupied) + 2mm);
+}
+.wx-bottom-clearance {
+  padding-bottom: var(--wx-bottom-clearance);
+  scroll-padding-bottom: var(--wx-bottom-clearance);
+}
+
+.wx-settings { container-type: inline-size; }
+.wx-setting-field-inline { flex-wrap: wrap; }
+.wx-setting-field-inline .wx-setting-control { flex-basis: 11rem; }
+.wx-settings-chips button { overflow-wrap: anywhere; }
+.wx-settings-chips button bdi { max-width: 100%; }
+@container (max-width: 19rem) {
+  .wx-setting-field-inline { display: block; }
+  .wx-setting-field-inline .wx-setting-label {
+    max-width: none;
+    margin-bottom: 0.25rem;
+    font-size: 0.73rem;
+  }
+}
+
+.wx-settings .wx-build-id { max-width: 100%; text-align: center; overflow-wrap: anywhere; }
+.wx-settings .credit { max-width: 100%; flex-wrap: wrap; justify-content: center; }

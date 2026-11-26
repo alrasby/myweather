@@ -214,7 +214,7 @@ export function HomeScreen({ lang, onOpenPlaces }: { lang: Lang; onOpenPlaces: (
       ref={scroller}
       onScroll={syncCloudsWithScroll}
       style={{ touchAction: "pan-y" }}
-      className="h-full overflow-y-auto overscroll-contain px-3 pb-[calc(2.9rem+max(0.65rem,env(safe-area-inset-bottom))+2mm+6px)]"
+      className="wx-home h-full overflow-y-auto overscroll-contain px-3 wx-bottom-clearance"
       onTouchStart={(e) => {
         if (e.touches.length !== 1) {
           swipeStart.current = null;

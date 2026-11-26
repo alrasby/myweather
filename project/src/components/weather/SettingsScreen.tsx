@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { ANDROID_BUILD_CODE, DESIGN_REVISION } from "@/weather/buildInfo";
 import { useWeather } from "@/weather/store";
 import type { Lang, MorningAt, Prefs, QuietHours, RefreshMin, ShadeKind } from "@/weather/types";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 export function SettingsScreen({ lang }: { lang: Lang }) {
   const prefs = useWeather((s) => s.prefs);
@@ -18,7 +18,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
   }, []);
 
   return (
-    <div className="wx-settings h-full overflow-y-auto px-3 pb-[calc(3.6rem+max(0.85rem,env(safe-area-inset-bottom))+10px)] pt-2.5">
+    <div className="wx-settings h-full overflow-y-auto px-3 wx-bottom-clearance pt-2.5">
       <Card title={t(lang, "appearance")}>
         <Field label={t(lang, "language")} inline>
           <Chips
@@ -80,7 +80,7 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
         </Field>
       </Card>
 
-      <Card title={t(lang, "refreshAlerts")}>
+      <Card title={lang === "ar" ? "التحديث والبيانات" : "Refresh and data"}>
         <Field label={t(lang, "autoRefresh")}>
           <Chips
             cols={3}
@@ -96,7 +96,15 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(id) => setPrefs({ refreshMin: Number(id) as RefreshMin })}
           />
         </Field>
-        <Toggle on={prefs.alerts} title={t(lang, "alerts")} hint={t(lang, "alertsHint")} onClick={() => setPrefs({ alerts: !prefs.alerts })} />
+
+        <Toggle
+          on={prefs.wifiOnly}
+          disabled={prefs.refreshMin === 0}
+          title={t(lang, "wifiOnly")}
+          hint={prefs.refreshMin === 0 ? t(lang, "wifiNeedsRefresh") : undefined}
+          onClick={() => setPrefs({ wifiOnly: !prefs.wifiOnly })}
+        />
+        <Toggle on={prefs.dataSaver} title={t(lang, "dataSaver")} hint={t(lang, "dataSaverHint")} onClick={() => setPrefs({ dataSaver: !prefs.dataSaver })} />
         {widgetReady ? (
           <button
             type="button"
@@ -110,14 +118,20 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             <span className="mt-0.5 block text-xs leading-snug text-muted">{t(lang, "widgetHomeHint")}</span>
           </button>
         ) : null}
-        <Toggle
-          on={prefs.wifiOnly}
-          disabled={prefs.refreshMin === 0}
-          title={t(lang, "wifiOnly")}
-          hint={prefs.refreshMin === 0 ? t(lang, "wifiNeedsRefresh") : undefined}
-          onClick={() => setPrefs({ wifiOnly: !prefs.wifiOnly })}
-        />
-        <Toggle on={prefs.dataSaver} title={t(lang, "dataSaver")} hint={t(lang, "dataSaverHint")} onClick={() => setPrefs({ dataSaver: !prefs.dataSaver })} />
+        <button
+          type="button"
+          className="cache-btn mt-3 h-12 w-full rounded-full text-xs font-semibold text-fg"
+          onClick={() => {
+            clearCache();
+            window.setTimeout(() => setNotice(null), 1600);
+          }}
+        >
+          {notice === "cleared" ? t(lang, "cleared") : t(lang, "clearCache")}
+        </button>
+      </Card>
+
+      <Card title={lang === "ar" ? "التنبيهات والملخص" : "Alerts and summary"}>
+        <Toggle on={prefs.alerts} title={t(lang, "alerts")} hint={t(lang, "alertsHint")} onClick={() => setPrefs({ alerts: !prefs.alerts })} />
         <div className={prefs.alerts ? "" : "pointer-events-none opacity-45"}>
         <Field label={t(lang, "rainFrom")} inline>
           <Chips
@@ -215,6 +229,9 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
             onChange={(particles) => setPrefs({ particles })}
           />
         </Field>
+        {prefs.dataSaver ? <p className="text-xs leading-relaxed text-muted">
+          {lang === "ar" ? "أوقف توفير البيانات لتغيير كثافة حركة الرياح." : "Turn off data saver to change wind motion density."}
+        </p> : null}
         <Toggle on={prefs.storms} title={t(lang, "storms")} hint={t(lang, "stormsHint")} onClick={() => setPrefs({ storms: !prefs.storms })} />
       </Card>
 
@@ -238,24 +255,15 @@ export function SettingsScreen({ lang }: { lang: Lang }) {
           ] as const).map(([label, href]) => (
             <a key={href} href={href} target="_blank" rel="noopener noreferrer" dir="ltr"
               className="inline-flex min-h-12 items-center rounded-full border border-line px-3 py-2 text-xs font-semibold text-fg">
-              {label}
+              <bdi dir={/^[0-9]/.test(label) ? "ltr" : undefined}>{label}</bdi>
             </a>
           ))}
         </nav>
-        <button
-          type="button"
-          className="cache-btn mt-3 h-12 w-full rounded-full text-xs font-semibold text-fg"
-          onClick={() => {
-            clearCache();
-            window.setTimeout(() => setNotice(null), 1600);
-          }}
-        >
-          {notice === "cleared" ? t(lang, "cleared") : t(lang, "clearCache")}
-        </button>
+
         </div>
       </details>
       <div className="flex justify-center pb-1 pt-1">
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex max-w-full flex-col items-center gap-1">
           <span dir="ltr" className="wx-build-id px-2.5 py-1" aria-label={`Android build ${ANDROID_BUILD_CODE}, design ${DESIGN_REVISION}`}>
             MyWeather 1.0.0 · Build {ANDROID_BUILD_CODE} · {DESIGN_REVISION}
           </span>
@@ -280,10 +288,11 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 function Field({ label, children, inline = false }: {
   label: string; children: ReactNode; inline?: boolean;
 }) {
+  const labelId = useId();
   return (
     <div className={`wx-setting-field ${inline ? "wx-setting-field-inline" : ""}`}>
-      <p className="wx-setting-label">{label}</p>
-      <div className="wx-setting-control">{children}</div>
+      <p id={labelId} className="wx-setting-label">{label}</p>
+      <div className="wx-setting-control" role="group" aria-labelledby={labelId}>{children}</div>
     </div>
   );
 }
@@ -320,7 +329,7 @@ function Chips<T extends string>({
             aria-label={accessibleLabel ?? label}
             disabled={disabled}
           >
-            {label}
+            <bdi dir={/^[0-9]/.test(label) ? "ltr" : undefined}>{label}</bdi>
           </button>
         );
       })}
