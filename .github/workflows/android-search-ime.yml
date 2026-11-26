@@ -57,11 +57,16 @@ jobs:
             adb install -r project/android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r project/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell am instrument -w -r -e class net.nabdhserv.myweather.CitySearchInputTest net.nabdhserv.myweather.test/androidx.test.runner.AndroidJUnitRunner | tee native-ime-result.txt
+            adb logcat -d -v threadtime > native-ime-logcat.txt
+            adb exec-out screencap -p > native-ime-screen.png
             grep -F 'OK (1 test)' native-ime-result.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: native-city-search-ime-evidence
-          path: native-ime-result.txt
+          path: |
+            native-ime-result.txt
+            native-ime-logcat.txt
+            native-ime-screen.png
           if-no-files-found: ignore
           retention-days: 7

@@ -235,4 +235,69 @@ console.log(JSON.stringify({scenario:'city-local-solar-orbits',cities:solarPosit
  console.log(JSON.stringify({scenario:'rapid-city-and-delayed-forecast-transition',switches,leaks:leaks.length,errors}));
  await ctx.close();
 }
+
+// Reserve the actual dock size, including accessibility font scaling and device inset.
+for(const [name,width,height,scale,inset,lang] of [
+ ['compact-ar',320,640,1,0,'ar'],['phone-ar',390,844,1,34,'ar'],
+ ['large-type-ar',390,844,2,34,'ar'],['landscape-en',844,390,1,24,'en'],
+]){
+ const ctx=await browser.newContext({viewport:{width,height},reducedMotion:'reduce'});
+ const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const now=Date.parse('2026-11-25T14:44:00Z');await page.clock.setFixedTime(now);
+ await page.addInitScript(({now,lang})=>{
+  const p={id:'23.59,58.38',name:'مسقط',nameEn:'Muscat',country:'عمان',countryEn:'Oman',lat:23.59,lon:58.38,primary:true};
+  const hour={t:now,temp:28,feels:29,precip:0,pop:0,code:0,wind:8,gust:12,uv:0,isDay:false,pressure:1010};
+  const bundle={placeId:p.id,timezone:'Asia/Muscat',offset:14400,fetchedAt:now,forecastSource:'open-meteo-best-match',current:{...hour,humidity:55,cloud:3,dir:120,visibility:10000},
+   hourly:Array.from({length:48},(_,i)=>({...hour,t:now+i*3600000})),
+   daily:Array.from({length:15},(_,i)=>({t:now+i*86400000,code:0,tmax:30,tmin:23,sunrise:now-12*3600000+i*86400000,sunset:now-3600000+i*86400000,precip:0,pop:0,uv:5,wind:8})),air:null,marine:null,marineVersion:3};
+  localStorage.setItem('myweather-cache-v6',JSON.stringify({places:[p],activeId:p.id,entries:{[p.id]:{at:now,bundle}}}));
+  localStorage.setItem('myweather-prefs-v2',JSON.stringify({lang,theme:'dark',refreshMin:0,alerts:false,particles:'low'}));
+ },{now,lang});
+ await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
+ await page.goto('http://127.0.0.1:8765');await page.locator('.wx-home').waitFor();
+ await page.evaluate(()=>document.fonts.ready);
+ await page.addStyleTag({content: `html{font-size:${16*scale}px!important}.safe-bottom{padding-bottom:${inset}px!important}`});
+ const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+ await settle();
+ const gap=async selector=>{
+  const content=await page.locator(selector).last().boundingBox();
+  const nav=await page.locator('.wx-bottom-nav').boundingBox();
+  assert.ok(content&&nav,name+' mounted content/dock');
+  const pixels=nav.y-(content.y+content.height);
+  assert.ok(pixels>=7.5,name+' '+selector+' gap '+pixels+' must reserve at least 2mm');
+  return pixels;
+ };
+ await page.locator('.wx-home').evaluate(e=>{e.scrollTop=e.scrollHeight;});await settle();
+ const homeGap=await gap('.wx-home article');
+ await page.screenshot({path:`sky-qa/layout-${name}-home.png`});
+ await page.locator('.wx-bottom-nav button').nth(2).click();await page.locator('.wx-settings').waitFor();
+ const headings=await page.locator('.wx-settings h2').allTextContents();
+ assert.equal(headings.length,5,name+' appearance, units, data, alerts, map');
+ const saver=page.getByRole('switch',{name:lang==='ar'?'توفير البيانات':'Data saver',exact:true});
+ await saver.click();assert.equal(await saver.getAttribute('aria-checked'),'true');
+ const windGroup=page.getByRole('group',{name:lang==='ar'?'حركة الرياح':'Wind motion',exact:true});
+ assert.equal(await windGroup.locator('button:disabled').count(),3,name+' saver disables wind density');
+ await saver.click();assert.equal(await windGroup.locator('button:disabled').count(),0);
+ const tempGroup=page.getByRole('group',{name:lang==='ar'?'الحرارة':'Temperature',exact:true});
+ await tempGroup.locator('button').nth(1).click();assert.equal(await tempGroup.locator('button').nth(1).getAttribute('aria-pressed'),'true');
+ await page.locator('.wx-settings summary').click();
+ await page.locator('.wx-settings').evaluate(e=>{e.scrollTop=e.scrollHeight;});await settle();
+ const settingsGap=await gap('.wx-settings .credit');
+ const overflow=await page.locator('.wx-settings').evaluate(e=>e.scrollWidth-e.clientWidth);
+ assert.ok(overflow<=1,name+' settings must not overflow horizontally '+overflow);
+ await page.screenshot({path:`sky-qa/layout-${name}-settings.png`});
+ // Resize after mount: the shared reservation must react without remounting.
+ await page.setViewportSize({width:Math.max(320,width-20),height:height+30});await settle();
+ await page.locator('.wx-settings').evaluate(e=>{e.scrollTop=e.scrollHeight;});await settle();
+ await gap('.wx-settings .credit');
+ await page.locator('.wx-bottom-nav button').nth(1).click();await page.locator('.map-bar').waitFor();await settle();
+ const mapGap=await gap('.map-bar');
+ await page.screenshot({path:`sky-qa/layout-${name}-map.png`});
+ // Return to settings to prove selected units survive tab changes.
+ await page.locator('.wx-bottom-nav button').nth(2).click();
+ assert.equal(await page.getByRole('group',{name:lang==='ar'?'الحرارة':'Temperature',exact:true}).locator('button').nth(1).getAttribute('aria-pressed'),'true');
+ assert.deepEqual(errors,[],name+' runtime errors');
+ console.log(JSON.stringify({scenario:'navigation-clearance',name,homeGap,settingsGap,mapGap,overflow}));
+ await ctx.close();
+}
 } finally {await browser?.close();await new Promise(r=>server.close(r));}
