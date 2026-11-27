@@ -1,6 +1,7 @@
 package net.nabdhserv.myweather;
 
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -31,6 +32,7 @@ public class MainActivity extends BridgeActivity {
             getBridge().getWebView().setBackgroundColor(0xFF0C1424);
         }
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        applyStatusBarContrast();
         ViewCompat.setOnApplyWindowInsetsListener(getWindow().getDecorView(), (view, insets) -> {
             pushStatusInset();
             return insets;
@@ -60,6 +62,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        applyStatusBarContrast();
         ensureCompass();
         if (compass != null) compass.onHostResume();
         ensureWidget();
@@ -68,6 +71,19 @@ public class MainActivity extends BridgeActivity {
             returnHome = false;
             showHome();
         }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        applyStatusBarContrast();
+    }
+
+    private void applyStatusBarContrast() {
+        // The WebView paints a dark status-only backdrop on every tab.
+        // Icon contrast must follow that surface, not the phone's day/night theme.
+        WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
+            .setAppearanceLightStatusBars(false);
     }
 
     private void showHome() {

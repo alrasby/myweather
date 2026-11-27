@@ -223,6 +223,7 @@ export function WeatherApp() {
         heroWeather={tab === "home" && !placesOpen && sky !== null}
         animateClouds={tab === "home" && !placesOpen && sky !== null}
         celestial={celestial} />
+      <div className="wx-status-scrim" aria-hidden="true" />
       <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
         <section className={`under-status mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col ${tab === "map" ? "hidden" : ""}`}>
           <div className="min-h-0 flex-1">
