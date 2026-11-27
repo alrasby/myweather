@@ -80,6 +80,8 @@ public class StatusBarContrastTest {
                 instrumentation.runOnMainSync(() -> nativeTop.set(ViewCompat.getRootWindowInsets(activity.getWindow().getDecorView()).getInsets(WindowInsetsCompat.Type.statusBars()).top));
                 assertEquals("Backdrop must cover exactly the status area",
                     nativeTop.get().doubleValue(), box.getDouble(1) * box.getDouble(2), 2.0);
+                instrumentation.waitForIdleSync();
+                SystemClock.sleep(500); // Let WebView commit the selected tab before capturing pixels.
                 Bitmap image = instrumentation.getUiAutomation().takeScreenshot();
                 assertNotNull(image);
                 try (FileOutputStream file = new FileOutputStream(new File(dir, mode + "-tab" + tab + ".png"))) {
