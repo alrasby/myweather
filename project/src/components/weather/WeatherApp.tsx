@@ -1,4 +1,5 @@
 import { celestialMotion } from "@/weather/celestialMotion";
+import { Capacitor, SystemBars, SystemBarsStyle, SystemBarType } from "@capacitor/core";
 import { House, Map as MapIcon, Settings } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CitiesScreen } from "@/components/weather/CitiesScreen";
@@ -20,6 +21,14 @@ const loadMapScreen = () => import("@/components/weather/MapScreen");
 const MapScreen = lazy(() => loadMapScreen().then((m) => ({ default: m.MapScreen })));
 
 export function WeatherApp() {
+  useLayoutEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    // Update the owning plugin's retained style too: DEFAULT follows the phone
+    // theme and can overwrite native window flags after load/configuration.
+    // Limit this to StatusBar; the navigation bar keeps its existing policy.
+    void SystemBars.setStyle({ style: SystemBarsStyle.Dark, bar: SystemBarType.StatusBar })
+      .catch(() => console.warn("Unable to apply status-bar contrast"));
+  }, []);
   const hydrate = useWeather((s) => s.hydrate);
   const hydrated = useWeather((s) => s.hydrated);
   const activeId = useWeather((s) => s.activeId);
