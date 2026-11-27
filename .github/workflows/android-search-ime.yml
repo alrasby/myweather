@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - project/capacitor.config.ts
+      - project/android/app/src/main/java/net/nabdhserv/myweather/MainActivity.java
+      - project/android/app/src/main/res/values/styles.xml
+      - project/android/app/src/androidTest/java/net/nabdhserv/myweather/StatusBarContrastTest.java
       - project/src/components/weather/CitiesScreen.tsx
       - project/android/app/src/androidTest/java/net/nabdhserv/myweather/CitySearchInputTest.java
       - .github/workflows/android-search-ime.yml
@@ -43,7 +46,7 @@ jobs:
       - name: Enable hardware acceleration
         run: |
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
-      - name: Compose seven Arabic city names through Android InputConnection
+      - name: Verify native city input and status-bar contrast in both device themes
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -56,10 +59,16 @@ jobs:
           script: |
             adb install -r project/android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r project/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w -r -e class net.nabdhserv.myweather.CitySearchInputTest net.nabdhserv.myweather.test/androidx.test.runner.AndroidJUnitRunner | tee native-ime-result.txt
+            adb shell cmd uimode night no
+            adb shell am instrument -w -r -e class net.nabdhserv.myweather.CitySearchInputTest,net.nabdhserv.myweather.StatusBarContrastTest net.nabdhserv.myweather.test/androidx.test.runner.AndroidJUnitRunner | tee native-ime-result.txt
             adb logcat -d -v threadtime > native-ime-logcat.txt
             adb exec-out screencap -p > native-ime-screen.png
-            grep -F 'OK (1 test)' native-ime-result.txt
+            grep -F 'OK (2 tests)' native-ime-result.txt
+            adb shell cmd uimode night yes
+            adb shell am instrument -w -r -e class net.nabdhserv.myweather.StatusBarContrastTest net.nabdhserv.myweather.test/androidx.test.runner.AndroidJUnitRunner | tee native-status-dark-result.txt
+            adb logcat -d -v threadtime > native-status-dark-logcat.txt
+            adb pull /sdcard/Android/data/net.nabdhserv.myweather/files/statusbar-qa native-statusbar-evidence
+            grep -F 'OK (1 test)' native-status-dark-result.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -68,5 +77,8 @@ jobs:
             native-ime-result.txt
             native-ime-logcat.txt
             native-ime-screen.png
+            native-status-dark-result.txt
+            native-status-dark-logcat.txt
+            native-statusbar-evidence/
           if-no-files-found: ignore
           retention-days: 7

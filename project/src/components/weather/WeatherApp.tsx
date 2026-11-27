@@ -1,4 +1,5 @@
 import { celestialMotion } from "@/weather/celestialMotion";
+import { Capacitor, SystemBars, SystemBarsStyle, SystemBarType } from "@capacitor/core";
 import { House, Map as MapIcon, Settings } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CitiesScreen } from "@/components/weather/CitiesScreen";
@@ -20,6 +21,14 @@ const loadMapScreen = () => import("@/components/weather/MapScreen");
 const MapScreen = lazy(() => loadMapScreen().then((m) => ({ default: m.MapScreen })));
 
 export function WeatherApp() {
+  useLayoutEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    // Update the owning plugin's retained style too: DEFAULT follows the phone
+    // theme and can overwrite native window flags after load/configuration.
+    // Limit this to StatusBar; the navigation bar keeps its existing policy.
+    void SystemBars.setStyle({ style: SystemBarsStyle.Dark, bar: SystemBarType.StatusBar })
+      .catch(() => console.warn("Unable to apply status-bar contrast"));
+  }, []);
   const hydrate = useWeather((s) => s.hydrate);
   const hydrated = useWeather((s) => s.hydrated);
   const activeId = useWeather((s) => s.activeId);
@@ -223,6 +232,7 @@ export function WeatherApp() {
         heroWeather={tab === "home" && !placesOpen && sky !== null}
         animateClouds={tab === "home" && !placesOpen && sky !== null}
         celestial={celestial} />
+      <div className="wx-status-scrim" aria-hidden="true" />
       <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
         <section className={`under-status mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col ${tab === "map" ? "hidden" : ""}`}>
           <div className="min-h-0 flex-1">

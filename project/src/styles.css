@@ -1327,3 +1327,14 @@ html:not(.light) .wx-city-search-wrap .wx-city-search-icon { color: #ffcf6b; }
 
 .wx-settings .wx-build-id { max-width: 100%; text-align: center; overflow-wrap: anywhere; }
 .wx-settings .credit { max-width: 100%; flex-wrap: wrap; justify-content: center; }
+
+/* Match Android's light status icons across sky and satellite backgrounds.
+   This overlays only the already reserved native status area; no layout shift. */
+.wx-status-scrim {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--sat, env(safe-area-inset-top, 0px));
+  background: #0c1424;
+  z-index: 50;
+  pointer-events: none;
+}
