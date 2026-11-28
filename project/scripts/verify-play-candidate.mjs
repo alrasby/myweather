@@ -14,9 +14,9 @@ const eot=read("project/src/weather/eot20TideClient.ts");
 const workflow=read(".github/workflows/android-play-candidate.yml");
 
 assert.match(gradle,/applicationId "net\.nabdhserv\.myweather"/);
-assert.match(gradle,/versionCode 93\b/);
+assert.match(gradle,/versionCode 94\b/);
 assert.match(gradle,/versionName "1\.0\.0"/);
-assert.match(info,/ANDROID_BUILD_CODE = 93\b/);
+assert.match(info,/ANDROID_BUILD_CODE = 94\b/);
 assert.match(vars,/targetSdkVersion = 36\b/);
 assert.match(vars,/compileSdkVersion = 36\b/);
 assert.match(manifest,/android:usesCleartextTraffic="false"/);
